@@ -52,6 +52,20 @@
       <p id="lessons-empty" class="empty-state hidden">טרם עודכן תוכן</p>
     </div>
     <div id="panel-torah" class="info-panel hidden">
+      <button type="button" id="open-torah-form-btn" class="btn-primary torah-add-btn">✍️ הוספת דבר תורה</button>
+      <div id="public-torah-form" class="torah-public-form hidden">
+        <input type="text" id="public-torah-title" placeholder="כותרת">
+        <select id="public-torah-category"></select>
+        <textarea id="public-torah-text" rows="4" placeholder="תוכן דבר התורה (אפשר גם רק לצרף קובץ בלי טקסט)"></textarea>
+        <label class="file-label">צירוף קובץ (וורד, PDF וכו', אופציונלי)
+          <input type="file" id="public-torah-file" accept=".doc,.docx,.pdf,.txt,.odt,image/*">
+        </label>
+        <p id="public-torah-file-name" class="file-name hidden"></p>
+        <div class="form-actions">
+          <button type="button" id="public-torah-submit" class="btn-primary">פרסום</button>
+          <button type="button" id="public-torah-cancel" class="secondary">ביטול</button>
+        </div>
+      </div>
       <div class="chip-row" id="torah-category-chips"></div>
       <ul id="torah-list" class="torah-list"></ul>
       <p id="torah-empty" class="empty-state hidden">אין עדיין דברי תורה בקטגוריה זו</p>
@@ -146,14 +160,7 @@
 
     <div class="manage-section">
       <h2>ניהול דברי תורה</h2>
-      <input type="text" id="new-torah-title" placeholder="כותרת">
-      <select id="new-torah-category">
-        <option value="shabbat">שבתות</option>
-        <option value="chagim">חגים</option>
-        <option value="general">כלליים</option>
-      </select>
-      <textarea id="new-torah-text" rows="4" placeholder="תוכן דבר התורה"></textarea>
-      <div class="form-actions"><button type="button" id="add-torah-btn" class="btn-primary">הוספה</button></div>
+      <p class="hint">כל אחד יכול להוסיף דברי תורה מלשונית "מידע". כאן אפשר רק למחוק.</p>
       <ul id="admin-torah-list" class="contact-list"></ul>
     </div>
 

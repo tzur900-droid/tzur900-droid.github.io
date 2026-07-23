@@ -460,6 +460,14 @@ async function renderTorah() {
     li.querySelector(".card-tag").textContent = torahCategoryLabel(t.category);
     li.querySelector("h3").textContent = t.title;
     li.querySelector(".card-body").textContent = t.text;
+    if (t.fileBlob) {
+      const link = document.createElement("a");
+      link.className = "card-file";
+      link.href = URL.createObjectURL(t.fileBlob);
+      link.download = t.fileName || "קובץ מצורף";
+      link.textContent = "📎 " + (t.fileName || "קובץ מצורף");
+      li.appendChild(link);
+    }
     list.appendChild(li);
   });
   document.getElementById("torah-empty").classList.toggle("hidden", filtered.length > 0);
@@ -613,12 +621,17 @@ async function exportBackup() {
     text: a.text,
     date: a.date,
   }));
-  const torahArticles = (await getAllFromStore(TORAH_STORE)).map((t) => ({
-    title: t.title,
-    category: t.category,
-    text: t.text,
-    date: t.date,
-  }));
+  const torahArticles = await Promise.all(
+    (await getAllFromStore(TORAH_STORE)).map(async (t) => ({
+      title: t.title,
+      category: t.category,
+      text: t.text,
+      date: t.date,
+      file: t.fileBlob ? await blobToDataURL(t.fileBlob) : null,
+      fileName: t.fileName || null,
+      fileType: t.fileType || null,
+    }))
+  );
   const infoTexts = {
     prayer: getInfoText("prayer"),
     lessons: getInfoText("lessons"),
@@ -670,7 +683,13 @@ async function importBackup(file) {
 
   await clearStore(TORAH_STORE);
   for (const t of parsed.torahArticles || []) {
-    await addToStore(TORAH_STORE, { title: t.title, category: t.category, text: t.text, date: t.date });
+    const record = { title: t.title, category: t.category, text: t.text, date: t.date };
+    if (t.file) {
+      record.fileBlob = await dataURLToBlob(t.file);
+      record.fileName = t.fileName;
+      record.fileType = t.fileType;
+    }
+    await addToStore(TORAH_STORE, record);
   }
 
   if (parsed.infoTexts) {
@@ -734,12 +753,12 @@ async function init() {
     infoSubnav.appendChild(chip);
   });
 
-  const torahCategorySelect = document.getElementById("new-torah-category");
+  const publicTorahCategorySelect = document.getElementById("public-torah-category");
   TORAH_CATEGORIES.forEach((c) => {
     const opt = document.createElement("option");
     opt.value = c.value;
     opt.textContent = c.label;
-    torahCategorySelect.appendChild(opt);
+    publicTorahCategorySelect.appendChild(opt);
   });
   buildTorahChips();
 
@@ -770,15 +789,52 @@ async function init() {
     await renderAnnouncements();
   });
 
-  document.getElementById("add-torah-btn").addEventListener("click", async () => {
-    const title = document.getElementById("new-torah-title").value.trim();
-    const category = document.getElementById("new-torah-category").value;
-    const text = document.getElementById("new-torah-text").value.trim();
-    if (!title || !text) { showToast("יש למלא כותרת ותוכן"); return; }
-    await addToStore(TORAH_STORE, { title, category, text, date: new Date().toISOString() });
-    document.getElementById("new-torah-title").value = "";
-    document.getElementById("new-torah-text").value = "";
-    showToast("נוסף בהצלחה");
+  let pendingTorahFile = null;
+
+  function resetPublicTorahForm() {
+    document.getElementById("public-torah-title").value = "";
+    document.getElementById("public-torah-text").value = "";
+    document.getElementById("public-torah-file").value = "";
+    document.getElementById("public-torah-file-name").classList.add("hidden");
+    pendingTorahFile = null;
+    document.getElementById("public-torah-form").classList.add("hidden");
+  }
+
+  document.getElementById("open-torah-form-btn").addEventListener("click", () => {
+    document.getElementById("public-torah-form").classList.toggle("hidden");
+  });
+  document.getElementById("public-torah-cancel").addEventListener("click", resetPublicTorahForm);
+
+  document.getElementById("public-torah-file").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    const nameEl = document.getElementById("public-torah-file-name");
+    if (file) {
+      pendingTorahFile = file;
+      nameEl.textContent = "📎 " + file.name;
+      nameEl.classList.remove("hidden");
+    } else {
+      pendingTorahFile = null;
+      nameEl.classList.add("hidden");
+    }
+  });
+
+  document.getElementById("public-torah-submit").addEventListener("click", async () => {
+    const title = document.getElementById("public-torah-title").value.trim();
+    const category = document.getElementById("public-torah-category").value;
+    const text = document.getElementById("public-torah-text").value.trim();
+    if (!title || (!text && !pendingTorahFile)) {
+      showToast("יש למלא כותרת, ולפחות תוכן או קובץ מצורף");
+      return;
+    }
+    const record = { title, category, text, date: new Date().toISOString() };
+    if (pendingTorahFile) {
+      record.fileBlob = pendingTorahFile;
+      record.fileName = pendingTorahFile.name;
+      record.fileType = pendingTorahFile.type;
+    }
+    await addToStore(TORAH_STORE, record);
+    showToast("דבר התורה פורסם בהצלחה");
+    resetPublicTorahForm();
     await renderTorah();
   });
 
