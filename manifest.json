@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d3b66">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="אלפון בית אל">
+<title>אלפון ישיבת בית אל נתניה</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <img src="icons/icon-192.png" class="logo" alt="לוגו הישיבה">
+  <h1>אלפון ישיבת בית אל נתניה</h1>
+</header>
+
+<main>
+  <section id="view-search" class="view active">
+    <div class="search-bar">
+      <input type="search" id="search-input" placeholder="חיפוש לפי שם...">
+    </div>
+    <div class="group-chips" id="search-group-chips"></div>
+    <ul id="search-results" class="contact-list"></ul>
+    <p id="search-empty" class="empty-state hidden">לא נמצאו אנשי קשר</p>
+  </section>
+
+  <section id="view-gallery" class="view">
+    <div class="group-chips" id="gallery-group-chips"></div>
+    <div id="gallery-grid" class="gallery-grid"></div>
+    <p id="gallery-empty" class="empty-state hidden">אין עדיין תמונות</p>
+  </section>
+
+  <section id="view-add" class="view">
+    <div id="pin-setup" class="lock-box hidden">
+      <div class="lock-icon">🔒</div>
+      <h2>הגדרת קוד גישה</h2>
+      <p class="hint">בפעם הראשונה יש להגדיר קוד (4 ספרות ומעלה) שרק מי שמזין נתונים יידע. הקוד יידרש בכל פתיחה של לשונית הניהול.</p>
+      <input type="password" id="pin-setup-input" inputmode="numeric" placeholder="בחר/י קוד" autocomplete="off">
+      <input type="password" id="pin-setup-confirm" inputmode="numeric" placeholder="אימות קוד" autocomplete="off">
+      <button type="button" id="pin-setup-btn" class="btn-primary">הגדרת קוד</button>
+    </div>
+
+    <div id="pin-lock" class="lock-box hidden">
+      <div class="lock-icon">🔒</div>
+      <h2>לשונית מוגנת</h2>
+      <p class="hint">יש להזין את קוד הגישה כדי להוסיף, לערוך או למחוק אנשי קשר.</p>
+      <input type="password" id="pin-lock-input" inputmode="numeric" placeholder="קוד גישה" autocomplete="off">
+      <button type="button" id="pin-unlock-btn" class="btn-primary">כניסה</button>
+      <p id="pin-error" class="pin-error hidden">קוד שגוי, נסה/י שוב</p>
+    </div>
+
+    <div id="admin-content" class="hidden">
+    <div class="admin-topbar">
+      <button type="button" id="lock-btn" class="secondary">🔒 נעילה</button>
+      <button type="button" id="reset-pin-btn" class="secondary">שינוי קוד</button>
+    </div>
+    <h2>הוספת איש קשר</h2>
+    <form id="contact-form">
+      <input type="hidden" id="contact-id">
+      <label>שם מלא
+        <input type="text" id="field-name" required autocomplete="off">
+      </label>
+      <label>טלפון
+        <input type="tel" id="field-phone" required placeholder="050-0000000" autocomplete="off">
+      </label>
+      <label>קבוצה (שיעור)
+        <select id="field-group" required></select>
+      </label>
+      <label>תמונה
+        <input type="file" id="field-photo" accept="image/*" capture="environment">
+      </label>
+      <img id="photo-preview" class="photo-preview hidden" alt="תצוגה מקדימה">
+      <div class="form-actions">
+        <button type="submit" id="save-btn">שמירה</button>
+        <button type="button" id="cancel-edit-btn" class="secondary hidden">ביטול עריכה</button>
+      </div>
+    </form>
+
+    <div class="manage-section">
+      <h2>ניהול אנשי קשר</h2>
+      <input type="search" id="manage-search" placeholder="חיפוש לעריכה או מחיקה...">
+      <ul id="manage-list" class="contact-list"></ul>
+    </div>
+
+    <div class="backup-section">
+      <h2>גיבוי ושחזור</h2>
+      <p class="hint">הנתונים נשמרים רק על המכשיר הזה. מומלץ לגבות מדי פעם לקובץ.</p>
+      <div class="form-actions">
+        <button type="button" id="export-btn" class="secondary">ייצוא גיבוי לקובץ</button>
+        <button type="button" id="import-btn" class="secondary">ייבוא גיבוי מקובץ</button>
+      </div>
+      <input type="file" id="import-file" accept="application/json" class="hidden">
+    </div>
+    </div>
+  </section>
+</main>
+
+<div id="detail-modal" class="modal hidden">
+  <div class="modal-content">
+    <button id="modal-close" class="modal-close" aria-label="סגירה">×</button>
+    <img id="modal-photo" class="modal-photo" alt="">
+    <h2 id="modal-name"></h2>
+    <p id="modal-group" class="modal-group"></p>
+    <p id="modal-phone" class="modal-phone"></p>
+    <div class="modal-actions">
+      <a id="modal-call" class="btn-call" href="#">📞 התקשרות</a>
+      <a id="modal-whatsapp" class="btn-whatsapp" href="#" target="_blank" rel="noopener">💬 וואטסאפ</a>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<nav class="bottom-nav">
+  <button class="nav-btn active" data-view="view-search">
+    <span class="nav-icon">🔍</span>
+    <span>חיפוש</span>
+  </button>
+  <button class="nav-btn" data-view="view-gallery">
+    <span class="nav-icon">🖼️</span>
+    <span>גלריה</span>
+  </button>
+  <button class="nav-btn" data-view="view-add">
+    <span class="nav-icon">⚙️</span>
+    <span>ניהול</span>
+  </button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>
