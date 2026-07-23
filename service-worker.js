@@ -1,4 +1,4 @@
-const CACHE_NAME = "alfon-netanya-v2";
+const CACHE_NAME = "alfon-netanya-v3";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -13,9 +13,25 @@ const APP_SHELL = [
 
 const APP_CODE_PATTERN = /\.(html|js|css)$/;
 
+function freshUrl(url) {
+  // Appending a unique query param guarantees the request is treated as a
+  // new resource, bypassing the browser's own HTTP cache entirely (a plain
+  // network-first fetch can otherwise still be silently answered from the
+  // browser's HTTP cache, e.g. GitHub Pages' 10-minute max-age header).
+  const u = new URL(url, self.location.href);
+  u.searchParams.set("swcb", Date.now().toString());
+  return u.toString();
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(
+        APP_SHELL.map((url) =>
+          fetch(freshUrl(url)).then((res) => cache.put(url, res))
+        )
+      )
+    )
   );
   self.skipWaiting();
 });
@@ -35,10 +51,10 @@ self.addEventListener("fetch", (event) => {
   const isAppCode = APP_CODE_PATTERN.test(url.pathname) || url.pathname.endsWith("/");
 
   if (isAppCode) {
-    // Network-first: always try to get the latest app code so updates show up
-    // immediately. Falls back to the cached copy only when offline.
+    // Network-first (bypassing HTTP cache) so updates show up immediately.
+    // Falls back to the cached copy only when offline.
     event.respondWith(
-      fetch(event.request)
+      fetch(freshUrl(event.request.url))
         .then((response) => {
           if (response.ok) {
             const clone = response.clone();
