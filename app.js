@@ -8,13 +8,23 @@ function groupLabel(g) {
   return g === GRADUATE_GROUP ? GRADUATE_GROUP : `שיעור ${g}`;
 }
 const DB_NAME = "alfonBeitElDB";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "contacts";
+const GEMACH_STORE = "gemachim";
+const ANNOUNCEMENT_STORE = "announcements";
+const TORAH_STORE = "torahArticles";
+
+const TORAH_CATEGORIES = [
+  { value: "shabbat", label: "שבתות" },
+  { value: "chagim", label: "חגים" },
+  { value: "general", label: "כלליים" },
+];
 
 let db;
 let editingId = null;
 let searchGroupFilter = "all";
 let galleryGroupFilter = "all";
+let torahCategoryFilter = "all";
 let pendingPhotoBlob = null;
 
 /* ---------- IndexedDB ---------- */
@@ -29,6 +39,15 @@ function openDB() {
         store.createIndex("name", "name", { unique: false });
         store.createIndex("group", "group", { unique: false });
       }
+      if (!database.objectStoreNames.contains(GEMACH_STORE)) {
+        database.createObjectStore(GEMACH_STORE, { keyPath: "id", autoIncrement: true });
+      }
+      if (!database.objectStoreNames.contains(ANNOUNCEMENT_STORE)) {
+        database.createObjectStore(ANNOUNCEMENT_STORE, { keyPath: "id", autoIncrement: true });
+      }
+      if (!database.objectStoreNames.contains(TORAH_STORE)) {
+        database.createObjectStore(TORAH_STORE, { keyPath: "id", autoIncrement: true });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -37,6 +56,48 @@ function openDB() {
 
 function tx(storeName, mode) {
   return db.transaction(storeName, mode).objectStore(storeName);
+}
+
+function getAllFromStore(storeName) {
+  return new Promise((resolve, reject) => {
+    const req = tx(storeName, "readonly").getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function addToStore(storeName, item) {
+  return new Promise((resolve, reject) => {
+    const req = tx(storeName, "readwrite").add(item);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function deleteFromStore(storeName, id) {
+  return new Promise((resolve, reject) => {
+    const req = tx(storeName, "readwrite").delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function clearStore(storeName) {
+  return new Promise((resolve, reject) => {
+    const req = tx(storeName, "readwrite").clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/* ---------- Info text (localStorage) ---------- */
+
+function getInfoText(key) {
+  return localStorage.getItem("info_" + key) || "";
+}
+
+function setInfoText(key, value) {
+  localStorage.setItem("info_" + key, value);
 }
 
 function getAllContacts() {
@@ -312,8 +373,162 @@ async function renderManageList() {
   filtered.forEach((c) => list.appendChild(contactRow(c, { showActions: true })));
 }
 
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function adminListRow(primaryText, secondaryText, onDelete) {
+  const li = document.createElement("li");
+  li.className = "contact-row";
+  li.innerHTML = `<div class="contact-info"><div class="contact-name"></div><div class="contact-sub"></div></div>`;
+  li.querySelector(".contact-name").textContent = primaryText;
+  li.querySelector(".contact-sub").textContent = secondaryText || "";
+  const actions = document.createElement("div");
+  actions.className = "contact-actions";
+  const delBtn = document.createElement("button");
+  delBtn.className = "icon-btn danger";
+  delBtn.textContent = "🗑️";
+  delBtn.onclick = onDelete;
+  actions.appendChild(delBtn);
+  li.appendChild(actions);
+  return li;
+}
+
+async function renderAnnouncements() {
+  const all = await getAllFromStore(ANNOUNCEMENT_STORE);
+  all.sort((a, b) => new Date(b.date) - new Date(a.date));
+  const list = document.getElementById("announcements-list");
+  list.innerHTML = "";
+  all.forEach((a) => {
+    const li = document.createElement("li");
+    li.className = "card-item";
+    li.innerHTML = `<h3></h3><div class="card-date"></div><p class="card-body"></p>`;
+    li.querySelector("h3").textContent = a.title;
+    li.querySelector(".card-date").textContent = formatDate(a.date);
+    li.querySelector(".card-body").textContent = a.text;
+    list.appendChild(li);
+  });
+  document.getElementById("announcements-empty").classList.toggle("hidden", all.length > 0);
+
+  const adminList = document.getElementById("admin-announcements-list");
+  adminList.innerHTML = "";
+  all.forEach((a) => {
+    adminList.appendChild(
+      adminListRow(a.title, formatDate(a.date), async () => {
+        if (!confirm(`למחוק את ההודעה "${a.title}"?`)) return;
+        await deleteFromStore(ANNOUNCEMENT_STORE, a.id);
+        showToast("נמחק בהצלחה");
+        await renderAnnouncements();
+      })
+    );
+  });
+}
+
+function torahCategoryLabel(v) {
+  const found = TORAH_CATEGORIES.find((c) => c.value === v);
+  return found ? found.label : v;
+}
+
+function buildTorahChips() {
+  const container = document.getElementById("torah-category-chips");
+  container.innerHTML = "";
+  const all = [{ value: "all", label: "הכל" }, ...TORAH_CATEGORIES];
+  all.forEach((c) => {
+    const chip = document.createElement("button");
+    chip.className = "chip" + (c.value === torahCategoryFilter ? " active" : "");
+    chip.textContent = c.label;
+    chip.onclick = () => {
+      torahCategoryFilter = c.value;
+      buildTorahChips();
+      renderTorah();
+    };
+    container.appendChild(chip);
+  });
+}
+
+async function renderTorah() {
+  const all = await getAllFromStore(TORAH_STORE);
+  all.sort((a, b) => new Date(b.date) - new Date(a.date));
+  const filtered = torahCategoryFilter === "all" ? all : all.filter((t) => t.category === torahCategoryFilter);
+  const list = document.getElementById("torah-list");
+  list.innerHTML = "";
+  filtered.forEach((t) => {
+    const li = document.createElement("li");
+    li.className = "card-item";
+    li.innerHTML = `<span class="card-tag"></span><h3></h3><p class="card-body"></p>`;
+    li.querySelector(".card-tag").textContent = torahCategoryLabel(t.category);
+    li.querySelector("h3").textContent = t.title;
+    li.querySelector(".card-body").textContent = t.text;
+    list.appendChild(li);
+  });
+  document.getElementById("torah-empty").classList.toggle("hidden", filtered.length > 0);
+
+  const adminList = document.getElementById("admin-torah-list");
+  adminList.innerHTML = "";
+  all.forEach((t) => {
+    adminList.appendChild(
+      adminListRow(t.title, torahCategoryLabel(t.category), async () => {
+        if (!confirm(`למחוק את "${t.title}"?`)) return;
+        await deleteFromStore(TORAH_STORE, t.id);
+        showToast("נמחק בהצלחה");
+        await renderTorah();
+      })
+    );
+  });
+}
+
+async function renderGemachim() {
+  const all = await getAllFromStore(GEMACH_STORE);
+  const list = document.getElementById("gemachim-list");
+  list.innerHTML = "";
+  all.forEach((g) => {
+    const li = document.createElement("li");
+    li.className = "card-item";
+    li.textContent = g.text;
+    list.appendChild(li);
+  });
+  document.getElementById("gemachim-empty").classList.toggle("hidden", all.length > 0);
+
+  const adminList = document.getElementById("admin-gemachim-list");
+  adminList.innerHTML = "";
+  all.forEach((g) => {
+    adminList.appendChild(
+      adminListRow(g.text, "", async () => {
+        if (!confirm("למחוק פריט זה?")) return;
+        await deleteFromStore(GEMACH_STORE, g.id);
+        showToast("נמחק בהצלחה");
+        await renderGemachim();
+      })
+    );
+  });
+}
+
+function renderInfoTexts() {
+  const map = [
+    ["prayer", "prayer-text", "prayer-empty", "admin-prayer-text"],
+    ["lessons", "lessons-text", "lessons-empty", "admin-lessons-text"],
+    ["office", "office-text", "office-empty", "admin-office-text"],
+  ];
+  map.forEach(([key, textId, emptyId, adminId]) => {
+    const value = getInfoText(key);
+    document.getElementById(textId).textContent = value;
+    document.getElementById(emptyId).classList.toggle("hidden", !!value);
+    const adminField = document.getElementById(adminId);
+    if (adminField && document.activeElement !== adminField) adminField.value = value;
+  });
+}
+
 async function refreshAll() {
-  await Promise.all([renderSearch(), renderGallery(), renderManageList()]);
+  await Promise.all([
+    renderSearch(),
+    renderGallery(),
+    renderManageList(),
+    renderAnnouncements(),
+    renderTorah(),
+    renderGemachim(),
+  ]);
+  renderInfoTexts();
 }
 
 /* ---------- Detail modal ---------- */
@@ -384,7 +599,7 @@ function switchView(viewId) {
 
 async function exportBackup() {
   const all = await getAllContacts();
-  const data = await Promise.all(
+  const contacts = await Promise.all(
     all.map(async (c) => ({
       name: c.name,
       phone: c.phone,
@@ -392,13 +607,31 @@ async function exportBackup() {
       photo: c.photo ? await blobToDataURL(c.photo) : null,
     }))
   );
-  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), contacts: data })], {
-    type: "application/json",
-  });
+  const gemachim = (await getAllFromStore(GEMACH_STORE)).map((g) => ({ text: g.text }));
+  const announcements = (await getAllFromStore(ANNOUNCEMENT_STORE)).map((a) => ({
+    title: a.title,
+    text: a.text,
+    date: a.date,
+  }));
+  const torahArticles = (await getAllFromStore(TORAH_STORE)).map((t) => ({
+    title: t.title,
+    category: t.category,
+    text: t.text,
+    date: t.date,
+  }));
+  const infoTexts = {
+    prayer: getInfoText("prayer"),
+    lessons: getInfoText("lessons"),
+    office: getInfoText("office"),
+  };
+  const blob = new Blob(
+    [JSON.stringify({ exportedAt: new Date().toISOString(), contacts, gemachim, announcements, torahArticles, infoTexts })],
+    { type: "application/json" }
+  );
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `גיבוי-אלפון-בית-אל-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `גיבוי-אלפון-נתניה-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -416,17 +649,36 @@ async function importBackup(file) {
     return;
   }
   const contacts = parsed.contacts || [];
-  if (!Array.isArray(contacts) || contacts.length === 0) {
-    showToast("לא נמצאו אנשי קשר בקובץ");
-    return;
-  }
-  if (!confirm(`ייבוא ${contacts.length} אנשי קשר יחליף את כל הנתונים הקיימים. להמשיך?`)) return;
+  if (!confirm(`ייבוא הקובץ יחליף את כל הנתונים הקיימים (אנשי קשר, גמ"חים, מודעות, דברי תורה ומידע כללי). להמשיך?`)) return;
+
   await clearAllContacts();
   photoUrlCache.clear();
   for (const c of contacts) {
     const photo = c.photo ? await dataURLToBlob(c.photo) : null;
     await saveContact({ name: c.name, phone: c.phone, group: c.group, photo });
   }
+
+  await clearStore(GEMACH_STORE);
+  for (const g of parsed.gemachim || []) {
+    await addToStore(GEMACH_STORE, { text: g.text });
+  }
+
+  await clearStore(ANNOUNCEMENT_STORE);
+  for (const a of parsed.announcements || []) {
+    await addToStore(ANNOUNCEMENT_STORE, { title: a.title, text: a.text, date: a.date });
+  }
+
+  await clearStore(TORAH_STORE);
+  for (const t of parsed.torahArticles || []) {
+    await addToStore(TORAH_STORE, { title: t.title, category: t.category, text: t.text, date: t.date });
+  }
+
+  if (parsed.infoTexts) {
+    setInfoText("prayer", parsed.infoTexts.prayer || "");
+    setInfoText("lessons", parsed.infoTexts.lessons || "");
+    setInfoText("office", parsed.infoTexts.office || "");
+  }
+
   showToast("הייבוא הושלם בהצלחה");
   await refreshAll();
 }
@@ -457,6 +709,87 @@ async function init() {
     renderGallery();
   }
   buildGroupChips(document.getElementById("gallery-group-chips"), galleryGroupFilter, setGalleryGroup);
+
+  const INFO_PANELS = [
+    { id: "panel-announcements", label: "לוח מודעות" },
+    { id: "panel-prayer", label: "שעות תפילה" },
+    { id: "panel-lessons", label: "מערכת שיעורים" },
+    { id: "panel-torah", label: "דברי תורה" },
+    { id: "panel-gemachim", label: 'גמ"חים' },
+    { id: "panel-office", label: "יצירת קשר עם המשרד" },
+  ];
+  function showInfoPanel(panelId) {
+    INFO_PANELS.forEach((p) => document.getElementById(p.id).classList.toggle("hidden", p.id !== panelId));
+    document.querySelectorAll("#info-subnav .chip").forEach((chip) => {
+      chip.classList.toggle("active", chip.dataset.panel === panelId);
+    });
+  }
+  const infoSubnav = document.getElementById("info-subnav");
+  INFO_PANELS.forEach((p, i) => {
+    const chip = document.createElement("button");
+    chip.className = "chip" + (i === 0 ? " active" : "");
+    chip.textContent = p.label;
+    chip.dataset.panel = p.id;
+    chip.onclick = () => showInfoPanel(p.id);
+    infoSubnav.appendChild(chip);
+  });
+
+  const torahCategorySelect = document.getElementById("new-torah-category");
+  TORAH_CATEGORIES.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.value;
+    opt.textContent = c.label;
+    torahCategorySelect.appendChild(opt);
+  });
+  buildTorahChips();
+
+  document.getElementById("save-prayer-btn").addEventListener("click", () => {
+    setInfoText("prayer", document.getElementById("admin-prayer-text").value.trim());
+    renderInfoTexts();
+    showToast("נשמר בהצלחה");
+  });
+  document.getElementById("save-lessons-btn").addEventListener("click", () => {
+    setInfoText("lessons", document.getElementById("admin-lessons-text").value.trim());
+    renderInfoTexts();
+    showToast("נשמר בהצלחה");
+  });
+  document.getElementById("save-office-btn").addEventListener("click", () => {
+    setInfoText("office", document.getElementById("admin-office-text").value.trim());
+    renderInfoTexts();
+    showToast("נשמר בהצלחה");
+  });
+
+  document.getElementById("add-announcement-btn").addEventListener("click", async () => {
+    const title = document.getElementById("new-announcement-title").value.trim();
+    const text = document.getElementById("new-announcement-text").value.trim();
+    if (!title || !text) { showToast("יש למלא כותרת ותוכן"); return; }
+    await addToStore(ANNOUNCEMENT_STORE, { title, text, date: new Date().toISOString() });
+    document.getElementById("new-announcement-title").value = "";
+    document.getElementById("new-announcement-text").value = "";
+    showToast("ההודעה פורסמה");
+    await renderAnnouncements();
+  });
+
+  document.getElementById("add-torah-btn").addEventListener("click", async () => {
+    const title = document.getElementById("new-torah-title").value.trim();
+    const category = document.getElementById("new-torah-category").value;
+    const text = document.getElementById("new-torah-text").value.trim();
+    if (!title || !text) { showToast("יש למלא כותרת ותוכן"); return; }
+    await addToStore(TORAH_STORE, { title, category, text, date: new Date().toISOString() });
+    document.getElementById("new-torah-title").value = "";
+    document.getElementById("new-torah-text").value = "";
+    showToast("נוסף בהצלחה");
+    await renderTorah();
+  });
+
+  document.getElementById("add-gemach-btn").addEventListener("click", async () => {
+    const text = document.getElementById("new-gemach-text").value.trim();
+    if (!text) return;
+    await addToStore(GEMACH_STORE, { text });
+    document.getElementById("new-gemach-text").value = "";
+    showToast("נוסף בהצלחה");
+    await renderGemachim();
+  });
 
   document.getElementById("search-input").addEventListener("input", renderSearch);
   document.getElementById("manage-search").addEventListener("input", renderManageList);

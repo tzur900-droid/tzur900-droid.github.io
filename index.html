@@ -7,8 +7,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="אלפון בית אל">
-<title>אלפון ישיבת בית אל נתניה</title>
+<meta name="apple-mobile-web-app-title" content="אלפון נתניה">
+<title>אלפון נתניה</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -18,7 +18,7 @@
 
 <header class="app-header">
   <img src="icons/icon-192.png" class="logo" alt="לוגו הישיבה">
-  <h1>אלפון ישיבת בית אל נתניה</h1>
+  <h1>אלפון נתניה</h1>
 </header>
 
 <main>
@@ -35,6 +35,35 @@
     <div class="group-chips" id="gallery-group-chips"></div>
     <div id="gallery-grid" class="gallery-grid"></div>
     <p id="gallery-empty" class="empty-state hidden">אין עדיין תמונות</p>
+  </section>
+
+  <section id="view-info" class="view">
+    <div class="info-subnav" id="info-subnav"></div>
+    <div id="panel-announcements" class="info-panel">
+      <ul id="announcements-list" class="announcements-list"></ul>
+      <p id="announcements-empty" class="empty-state hidden">אין עדיין עדכונים</p>
+    </div>
+    <div id="panel-prayer" class="info-panel hidden">
+      <pre id="prayer-text" class="info-text"></pre>
+      <p id="prayer-empty" class="empty-state hidden">טרם עודכן תוכן</p>
+    </div>
+    <div id="panel-lessons" class="info-panel hidden">
+      <pre id="lessons-text" class="info-text"></pre>
+      <p id="lessons-empty" class="empty-state hidden">טרם עודכן תוכן</p>
+    </div>
+    <div id="panel-torah" class="info-panel hidden">
+      <div class="chip-row" id="torah-category-chips"></div>
+      <ul id="torah-list" class="torah-list"></ul>
+      <p id="torah-empty" class="empty-state hidden">אין עדיין דברי תורה בקטגוריה זו</p>
+    </div>
+    <div id="panel-gemachim" class="info-panel hidden">
+      <ul id="gemachim-list" class="gemach-list"></ul>
+      <p id="gemachim-empty" class="empty-state hidden">אין עדיין גמ"חים</p>
+    </div>
+    <div id="panel-office" class="info-panel hidden">
+      <pre id="office-text" class="info-text"></pre>
+      <p id="office-empty" class="empty-state hidden">טרם עודכן תוכן</p>
+    </div>
   </section>
 
   <section id="view-add" class="view">
@@ -89,6 +118,52 @@
       <ul id="manage-list" class="contact-list"></ul>
     </div>
 
+    <div class="manage-section">
+      <h2>עריכת שעות תפילה</h2>
+      <textarea id="admin-prayer-text" rows="6" placeholder="לדוגמה:&#10;שחרית - 6:30&#10;מנחה - 13:30&#10;ערבית - 20:00"></textarea>
+      <div class="form-actions"><button type="button" id="save-prayer-btn" class="btn-primary">שמירה</button></div>
+    </div>
+
+    <div class="manage-section">
+      <h2>עריכת מערכת שיעורים</h2>
+      <textarea id="admin-lessons-text" rows="6" placeholder="לדוגמה:&#10;יום ג' 20:00 - שיעור בהלכה עם הרב..."></textarea>
+      <div class="form-actions"><button type="button" id="save-lessons-btn" class="btn-primary">שמירה</button></div>
+    </div>
+
+    <div class="manage-section">
+      <h2>עריכת פרטי קשר למוסד</h2>
+      <textarea id="admin-office-text" rows="5" placeholder="לדוגמה:&#10;משרד: 09-0000000&#10;מזכירות: 050-0000000"></textarea>
+      <div class="form-actions"><button type="button" id="save-office-btn" class="btn-primary">שמירה</button></div>
+    </div>
+
+    <div class="manage-section">
+      <h2>ניהול לוח מודעות</h2>
+      <input type="text" id="new-announcement-title" placeholder="כותרת ההודעה">
+      <textarea id="new-announcement-text" rows="3" placeholder="תוכן ההודעה"></textarea>
+      <div class="form-actions"><button type="button" id="add-announcement-btn" class="btn-primary">פרסום הודעה</button></div>
+      <ul id="admin-announcements-list" class="contact-list"></ul>
+    </div>
+
+    <div class="manage-section">
+      <h2>ניהול דברי תורה</h2>
+      <input type="text" id="new-torah-title" placeholder="כותרת">
+      <select id="new-torah-category">
+        <option value="shabbat">שבתות</option>
+        <option value="chagim">חגים</option>
+        <option value="general">כלליים</option>
+      </select>
+      <textarea id="new-torah-text" rows="4" placeholder="תוכן דבר התורה"></textarea>
+      <div class="form-actions"><button type="button" id="add-torah-btn" class="btn-primary">הוספה</button></div>
+      <ul id="admin-torah-list" class="contact-list"></ul>
+    </div>
+
+    <div class="manage-section">
+      <h2>ניהול גמ"חים</h2>
+      <input type="text" id="new-gemach-text" placeholder='לדוגמה: השאלת שולחנות וכיסאות - צור קשר עם...'>
+      <div class="form-actions"><button type="button" id="add-gemach-btn" class="btn-primary">הוספה</button></div>
+      <ul id="admin-gemachim-list" class="contact-list"></ul>
+    </div>
+
     <div class="backup-section">
       <h2>גיבוי ושחזור</h2>
       <p class="hint">הנתונים נשמרים רק על המכשיר הזה. מומלץ לגבות מדי פעם לקובץ.</p>
@@ -127,6 +202,10 @@
   <button class="nav-btn" data-view="view-gallery">
     <span class="nav-icon">🖼️</span>
     <span>גלריה</span>
+  </button>
+  <button class="nav-btn" data-view="view-info">
+    <span class="nav-icon">📋</span>
+    <span>מידע</span>
   </button>
   <button class="nav-btn" data-view="view-add">
     <span class="nav-icon">⚙️</span>
