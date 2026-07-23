@@ -409,16 +409,19 @@ button {
   margin: 6px 0 16px;
 }
 
-.modal-actions { display: flex; gap: 10px; }
-.btn-call, .btn-whatsapp {
-  flex: 1;
-  padding: 12px;
+.modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-call, .btn-sms, .btn-whatsapp {
+  flex: 1 1 28%;
+  padding: 12px 6px;
   border-radius: 10px;
   text-decoration: none;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
+  text-align: center;
+  white-space: nowrap;
 }
 .btn-call { background: var(--navy); color: #fff; }
+.btn-sms { background: var(--gold); color: #4a3413; }
 .btn-whatsapp { background: #25d366; color: #fff; }
 
 /* Toast */

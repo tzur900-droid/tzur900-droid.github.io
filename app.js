@@ -1,6 +1,12 @@
 "use strict";
 
-const GROUPS = ["א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י"];
+const CLASS_GROUPS = ["א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י"];
+const GRADUATE_GROUP = "בוגר";
+const GROUPS = [...CLASS_GROUPS, GRADUATE_GROUP];
+
+function groupLabel(g) {
+  return g === GRADUATE_GROUP ? GRADUATE_GROUP : `שיעור ${g}`;
+}
 const DB_NAME = "alfonBeitElDB";
 const DB_VERSION = 1;
 const STORE = "contacts";
@@ -216,7 +222,7 @@ function photoUrl(contact) {
 
 function buildGroupChips(container, selected, onSelect) {
   container.innerHTML = "";
-  const all = [{ label: "הכל", value: "all" }, ...GROUPS.map((g) => ({ label: `שיעור ${g}`, value: g }))];
+  const all = [{ label: "הכל", value: "all" }, ...GROUPS.map((g) => ({ label: groupLabel(g), value: g }))];
   for (const item of all) {
     const chip = document.createElement("button");
     chip.className = "chip" + (item.value === selected ? " active" : "");
@@ -242,7 +248,7 @@ function contactRow(contact, { showActions = false } = {}) {
   info.className = "contact-info";
   info.innerHTML = `<div class="contact-name"></div><div class="contact-sub"></div>`;
   info.querySelector(".contact-name").textContent = contact.name;
-  info.querySelector(".contact-sub").textContent = `שיעור ${contact.group} · ${contact.phone}`;
+  info.querySelector(".contact-sub").textContent = `${groupLabel(contact.group)} · ${contact.phone}`;
 
   li.appendChild(avatarWrap);
   li.appendChild(info);
@@ -315,9 +321,10 @@ async function refreshAll() {
 function openDetail(contact) {
   document.getElementById("modal-photo").src = contact.photo ? photoUrl(contact) : "icons/icon-192.png";
   document.getElementById("modal-name").textContent = contact.name;
-  document.getElementById("modal-group").textContent = `שיעור ${contact.group}`;
+  document.getElementById("modal-group").textContent = groupLabel(contact.group);
   document.getElementById("modal-phone").textContent = contact.phone;
   document.getElementById("modal-call").href = "tel:" + digitsOnly(contact.phone);
+  document.getElementById("modal-sms").href = "sms:" + digitsOnly(contact.phone);
   document.getElementById("modal-whatsapp").href = "https://wa.me/" + toWhatsAppNumber(contact.phone);
   document.getElementById("detail-modal").classList.remove("hidden");
 }
@@ -433,7 +440,7 @@ async function init() {
   GROUPS.forEach((g) => {
     const opt = document.createElement("option");
     opt.value = g;
-    opt.textContent = `שיעור ${g}`;
+    opt.textContent = groupLabel(g);
     groupSelect.appendChild(opt);
   });
 
