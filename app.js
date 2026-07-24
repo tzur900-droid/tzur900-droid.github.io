@@ -2,17 +2,25 @@
 
 const CLASS_GROUPS = ["א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י"];
 const GRADUATE_GROUP = "בוגר";
-const GROUPS = [...CLASS_GROUPS, GRADUATE_GROUP];
+const RABBIS_GROUP = "רבנים";
+const GROUPS = [...CLASS_GROUPS, GRADUATE_GROUP, RABBIS_GROUP];
+const SPECIAL_GROUP_LABELS = {
+  [GRADUATE_GROUP]: GRADUATE_GROUP,
+  [RABBIS_GROUP]: RABBIS_GROUP,
+  י: "שיעור י' ומעלה",
+};
 
 function groupLabel(g) {
-  return g === GRADUATE_GROUP ? GRADUATE_GROUP : `שיעור ${g}`;
+  return SPECIAL_GROUP_LABELS[g] || `שיעור ${g}`;
 }
 const DB_NAME = "alfonBeitElDB";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = "contacts";
 const GEMACH_STORE = "gemachim";
 const ANNOUNCEMENT_STORE = "announcements";
 const TORAH_STORE = "torahArticles";
+const SINGLE_FILE_STORE = "singleFiles";
+const LESSONS_IMAGE_KEY = "lessonsImage";
 
 const TORAH_CATEGORIES = [
   { value: "shabbat", label: "שבתות" },
@@ -47,6 +55,9 @@ function openDB() {
       }
       if (!database.objectStoreNames.contains(TORAH_STORE)) {
         database.createObjectStore(TORAH_STORE, { keyPath: "id", autoIncrement: true });
+      }
+      if (!database.objectStoreNames.contains(SINGLE_FILE_STORE)) {
+        database.createObjectStore(SINGLE_FILE_STORE, { keyPath: "key" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -98,6 +109,32 @@ function getInfoText(key) {
 
 function setInfoText(key, value) {
   localStorage.setItem("info_" + key, value);
+}
+
+/* ---------- Single file storage (e.g. lessons schedule image) ---------- */
+
+function putSingleFile(key, blob, type) {
+  return new Promise((resolve, reject) => {
+    const req = tx(SINGLE_FILE_STORE, "readwrite").put({ key, blob, type });
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function getSingleFile(key) {
+  return new Promise((resolve, reject) => {
+    const req = tx(SINGLE_FILE_STORE, "readonly").get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function deleteSingleFile(key) {
+  return new Promise((resolve, reject) => {
+    const req = tx(SINGLE_FILE_STORE, "readwrite").delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
 }
 
 function getAllContacts() {
@@ -515,7 +552,6 @@ async function renderGemachim() {
 function renderInfoTexts() {
   const map = [
     ["prayer", "prayer-text", "prayer-empty", "admin-prayer-text"],
-    ["lessons", "lessons-text", "lessons-empty", "admin-lessons-text"],
     ["office", "office-text", "office-empty", "admin-office-text"],
   ];
   map.forEach(([key, textId, emptyId, adminId]) => {
@@ -527,6 +563,32 @@ function renderInfoTexts() {
   });
 }
 
+async function renderLessonsSchedule() {
+  const text = getInfoText("lessons");
+  document.getElementById("lessons-text").textContent = text;
+  const adminField = document.getElementById("admin-lessons-text");
+  if (document.activeElement !== adminField) adminField.value = text;
+
+  const fileRec = await getSingleFile(LESSONS_IMAGE_KEY);
+  const img = document.getElementById("lessons-image");
+  const adminPreview = document.getElementById("admin-lessons-image-preview");
+  const removeBtn = document.getElementById("remove-lessons-image-btn");
+  const hasImage = !!(fileRec && fileRec.blob);
+  if (hasImage) {
+    const url = URL.createObjectURL(fileRec.blob);
+    img.src = url;
+    img.classList.remove("hidden");
+    adminPreview.src = url;
+    adminPreview.classList.remove("hidden");
+    removeBtn.classList.remove("hidden");
+  } else {
+    img.classList.add("hidden");
+    adminPreview.classList.add("hidden");
+    removeBtn.classList.add("hidden");
+  }
+  document.getElementById("lessons-empty").classList.toggle("hidden", !!text || hasImage);
+}
+
 async function refreshAll() {
   await Promise.all([
     renderSearch(),
@@ -535,6 +597,7 @@ async function refreshAll() {
     renderAnnouncements(),
     renderTorah(),
     renderGemachim(),
+    renderLessonsSchedule(),
   ]);
   renderInfoTexts();
 }
@@ -637,8 +700,22 @@ async function exportBackup() {
     lessons: getInfoText("lessons"),
     office: getInfoText("office"),
   };
+  const lessonsImageRec = await getSingleFile(LESSONS_IMAGE_KEY);
+  const lessonsImage = lessonsImageRec
+    ? { data: await blobToDataURL(lessonsImageRec.blob), type: lessonsImageRec.type }
+    : null;
   const blob = new Blob(
-    [JSON.stringify({ exportedAt: new Date().toISOString(), contacts, gemachim, announcements, torahArticles, infoTexts })],
+    [
+      JSON.stringify({
+        exportedAt: new Date().toISOString(),
+        contacts,
+        gemachim,
+        announcements,
+        torahArticles,
+        infoTexts,
+        lessonsImage,
+      }),
+    ],
     { type: "application/json" }
   );
   const url = URL.createObjectURL(blob);
@@ -696,6 +773,12 @@ async function importBackup(file) {
     setInfoText("prayer", parsed.infoTexts.prayer || "");
     setInfoText("lessons", parsed.infoTexts.lessons || "");
     setInfoText("office", parsed.infoTexts.office || "");
+  }
+
+  if (parsed.lessonsImage) {
+    await putSingleFile(LESSONS_IMAGE_KEY, await dataURLToBlob(parsed.lessonsImage.data), parsed.lessonsImage.type);
+  } else {
+    await deleteSingleFile(LESSONS_IMAGE_KEY);
   }
 
   showToast("הייבוא הושלם בהצלחה");
@@ -767,9 +850,31 @@ async function init() {
     renderInfoTexts();
     showToast("נשמר בהצלחה");
   });
-  document.getElementById("save-lessons-btn").addEventListener("click", () => {
+  let pendingLessonsImage = null;
+  document.getElementById("admin-lessons-image").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    pendingLessonsImage = file;
+    const preview = document.getElementById("admin-lessons-image-preview");
+    preview.src = URL.createObjectURL(file);
+    preview.classList.remove("hidden");
+    document.getElementById("remove-lessons-image-btn").classList.remove("hidden");
+  });
+  document.getElementById("remove-lessons-image-btn").addEventListener("click", async () => {
+    if (!confirm("להסיר את תמונת מערכת השעות?")) return;
+    pendingLessonsImage = "remove";
+    await deleteSingleFile(LESSONS_IMAGE_KEY);
+    document.getElementById("admin-lessons-image").value = "";
+    showToast("התמונה הוסרה");
+    await renderLessonsSchedule();
+  });
+  document.getElementById("save-lessons-btn").addEventListener("click", async () => {
     setInfoText("lessons", document.getElementById("admin-lessons-text").value.trim());
-    renderInfoTexts();
+    if (pendingLessonsImage && pendingLessonsImage !== "remove") {
+      await putSingleFile(LESSONS_IMAGE_KEY, pendingLessonsImage, pendingLessonsImage.type);
+      pendingLessonsImage = null;
+    }
+    await renderLessonsSchedule();
     showToast("נשמר בהצלחה");
   });
   document.getElementById("save-office-btn").addEventListener("click", () => {

@@ -48,6 +48,7 @@
       <p id="prayer-empty" class="empty-state hidden">טרם עודכן תוכן</p>
     </div>
     <div id="panel-lessons" class="info-panel hidden">
+      <img id="lessons-image" class="schedule-image hidden" alt="מערכת שיעורים">
       <pre id="lessons-text" class="info-text"></pre>
       <p id="lessons-empty" class="empty-state hidden">טרם עודכן תוכן</p>
     </div>
@@ -117,7 +118,7 @@
         <select id="field-group" required></select>
       </label>
       <label>תמונה
-        <input type="file" id="field-photo" accept="image/*" capture="environment">
+        <input type="file" id="field-photo" accept="image/*">
       </label>
       <img id="photo-preview" class="photo-preview hidden" alt="תצוגה מקדימה">
       <div class="form-actions">
@@ -140,6 +141,11 @@
 
     <div class="manage-section">
       <h2>עריכת מערכת שיעורים</h2>
+      <label class="file-label">תמונה של מערכת השעות (אופציונלי - אפשר לצלם טבלה מסודרת ולהעלות)
+        <input type="file" id="admin-lessons-image" accept="image/*">
+      </label>
+      <img id="admin-lessons-image-preview" class="schedule-image-preview hidden" alt="תצוגה מקדימה">
+      <button type="button" id="remove-lessons-image-btn" class="secondary hidden">הסרת התמונה</button>
       <textarea id="admin-lessons-text" rows="6" placeholder="לדוגמה:&#10;יום ג' 20:00 - שיעור בהלכה עם הרב..."></textarea>
       <div class="form-actions"><button type="button" id="save-lessons-btn" class="btn-primary">שמירה</button></div>
     </div>
