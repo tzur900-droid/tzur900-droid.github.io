@@ -1,5 +1,27 @@
 "use strict";
 
+/* ---------- Firebase ---------- */
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAqc98gW-LulNziHNH-bw6FjGqQu9nP6QE",
+  authDomain: "alfon-netanya.firebaseapp.com",
+  projectId: "alfon-netanya",
+  storageBucket: "alfon-netanya.firebasestorage.app",
+  messagingSenderId: "446549495013",
+  appId: "1:446549495013:web:213456ef23e2b6254b980c",
+};
+firebase.initializeApp(firebaseConfig);
+const fsdb = firebase.firestore();
+fsdb.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+
+const contactsCol = fsdb.collection("contacts");
+const gemachCol = fsdb.collection("gemachim");
+const announcementCol = fsdb.collection("announcements");
+const torahCol = fsdb.collection("torahArticles");
+const settingsDoc = fsdb.collection("settings").doc("main");
+
+/* ---------- Groups ---------- */
+
 const CLASS_GROUPS = ["א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י"];
 const GRADUATE_GROUP = "בוגר";
 const RABBIS_GROUP = "רבנים";
@@ -13,14 +35,6 @@ const SPECIAL_GROUP_LABELS = {
 function groupLabel(g) {
   return SPECIAL_GROUP_LABELS[g] || `שיעור ${g}`;
 }
-const DB_NAME = "alfonBeitElDB";
-const DB_VERSION = 3;
-const STORE = "contacts";
-const GEMACH_STORE = "gemachim";
-const ANNOUNCEMENT_STORE = "announcements";
-const TORAH_STORE = "torahArticles";
-const SINGLE_FILE_STORE = "singleFiles";
-const LESSONS_IMAGE_KEY = "lessonsImage";
 
 const TORAH_CATEGORIES = [
   { value: "shabbat", label: "שבתות" },
@@ -28,220 +42,21 @@ const TORAH_CATEGORIES = [
   { value: "general", label: "כלליים" },
 ];
 
-let db;
+const MAX_ATTACHMENT_BYTES = 650 * 1024;
+
+/* ---------- State ---------- */
+
 let editingId = null;
 let searchGroupFilter = "all";
 let galleryGroupFilter = "all";
 let torahCategoryFilter = "all";
-let pendingPhotoBlob = null;
+let pendingPhotoDataUrl = null;
 
-/* ---------- IndexedDB ---------- */
-
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const database = req.result;
-      if (!database.objectStoreNames.contains(STORE)) {
-        const store = database.createObjectStore(STORE, { keyPath: "id", autoIncrement: true });
-        store.createIndex("name", "name", { unique: false });
-        store.createIndex("group", "group", { unique: false });
-      }
-      if (!database.objectStoreNames.contains(GEMACH_STORE)) {
-        database.createObjectStore(GEMACH_STORE, { keyPath: "id", autoIncrement: true });
-      }
-      if (!database.objectStoreNames.contains(ANNOUNCEMENT_STORE)) {
-        database.createObjectStore(ANNOUNCEMENT_STORE, { keyPath: "id", autoIncrement: true });
-      }
-      if (!database.objectStoreNames.contains(TORAH_STORE)) {
-        database.createObjectStore(TORAH_STORE, { keyPath: "id", autoIncrement: true });
-      }
-      if (!database.objectStoreNames.contains(SINGLE_FILE_STORE)) {
-        database.createObjectStore(SINGLE_FILE_STORE, { keyPath: "key" });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function tx(storeName, mode) {
-  return db.transaction(storeName, mode).objectStore(storeName);
-}
-
-function getAllFromStore(storeName) {
-  return new Promise((resolve, reject) => {
-    const req = tx(storeName, "readonly").getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function addToStore(storeName, item) {
-  return new Promise((resolve, reject) => {
-    const req = tx(storeName, "readwrite").add(item);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function deleteFromStore(storeName, id) {
-  return new Promise((resolve, reject) => {
-    const req = tx(storeName, "readwrite").delete(id);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function clearStore(storeName) {
-  return new Promise((resolve, reject) => {
-    const req = tx(storeName, "readwrite").clear();
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/* ---------- Info text (localStorage) ---------- */
-
-function getInfoText(key) {
-  return localStorage.getItem("info_" + key) || "";
-}
-
-function setInfoText(key, value) {
-  localStorage.setItem("info_" + key, value);
-}
-
-/* ---------- Single file storage (e.g. lessons schedule image) ---------- */
-
-function putSingleFile(key, blob, type) {
-  return new Promise((resolve, reject) => {
-    const req = tx(SINGLE_FILE_STORE, "readwrite").put({ key, blob, type });
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function getSingleFile(key) {
-  return new Promise((resolve, reject) => {
-    const req = tx(SINGLE_FILE_STORE, "readonly").get(key);
-    req.onsuccess = () => resolve(req.result || null);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function deleteSingleFile(key) {
-  return new Promise((resolve, reject) => {
-    const req = tx(SINGLE_FILE_STORE, "readwrite").delete(key);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function getAllContacts() {
-  return new Promise((resolve, reject) => {
-    const req = tx(STORE, "readonly").getAll();
-    req.onsuccess = () => resolve(req.result.sort((a, b) => a.name.localeCompare(b.name, "he")));
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function saveContact(contact) {
-  return new Promise((resolve, reject) => {
-    const store = tx(STORE, "readwrite");
-    const req = contact.id ? store.put(contact) : store.add(contact);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function deleteContactById(id) {
-  return new Promise((resolve, reject) => {
-    const req = tx(STORE, "readwrite").delete(id);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function clearAllContacts() {
-  return new Promise((resolve, reject) => {
-    const req = tx(STORE, "readwrite").clear();
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/* ---------- Admin PIN lock ---------- */
-
-async function sha256Hex(text) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function isPinSet() {
-  return !!localStorage.getItem("pinHash");
-}
-
-function isAdminUnlocked() {
-  return sessionStorage.getItem("adminUnlocked") === "1";
-}
-
-function updateAdminLockUI() {
-  const setupBox = document.getElementById("pin-setup");
-  const lockBox = document.getElementById("pin-lock");
-  const content = document.getElementById("admin-content");
-  document.getElementById("pin-error").classList.add("hidden");
-  if (!isPinSet()) {
-    setupBox.classList.remove("hidden");
-    lockBox.classList.add("hidden");
-    content.classList.add("hidden");
-    document.getElementById("pin-setup-input").value = "";
-    document.getElementById("pin-setup-confirm").value = "";
-  } else if (!isAdminUnlocked()) {
-    setupBox.classList.add("hidden");
-    lockBox.classList.remove("hidden");
-    content.classList.add("hidden");
-    document.getElementById("pin-lock-input").value = "";
-  } else {
-    setupBox.classList.add("hidden");
-    lockBox.classList.add("hidden");
-    content.classList.remove("hidden");
-  }
-}
-
-async function handlePinSetup() {
-  const pin = document.getElementById("pin-setup-input").value.trim();
-  const confirmPin = document.getElementById("pin-setup-confirm").value.trim();
-  if (pin.length < 4) { showToast("הקוד חייב להכיל לפחות 4 תווים"); return; }
-  if (pin !== confirmPin) { showToast("הקודים אינם תואמים"); return; }
-  localStorage.setItem("pinHash", await sha256Hex(pin));
-  sessionStorage.setItem("adminUnlocked", "1");
-  showToast("הקוד הוגדר בהצלחה");
-  updateAdminLockUI();
-}
-
-async function handlePinUnlock() {
-  const pin = document.getElementById("pin-lock-input").value.trim();
-  const hash = await sha256Hex(pin);
-  if (hash === localStorage.getItem("pinHash")) {
-    sessionStorage.setItem("adminUnlocked", "1");
-    updateAdminLockUI();
-  } else {
-    document.getElementById("pin-error").classList.remove("hidden");
-  }
-}
-
-function handleLock() {
-  sessionStorage.removeItem("adminUnlocked");
-  updateAdminLockUI();
-  switchView("view-search");
-}
-
-function handleResetPin() {
-  if (!confirm("שינוי הקוד ידרוש הגדרה מחדש. להמשיך?")) return;
-  localStorage.removeItem("pinHash");
-  sessionStorage.removeItem("adminUnlocked");
-  updateAdminLockUI();
-}
+let contactsCache = [];
+let gemachimCache = [];
+let announcementsCache = [];
+let torahCache = [];
+let settingsCache = {};
 
 /* ---------- Helpers ---------- */
 
@@ -259,20 +74,16 @@ function toWhatsAppNumber(phone) {
   return d;
 }
 
-function blobToDataURL(blob) {
+function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
-    reader.readAsDataURL(blob);
+    reader.readAsDataURL(file);
   });
 }
 
-function dataURLToBlob(dataURL) {
-  return fetch(dataURL).then((r) => r.blob());
-}
-
-function resizeImageToBlob(file, maxSize = 700, quality = 0.82) {
+function resizeImageToDataURL(file, maxSize = 700, quality = 0.82) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const reader = new FileReader();
@@ -292,7 +103,7 @@ function resizeImageToBlob(file, maxSize = 700, quality = 0.82) {
       canvas.height = height;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob((blob) => resolve(blob), "image/jpeg", quality);
+      resolve(canvas.toDataURL("image/jpeg", quality));
     };
     img.onerror = reject;
     reader.readAsDataURL(file);
@@ -307,13 +118,82 @@ function showToast(msg) {
   showToast._t = setTimeout(() => el.classList.add("hidden"), 2200);
 }
 
-const photoUrlCache = new Map();
-function photoUrl(contact) {
-  if (!contact.photo) return null;
-  if (photoUrlCache.has(contact.id)) return photoUrlCache.get(contact.id);
-  const url = URL.createObjectURL(contact.photo);
-  photoUrlCache.set(contact.id, url);
-  return url;
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+/* ---------- Admin PIN lock (shared via Firestore settings) ---------- */
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function isPinSet() {
+  return !!settingsCache.pinHash;
+}
+
+function isAdminUnlocked() {
+  return sessionStorage.getItem("adminUnlocked") === "1";
+}
+
+function updateAdminLockUI() {
+  const setupBox = document.getElementById("pin-setup");
+  const lockBox = document.getElementById("pin-lock");
+  const content = document.getElementById("admin-content");
+  document.getElementById("pin-error").classList.add("hidden");
+  if (!isPinSet()) {
+    setupBox.classList.remove("hidden");
+    lockBox.classList.add("hidden");
+    content.classList.add("hidden");
+  } else if (!isAdminUnlocked()) {
+    setupBox.classList.add("hidden");
+    lockBox.classList.remove("hidden");
+    content.classList.add("hidden");
+    document.getElementById("pin-lock-input").value = "";
+  } else {
+    setupBox.classList.add("hidden");
+    lockBox.classList.add("hidden");
+    content.classList.remove("hidden");
+  }
+}
+
+async function handlePinSetup() {
+  const pin = document.getElementById("pin-setup-input").value.trim();
+  const confirmPin = document.getElementById("pin-setup-confirm").value.trim();
+  if (pin.length < 4) { showToast("הקוד חייב להכיל לפחות 4 תווים"); return; }
+  if (pin !== confirmPin) { showToast("הקודים אינם תואמים"); return; }
+  await settingsDoc.set({ pinHash: await sha256Hex(pin) }, { merge: true });
+  sessionStorage.setItem("adminUnlocked", "1");
+  document.getElementById("pin-setup-input").value = "";
+  document.getElementById("pin-setup-confirm").value = "";
+  showToast("הקוד הוגדר בהצלחה");
+  updateAdminLockUI();
+}
+
+async function handlePinUnlock() {
+  const pin = document.getElementById("pin-lock-input").value.trim();
+  const hash = await sha256Hex(pin);
+  if (hash === settingsCache.pinHash) {
+    sessionStorage.setItem("adminUnlocked", "1");
+    updateAdminLockUI();
+  } else {
+    document.getElementById("pin-error").classList.remove("hidden");
+  }
+}
+
+function handleLock() {
+  sessionStorage.removeItem("adminUnlocked");
+  updateAdminLockUI();
+  switchView("view-search");
+}
+
+async function handleResetPin() {
+  if (!confirm("שינוי הקוד ידרוש הגדרה מחדש. להמשיך?")) return;
+  await settingsDoc.set({ pinHash: firebase.firestore.FieldValue.delete() }, { merge: true });
+  sessionStorage.removeItem("adminUnlocked");
+  updateAdminLockUI();
 }
 
 /* ---------- Rendering ---------- */
@@ -337,7 +217,7 @@ function contactRow(contact, { showActions = false } = {}) {
   const avatarWrap = document.createElement(contact.photo ? "img" : "div");
   avatarWrap.className = "contact-avatar";
   if (contact.photo) {
-    avatarWrap.src = photoUrl(contact);
+    avatarWrap.src = contact.photo;
   } else {
     avatarWrap.textContent = initials(contact.name);
   }
@@ -371,10 +251,9 @@ function contactRow(contact, { showActions = false } = {}) {
   return li;
 }
 
-async function renderSearch() {
-  const all = await getAllContacts();
+function renderSearch() {
   const q = document.getElementById("search-input").value.trim();
-  const filtered = all.filter((c) => {
+  const filtered = contactsCache.filter((c) => {
     const matchesGroup = searchGroupFilter === "all" || c.group === searchGroupFilter;
     const matchesQuery = !q || c.name.includes(q);
     return matchesGroup && matchesQuery;
@@ -385,15 +264,14 @@ async function renderSearch() {
   document.getElementById("search-empty").classList.toggle("hidden", filtered.length > 0);
 }
 
-async function renderGallery() {
-  const all = await getAllContacts();
-  const withPhotos = all.filter((c) => c.photo && (galleryGroupFilter === "all" || c.group === galleryGroupFilter));
+function renderGallery() {
+  const withPhotos = contactsCache.filter((c) => c.photo && (galleryGroupFilter === "all" || c.group === galleryGroupFilter));
   const grid = document.getElementById("gallery-grid");
   grid.innerHTML = "";
   withPhotos.forEach((c) => {
     const item = document.createElement("div");
     item.className = "gallery-item";
-    item.innerHTML = `<img src="${photoUrl(c)}" alt="${c.name}"><div class="cap"></div>`;
+    item.innerHTML = `<img src="${c.photo}" alt="${c.name}"><div class="cap"></div>`;
     item.querySelector(".cap").textContent = c.name;
     item.onclick = () => openDetail(c);
     grid.appendChild(item);
@@ -401,18 +279,12 @@ async function renderGallery() {
   document.getElementById("gallery-empty").classList.toggle("hidden", withPhotos.length > 0);
 }
 
-async function renderManageList() {
-  const all = await getAllContacts();
+function renderManageList() {
   const q = document.getElementById("manage-search").value.trim();
-  const filtered = q ? all.filter((c) => c.name.includes(q)) : all;
+  const filtered = q ? contactsCache.filter((c) => c.name.includes(q)) : contactsCache;
   const list = document.getElementById("manage-list");
   list.innerHTML = "";
   filtered.forEach((c) => list.appendChild(contactRow(c, { showActions: true })));
-}
-
-function formatDate(iso) {
-  const d = new Date(iso);
-  return d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function adminListRow(primaryText, secondaryText, onDelete) {
@@ -432,9 +304,8 @@ function adminListRow(primaryText, secondaryText, onDelete) {
   return li;
 }
 
-async function renderAnnouncements() {
-  const all = await getAllFromStore(ANNOUNCEMENT_STORE);
-  all.sort((a, b) => new Date(b.date) - new Date(a.date));
+function renderAnnouncements() {
+  const all = [...announcementsCache].sort((a, b) => new Date(b.date) - new Date(a.date));
   const list = document.getElementById("announcements-list");
   list.innerHTML = "";
   all.forEach((a) => {
@@ -454,9 +325,8 @@ async function renderAnnouncements() {
     adminList.appendChild(
       adminListRow(a.title, formatDate(a.date), async () => {
         if (!confirm(`למחוק את ההודעה "${a.title}"?`)) return;
-        await deleteFromStore(ANNOUNCEMENT_STORE, a.id);
+        await announcementCol.doc(a.id).delete();
         showToast("נמחק בהצלחה");
-        await renderAnnouncements();
       })
     );
   });
@@ -484,9 +354,8 @@ function buildTorahChips() {
   });
 }
 
-async function renderTorah() {
-  const all = await getAllFromStore(TORAH_STORE);
-  all.sort((a, b) => new Date(b.date) - new Date(a.date));
+function renderTorah() {
+  const all = [...torahCache].sort((a, b) => new Date(b.date) - new Date(a.date));
   const filtered = torahCategoryFilter === "all" ? all : all.filter((t) => t.category === torahCategoryFilter);
   const list = document.getElementById("torah-list");
   list.innerHTML = "";
@@ -497,10 +366,10 @@ async function renderTorah() {
     li.querySelector(".card-tag").textContent = torahCategoryLabel(t.category);
     li.querySelector("h3").textContent = t.title;
     li.querySelector(".card-body").textContent = t.text;
-    if (t.fileBlob) {
+    if (t.file) {
       const link = document.createElement("a");
       link.className = "card-file";
-      link.href = URL.createObjectURL(t.fileBlob);
+      link.href = t.file;
       link.download = t.fileName || "קובץ מצורף";
       link.textContent = "📎 " + (t.fileName || "קובץ מצורף");
       li.appendChild(link);
@@ -515,35 +384,32 @@ async function renderTorah() {
     adminList.appendChild(
       adminListRow(t.title, torahCategoryLabel(t.category), async () => {
         if (!confirm(`למחוק את "${t.title}"?`)) return;
-        await deleteFromStore(TORAH_STORE, t.id);
+        await torahCol.doc(t.id).delete();
         showToast("נמחק בהצלחה");
-        await renderTorah();
       })
     );
   });
 }
 
-async function renderGemachim() {
-  const all = await getAllFromStore(GEMACH_STORE);
+function renderGemachim() {
   const list = document.getElementById("gemachim-list");
   list.innerHTML = "";
-  all.forEach((g) => {
+  gemachimCache.forEach((g) => {
     const li = document.createElement("li");
     li.className = "card-item";
     li.textContent = g.text;
     list.appendChild(li);
   });
-  document.getElementById("gemachim-empty").classList.toggle("hidden", all.length > 0);
+  document.getElementById("gemachim-empty").classList.toggle("hidden", gemachimCache.length > 0);
 
   const adminList = document.getElementById("admin-gemachim-list");
   adminList.innerHTML = "";
-  all.forEach((g) => {
+  gemachimCache.forEach((g) => {
     adminList.appendChild(
       adminListRow(g.text, "", async () => {
         if (!confirm("למחוק פריט זה?")) return;
-        await deleteFromStore(GEMACH_STORE, g.id);
+        await gemachCol.doc(g.id).delete();
         showToast("נמחק בהצלחה");
-        await renderGemachim();
       })
     );
   });
@@ -555,7 +421,7 @@ function renderInfoTexts() {
     ["office", "office-text", "office-empty", "admin-office-text"],
   ];
   map.forEach(([key, textId, emptyId, adminId]) => {
-    const value = getInfoText(key);
+    const value = settingsCache[key] || "";
     document.getElementById(textId).textContent = value;
     document.getElementById(emptyId).classList.toggle("hidden", !!value);
     const adminField = document.getElementById(adminId);
@@ -563,22 +429,20 @@ function renderInfoTexts() {
   });
 }
 
-async function renderLessonsSchedule() {
-  const text = getInfoText("lessons");
+function renderLessonsSchedule() {
+  const text = settingsCache.lessons || "";
   document.getElementById("lessons-text").textContent = text;
   const adminField = document.getElementById("admin-lessons-text");
   if (document.activeElement !== adminField) adminField.value = text;
 
-  const fileRec = await getSingleFile(LESSONS_IMAGE_KEY);
   const img = document.getElementById("lessons-image");
   const adminPreview = document.getElementById("admin-lessons-image-preview");
   const removeBtn = document.getElementById("remove-lessons-image-btn");
-  const hasImage = !!(fileRec && fileRec.blob);
+  const hasImage = !!settingsCache.lessonsImage;
   if (hasImage) {
-    const url = URL.createObjectURL(fileRec.blob);
-    img.src = url;
+    img.src = settingsCache.lessonsImage;
     img.classList.remove("hidden");
-    adminPreview.src = url;
+    adminPreview.src = settingsCache.lessonsImage;
     adminPreview.classList.remove("hidden");
     removeBtn.classList.remove("hidden");
   } else {
@@ -589,23 +453,10 @@ async function renderLessonsSchedule() {
   document.getElementById("lessons-empty").classList.toggle("hidden", !!text || hasImage);
 }
 
-async function refreshAll() {
-  await Promise.all([
-    renderSearch(),
-    renderGallery(),
-    renderManageList(),
-    renderAnnouncements(),
-    renderTorah(),
-    renderGemachim(),
-    renderLessonsSchedule(),
-  ]);
-  renderInfoTexts();
-}
-
 /* ---------- Detail modal ---------- */
 
 function openDetail(contact) {
-  document.getElementById("modal-photo").src = contact.photo ? photoUrl(contact) : "icons/icon-192.png";
+  document.getElementById("modal-photo").src = contact.photo || "icons/icon-192.png";
   document.getElementById("modal-name").textContent = contact.name;
   document.getElementById("modal-group").textContent = groupLabel(contact.group);
   document.getElementById("modal-phone").textContent = contact.phone;
@@ -619,7 +470,7 @@ function closeDetail() {
   document.getElementById("detail-modal").classList.add("hidden");
 }
 
-/* ---------- Form ---------- */
+/* ---------- Contact form ---------- */
 
 function startEdit(contact) {
   editingId = contact.id;
@@ -629,12 +480,12 @@ function startEdit(contact) {
   document.getElementById("field-group").value = contact.group;
   const preview = document.getElementById("photo-preview");
   if (contact.photo) {
-    preview.src = photoUrl(contact);
+    preview.src = contact.photo;
     preview.classList.remove("hidden");
   } else {
     preview.classList.add("hidden");
   }
-  pendingPhotoBlob = contact.photo || null;
+  pendingPhotoDataUrl = contact.photo || null;
   document.getElementById("cancel-edit-btn").classList.remove("hidden");
   document.getElementById("save-btn").textContent = "עדכון";
   switchView("view-add");
@@ -643,7 +494,7 @@ function startEdit(contact) {
 
 function resetForm() {
   editingId = null;
-  pendingPhotoBlob = null;
+  pendingPhotoDataUrl = null;
   document.getElementById("contact-form").reset();
   document.getElementById("contact-id").value = "";
   document.getElementById("photo-preview").classList.add("hidden");
@@ -653,10 +504,8 @@ function resetForm() {
 
 async function removeContact(contact) {
   if (!confirm(`למחוק את ${contact.name}?`)) return;
-  await deleteContactById(contact.id);
-  photoUrlCache.delete(contact.id);
+  await contactsCol.doc(contact.id).delete();
   showToast("נמחק בהצלחה");
-  await refreshAll();
 }
 
 /* ---------- View switching ---------- */
@@ -669,55 +518,28 @@ function switchView(viewId) {
 /* ---------- Backup / restore ---------- */
 
 async function exportBackup() {
-  const all = await getAllContacts();
-  const contacts = await Promise.all(
-    all.map(async (c) => ({
-      name: c.name,
-      phone: c.phone,
-      group: c.group,
-      photo: c.photo ? await blobToDataURL(c.photo) : null,
-    }))
-  );
-  const gemachim = (await getAllFromStore(GEMACH_STORE)).map((g) => ({ text: g.text }));
-  const announcements = (await getAllFromStore(ANNOUNCEMENT_STORE)).map((a) => ({
-    title: a.title,
-    text: a.text,
-    date: a.date,
-  }));
-  const torahArticles = await Promise.all(
-    (await getAllFromStore(TORAH_STORE)).map(async (t) => ({
+  const data = {
+    exportedAt: new Date().toISOString(),
+    contacts: contactsCache.map((c) => ({ name: c.name, phone: c.phone, group: c.group, photo: c.photo || null })),
+    gemachim: gemachimCache.map((g) => ({ text: g.text })),
+    announcements: announcementsCache.map((a) => ({ title: a.title, text: a.text, date: a.date })),
+    torahArticles: torahCache.map((t) => ({
       title: t.title,
       category: t.category,
       text: t.text,
       date: t.date,
-      file: t.fileBlob ? await blobToDataURL(t.fileBlob) : null,
+      file: t.file || null,
       fileName: t.fileName || null,
       fileType: t.fileType || null,
-    }))
-  );
-  const infoTexts = {
-    prayer: getInfoText("prayer"),
-    lessons: getInfoText("lessons"),
-    office: getInfoText("office"),
+    })),
+    infoTexts: {
+      prayer: settingsCache.prayer || "",
+      lessons: settingsCache.lessons || "",
+      office: settingsCache.office || "",
+    },
+    lessonsImage: settingsCache.lessonsImage ? { data: settingsCache.lessonsImage, type: settingsCache.lessonsImageType } : null,
   };
-  const lessonsImageRec = await getSingleFile(LESSONS_IMAGE_KEY);
-  const lessonsImage = lessonsImageRec
-    ? { data: await blobToDataURL(lessonsImageRec.blob), type: lessonsImageRec.type }
-    : null;
-  const blob = new Blob(
-    [
-      JSON.stringify({
-        exportedAt: new Date().toISOString(),
-        contacts,
-        gemachim,
-        announcements,
-        torahArticles,
-        infoTexts,
-        lessonsImage,
-      }),
-    ],
-    { type: "application/json" }
-  );
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -729,6 +551,24 @@ async function exportBackup() {
   showToast("הגיבוי הורד בהצלחה");
 }
 
+async function deleteAllInCollection(col) {
+  const snap = await col.get();
+  const batches = [];
+  let batch = fsdb.batch();
+  let count = 0;
+  snap.docs.forEach((doc) => {
+    batch.delete(doc.ref);
+    count++;
+    if (count === 400) {
+      batches.push(batch.commit());
+      batch = fsdb.batch();
+      count = 0;
+    }
+  });
+  if (count > 0) batches.push(batch.commit());
+  await Promise.all(batches);
+}
+
 async function importBackup(file) {
   const text = await file.text();
   let parsed;
@@ -738,58 +578,57 @@ async function importBackup(file) {
     showToast("קובץ לא תקין");
     return;
   }
-  const contacts = parsed.contacts || [];
-  if (!confirm(`ייבוא הקובץ יחליף את כל הנתונים הקיימים (אנשי קשר, גמ"חים, מודעות, דברי תורה ומידע כללי). להמשיך?`)) return;
+  if (!confirm(`ייבוא הקובץ יחליף את כל הנתונים הקיימים (אנשי קשר, גמ"חים, מודעות, דברי תורה ומידע כללי) עבור כולם. להמשיך?`)) return;
 
-  await clearAllContacts();
-  photoUrlCache.clear();
-  for (const c of contacts) {
-    const photo = c.photo ? await dataURLToBlob(c.photo) : null;
-    await saveContact({ name: c.name, phone: c.phone, group: c.group, photo });
+  await deleteAllInCollection(contactsCol);
+  for (const c of parsed.contacts || []) {
+    await contactsCol.add({ name: c.name, phone: c.phone, group: c.group, photo: c.photo || null });
   }
 
-  await clearStore(GEMACH_STORE);
+  await deleteAllInCollection(gemachCol);
   for (const g of parsed.gemachim || []) {
-    await addToStore(GEMACH_STORE, { text: g.text });
+    await gemachCol.add({ text: g.text });
   }
 
-  await clearStore(ANNOUNCEMENT_STORE);
+  await deleteAllInCollection(announcementCol);
   for (const a of parsed.announcements || []) {
-    await addToStore(ANNOUNCEMENT_STORE, { title: a.title, text: a.text, date: a.date });
+    await announcementCol.add({ title: a.title, text: a.text, date: a.date });
   }
 
-  await clearStore(TORAH_STORE);
+  await deleteAllInCollection(torahCol);
   for (const t of parsed.torahArticles || []) {
-    const record = { title: t.title, category: t.category, text: t.text, date: t.date };
-    if (t.file) {
-      record.fileBlob = await dataURLToBlob(t.file);
-      record.fileName = t.fileName;
-      record.fileType = t.fileType;
-    }
-    await addToStore(TORAH_STORE, record);
+    await torahCol.add({
+      title: t.title,
+      category: t.category,
+      text: t.text,
+      date: t.date,
+      file: t.file || null,
+      fileName: t.fileName || null,
+      fileType: t.fileType || null,
+    });
   }
 
+  const settingsUpdate = {};
   if (parsed.infoTexts) {
-    setInfoText("prayer", parsed.infoTexts.prayer || "");
-    setInfoText("lessons", parsed.infoTexts.lessons || "");
-    setInfoText("office", parsed.infoTexts.office || "");
+    settingsUpdate.prayer = parsed.infoTexts.prayer || "";
+    settingsUpdate.lessons = parsed.infoTexts.lessons || "";
+    settingsUpdate.office = parsed.infoTexts.office || "";
   }
-
   if (parsed.lessonsImage) {
-    await putSingleFile(LESSONS_IMAGE_KEY, await dataURLToBlob(parsed.lessonsImage.data), parsed.lessonsImage.type);
+    settingsUpdate.lessonsImage = parsed.lessonsImage.data;
+    settingsUpdate.lessonsImageType = parsed.lessonsImage.type;
   } else {
-    await deleteSingleFile(LESSONS_IMAGE_KEY);
+    settingsUpdate.lessonsImage = firebase.firestore.FieldValue.delete();
+    settingsUpdate.lessonsImageType = firebase.firestore.FieldValue.delete();
   }
+  await settingsDoc.set(settingsUpdate, { merge: true });
 
   showToast("הייבוא הושלם בהצלחה");
-  await refreshAll();
 }
 
 /* ---------- Init ---------- */
 
-async function init() {
-  db = await openDB();
-
+function init() {
   const groupSelect = document.getElementById("field-group");
   GROUPS.forEach((g) => {
     const opt = document.createElement("option");
@@ -845,41 +684,49 @@ async function init() {
   });
   buildTorahChips();
 
-  document.getElementById("save-prayer-btn").addEventListener("click", () => {
-    setInfoText("prayer", document.getElementById("admin-prayer-text").value.trim());
-    renderInfoTexts();
+  document.getElementById("save-prayer-btn").addEventListener("click", async () => {
+    await settingsDoc.set({ prayer: document.getElementById("admin-prayer-text").value.trim() }, { merge: true });
     showToast("נשמר בהצלחה");
   });
+
   let pendingLessonsImage = null;
-  document.getElementById("admin-lessons-image").addEventListener("change", (e) => {
+  let removeLessonsImageFlag = false;
+  document.getElementById("admin-lessons-image").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    pendingLessonsImage = file;
+    const dataUrl = await resizeImageToDataURL(file);
+    pendingLessonsImage = { dataUrl, type: "image/jpeg" };
+    removeLessonsImageFlag = false;
     const preview = document.getElementById("admin-lessons-image-preview");
-    preview.src = URL.createObjectURL(file);
+    preview.src = dataUrl;
     preview.classList.remove("hidden");
     document.getElementById("remove-lessons-image-btn").classList.remove("hidden");
   });
-  document.getElementById("remove-lessons-image-btn").addEventListener("click", async () => {
-    if (!confirm("להסיר את תמונת מערכת השעות?")) return;
-    pendingLessonsImage = "remove";
-    await deleteSingleFile(LESSONS_IMAGE_KEY);
+  document.getElementById("remove-lessons-image-btn").addEventListener("click", () => {
+    if (!confirm("להסיר את תמונת מערכת השעות? (השינוי יישמר בלחיצה על שמירה)")) return;
+    pendingLessonsImage = null;
+    removeLessonsImageFlag = true;
     document.getElementById("admin-lessons-image").value = "";
-    showToast("התמונה הוסרה");
-    await renderLessonsSchedule();
+    document.getElementById("admin-lessons-image-preview").classList.add("hidden");
+    document.getElementById("remove-lessons-image-btn").classList.add("hidden");
   });
   document.getElementById("save-lessons-btn").addEventListener("click", async () => {
-    setInfoText("lessons", document.getElementById("admin-lessons-text").value.trim());
-    if (pendingLessonsImage && pendingLessonsImage !== "remove") {
-      await putSingleFile(LESSONS_IMAGE_KEY, pendingLessonsImage, pendingLessonsImage.type);
+    const update = { lessons: document.getElementById("admin-lessons-text").value.trim() };
+    if (pendingLessonsImage) {
+      update.lessonsImage = pendingLessonsImage.dataUrl;
+      update.lessonsImageType = pendingLessonsImage.type;
       pendingLessonsImage = null;
+    } else if (removeLessonsImageFlag) {
+      update.lessonsImage = firebase.firestore.FieldValue.delete();
+      update.lessonsImageType = firebase.firestore.FieldValue.delete();
+      removeLessonsImageFlag = false;
     }
-    await renderLessonsSchedule();
+    await settingsDoc.set(update, { merge: true });
     showToast("נשמר בהצלחה");
   });
-  document.getElementById("save-office-btn").addEventListener("click", () => {
-    setInfoText("office", document.getElementById("admin-office-text").value.trim());
-    renderInfoTexts();
+
+  document.getElementById("save-office-btn").addEventListener("click", async () => {
+    await settingsDoc.set({ office: document.getElementById("admin-office-text").value.trim() }, { merge: true });
     showToast("נשמר בהצלחה");
   });
 
@@ -887,11 +734,10 @@ async function init() {
     const title = document.getElementById("new-announcement-title").value.trim();
     const text = document.getElementById("new-announcement-text").value.trim();
     if (!title || !text) { showToast("יש למלא כותרת ותוכן"); return; }
-    await addToStore(ANNOUNCEMENT_STORE, { title, text, date: new Date().toISOString() });
+    await announcementCol.add({ title, text, date: new Date().toISOString() });
     document.getElementById("new-announcement-title").value = "";
     document.getElementById("new-announcement-text").value = "";
     showToast("ההודעה פורסמה");
-    await renderAnnouncements();
   });
 
   let pendingTorahFile = null;
@@ -910,17 +756,25 @@ async function init() {
   });
   document.getElementById("public-torah-cancel").addEventListener("click", resetPublicTorahForm);
 
-  document.getElementById("public-torah-file").addEventListener("change", (e) => {
+  document.getElementById("public-torah-file").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     const nameEl = document.getElementById("public-torah-file-name");
-    if (file) {
-      pendingTorahFile = file;
-      nameEl.textContent = "📎 " + file.name;
-      nameEl.classList.remove("hidden");
-    } else {
+    if (!file) {
       pendingTorahFile = null;
       nameEl.classList.add("hidden");
+      return;
     }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      showToast("הקובץ גדול מדי (מקסימום כ-650 קילובייט)");
+      e.target.value = "";
+      pendingTorahFile = null;
+      nameEl.classList.add("hidden");
+      return;
+    }
+    const dataUrl = await fileToDataURL(file);
+    pendingTorahFile = { dataUrl, name: file.name, type: file.type };
+    nameEl.textContent = "📎 " + file.name;
+    nameEl.classList.remove("hidden");
   });
 
   document.getElementById("public-torah-submit").addEventListener("click", async () => {
@@ -933,23 +787,21 @@ async function init() {
     }
     const record = { title, category, text, date: new Date().toISOString() };
     if (pendingTorahFile) {
-      record.fileBlob = pendingTorahFile;
+      record.file = pendingTorahFile.dataUrl;
       record.fileName = pendingTorahFile.name;
       record.fileType = pendingTorahFile.type;
     }
-    await addToStore(TORAH_STORE, record);
+    await torahCol.add(record);
     showToast("דבר התורה פורסם בהצלחה");
     resetPublicTorahForm();
-    await renderTorah();
   });
 
   document.getElementById("add-gemach-btn").addEventListener("click", async () => {
     const text = document.getElementById("new-gemach-text").value.trim();
     if (!text) return;
-    await addToStore(GEMACH_STORE, { text });
+    await gemachCol.add({ text });
     document.getElementById("new-gemach-text").value = "";
     showToast("נוסף בהצלחה");
-    await renderGemachim();
   });
 
   document.getElementById("search-input").addEventListener("input", renderSearch);
@@ -981,10 +833,10 @@ async function init() {
   document.getElementById("field-photo").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const blob = await resizeImageToBlob(file);
-    pendingPhotoBlob = blob;
+    const dataUrl = await resizeImageToDataURL(file);
+    pendingPhotoDataUrl = dataUrl;
     const preview = document.getElementById("photo-preview");
-    preview.src = URL.createObjectURL(blob);
+    preview.src = dataUrl;
     preview.classList.remove("hidden");
   });
 
@@ -996,12 +848,14 @@ async function init() {
     const phone = document.getElementById("field-phone").value.trim();
     const group = document.getElementById("field-group").value;
     if (!name || !phone || !group) return;
-    const contact = { name, phone, group, photo: pendingPhotoBlob };
-    if (editingId) contact.id = editingId;
-    await saveContact(contact);
+    const contact = { name, phone, group, photo: pendingPhotoDataUrl || null };
+    if (editingId) {
+      await contactsCol.doc(editingId).set(contact);
+    } else {
+      await contactsCol.add(contact);
+    }
     showToast(editingId ? "עודכן בהצלחה" : "נשמר בהצלחה");
     resetForm();
-    await refreshAll();
   });
 
   document.getElementById("export-btn").addEventListener("click", exportBackup);
@@ -1014,7 +868,38 @@ async function init() {
     e.target.value = "";
   });
 
-  await refreshAll();
+  /* ---------- Live data subscriptions ---------- */
+
+  contactsCol.onSnapshot((snap) => {
+    contactsCache = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => a.name.localeCompare(b.name, "he"));
+    renderSearch();
+    renderGallery();
+    renderManageList();
+  });
+
+  gemachCol.onSnapshot((snap) => {
+    gemachimCache = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderGemachim();
+  });
+
+  announcementCol.onSnapshot((snap) => {
+    announcementsCache = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderAnnouncements();
+  });
+
+  torahCol.onSnapshot((snap) => {
+    torahCache = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderTorah();
+  });
+
+  settingsDoc.onSnapshot((doc) => {
+    settingsCache = doc.data() || {};
+    renderInfoTexts();
+    renderLessonsSchedule();
+    updateAdminLockUI();
+  });
 }
 
 if ("serviceWorker" in navigator) {

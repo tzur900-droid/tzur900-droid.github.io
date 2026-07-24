@@ -1,4 +1,4 @@
-const CACHE_NAME = "alfon-netanya-v3";
+const CACHE_NAME = "alfon-netanya-v4";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -48,6 +48,9 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
+  // Only handle our own same-origin app files. Firebase/Firestore requests
+  // (auth, live data channels, CDN scripts) must reach the network normally.
+  if (url.origin !== self.location.origin) return;
   const isAppCode = APP_CODE_PATTERN.test(url.pathname) || url.pathname.endsWith("/");
 
   if (isAppCode) {
