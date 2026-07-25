@@ -273,7 +273,7 @@ function renderGallery() {
     item.className = "gallery-item";
     item.innerHTML = `<img src="${c.photo}" alt="${c.name}"><div class="cap"></div>`;
     item.querySelector(".cap").textContent = c.name;
-    item.onclick = () => openDetail(c);
+    item.onclick = () => openDetail(c, { large: true });
     grid.appendChild(item);
   });
   document.getElementById("gallery-empty").classList.toggle("hidden", withPhotos.length > 0);
@@ -455,14 +455,53 @@ function renderLessonsSchedule() {
 
 /* ---------- Detail modal ---------- */
 
-function openDetail(contact) {
+let currentDetailContact = null;
+let currentVCardUrl = null;
+
+function buildVCardUrl(contact) {
+  const vcard = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    `FN:${contact.name}`,
+    `TEL;TYPE=CELL:${digitsOnly(contact.phone)}`,
+    "END:VCARD",
+  ].join("\r\n");
+  if (currentVCardUrl) URL.revokeObjectURL(currentVCardUrl);
+  currentVCardUrl = URL.createObjectURL(new Blob([vcard], { type: "text/vcard" }));
+  return currentVCardUrl;
+}
+
+async function copyCurrentContactInfo() {
+  if (!currentDetailContact) return;
+  const text = `${currentDetailContact.name}: ${currentDetailContact.phone}`;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  showToast("הועתק בהצלחה");
+}
+
+function openDetail(contact, { large = false } = {}) {
+  currentDetailContact = contact;
   document.getElementById("modal-photo").src = contact.photo || "icons/icon-192.png";
+  document.getElementById("modal-photo").classList.toggle("large", large);
   document.getElementById("modal-name").textContent = contact.name;
   document.getElementById("modal-group").textContent = groupLabel(contact.group);
   document.getElementById("modal-phone").textContent = contact.phone;
   document.getElementById("modal-call").href = "tel:" + digitsOnly(contact.phone);
   document.getElementById("modal-sms").href = "sms:" + digitsOnly(contact.phone);
   document.getElementById("modal-whatsapp").href = "https://wa.me/" + toWhatsAppNumber(contact.phone);
+  const vcardLink = document.getElementById("modal-vcard");
+  vcardLink.href = buildVCardUrl(contact);
+  vcardLink.download = `${contact.name}.vcf`;
   document.getElementById("detail-modal").classList.remove("hidden");
 }
 
@@ -829,6 +868,7 @@ function init() {
   document.getElementById("detail-modal").addEventListener("click", (e) => {
     if (e.target.id === "detail-modal") closeDetail();
   });
+  document.getElementById("modal-copy").addEventListener("click", copyCurrentContactInfo);
 
   document.getElementById("field-photo").addEventListener("change", async (e) => {
     const file = e.target.files[0];
