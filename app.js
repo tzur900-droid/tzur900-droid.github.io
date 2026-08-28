@@ -253,9 +253,12 @@ function contactRow(contact, { showActions = false } = {}) {
 
 function renderSearch() {
   const q = document.getElementById("search-input").value.trim();
+  const qDigits = digitsOnly(q);
   const filtered = contactsCache.filter((c) => {
     const matchesGroup = searchGroupFilter === "all" || c.group === searchGroupFilter;
-    const matchesQuery = !q || c.name.includes(q);
+    const matchesName = c.name.includes(q);
+    const matchesPhone = qDigits && digitsOnly(c.phone).includes(qDigits);
+    const matchesQuery = !q || matchesName || matchesPhone;
     return matchesGroup && matchesQuery;
   });
   const list = document.getElementById("search-results");
@@ -281,7 +284,10 @@ function renderGallery() {
 
 function renderManageList() {
   const q = document.getElementById("manage-search").value.trim();
-  const filtered = q ? contactsCache.filter((c) => c.name.includes(q)) : contactsCache;
+  const qDigits = digitsOnly(q);
+  const filtered = q
+    ? contactsCache.filter((c) => c.name.includes(q) || (qDigits && digitsOnly(c.phone).includes(qDigits)))
+    : contactsCache;
   const list = document.getElementById("manage-list");
   list.innerHTML = "";
   filtered.forEach((c) => list.appendChild(contactRow(c, { showActions: true })));
