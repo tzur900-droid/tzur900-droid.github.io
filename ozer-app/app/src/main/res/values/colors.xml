@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="white">#FFFFFF</color>
+    <color name="teal">#1F6F5C</color>
+    <color name="mic_active">#C62828</color>
+    <color name="bubble_user">#1F6F5C</color>
+    <color name="bubble_user_text">#FFFFFF</color>
+    <color name="bubble_bot">#E7F2EF</color>
+    <color name="bubble_bot_text">#1B2B27</color>
+</resources>
