@@ -1,0 +1,910 @@
+"""The page layout engine (the Mikraot Gedolot method).
+
+Fonts never change size. On every page:
+  * the text runs on word by word (a verse may continue on the next page);
+  * the translation sits in a column beside the text and never runs ahead of it: a
+    verse's translation is set on the page where the verse's text is complete. If the
+    translation is shorter than the text, the text runs on under it at full width; if
+    it is longer, it runs on under the text at full width (an L);
+  * every commentary is a full-width block of columns under the text;
+  * a page takes the most text for which the translation and the commentary of every
+    verse completed on it fit on that page in full. The verse that continues on the
+    next page uses the room left, and the rest of its commentary follows it;
+  * only a commentary longer than a whole page (beyond the minimum lines of text)
+    runs on to the next page;
+  * the text ends on a full line and the last block is stretched to the bottom, so a
+    page has no hole;
+  * a haftara ('## …', no commentary) starts under the end of the parasha, and the
+    next parasha starts under the end of the haftara.
+
+Everything is measured in points and laid out line by line, so heights are exact.
+"""
+import math
+from dataclasses import dataclass, field
+
+from .model import PAGE_SIZES, entry_tokens, heb, parse_comm, parse_main
+from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width, words_of
+
+EPS = 0.01
+
+
+class Cancelled(Exception):
+    pass
+
+
+# ---------------------------------------------------------------- output pages
+
+@dataclass
+class Frame:
+    """Lines placed on the page: x_right is the frame's right edge, top its top (absolute pt)."""
+    lines: list
+    x_right: float
+    top: float
+
+
+@dataclass
+class Page:
+    width: float
+    height: float
+    frames: list = field(default_factory=list)
+    rules: list = field(default_factory=list)   # (x1, y, x2)
+    head: tuple = None                           # (right text, center text, left text, style, baseline y)
+    overfull: bool = False
+
+
+# ---------------------------------------------------------------- helpers
+
+@dataclass
+class Spec:
+    """A paragraph of the main text (or a heading)."""
+    words: list
+    base: Style
+    lh: float
+    align: str = "justify"
+    mt: float = 0.0
+    mb: float = 0.0
+    cut: bool = False
+    kind: str = "p"
+
+
+def layout_specs(specs, width_at):
+    lines = []
+    y = 0.0
+    for sp in specs:
+        y += sp.mt
+        ls = break_lines(sp.words, sp.base, sp.lh, width_at, y, sp.align)
+        for k, l in enumerate(ls):
+            l.mt = sp.mt if k == 0 else 0.0
+            l.mb = sp.mb if k == len(ls) - 1 else 0.0
+            l.kind = sp.kind
+        if ls and sp.cut:
+            ls[-1].last = False
+        if ls:
+            y = ls[-1].y + ls[-1].h
+        y += sp.mb
+        lines += ls
+    return lines, y
+
+
+def restack(lines):
+    """Recompute the y of lines after their heights changed."""
+    y = 0.0
+    for l in lines:
+        y += getattr(l, "mt", 0.0)
+        l.y = y
+        y += l.h + getattr(l, "mb", 0.0)
+    return y
+
+
+# ---------------------------------------------------------------- the engine
+
+class Engine:
+    def __init__(self, project, progress=None):
+        self.P = project
+        self.progress = progress
+        self.warnings = []
+        P = project
+        _, wmm, hmm = PAGE_SIZES[P["pageSize"]]
+        self.page_w = wmm * PT_PER_MM
+        self.page_h = hmm * PT_PER_MM
+        self.m = P["margin"] * PT_PER_MM
+        self.W = self.page_w - 2 * self.m
+        self.contentH = self.page_h - 2 * self.m
+        self.gap = P["colGap"] * PT_PER_MM
+        self.sgap = P["sectionGap"] * PT_PER_MM
+        self.lh_k = P["lineHeight"]
+        self.note_k = max(1.2, P["lineHeight"] - 0.12)
+        self.main = Style(P["mainFont"], P["mainSize"])
+        self.main_lh = P["mainSize"] * self.lh_k
+        self.head_style = Style(P["mainFont"], 9.0)
+        self.head_h = (9.0 * 1.3 + 1 * PT_PER_MM + 2 * PT_PER_MM) if P["header"] else 0.0
+        self.min_text_h = P["minLines"] * self.main_lh - 1
+
+        self.all_items, self.count = parse_main(P["main"])
+        self.comms = P["comms"]
+        self.parsed = {}
+        for i, c in enumerate(self.comms):
+            entries, problem, _ = parse_comm(c, self.count)
+            self.parsed[i] = entries
+            if problem:
+                self.warnings.append(f"{c['name']}: {problem}")
+        self.sides = [i for i, c in enumerate(self.comms) if c["place"] == "side"]
+        self.bottoms = [i for i, c in enumerate(self.comms) if c["place"] == "bottom"]
+        self.unders = [i for i, c in enumerate(self.comms) if c["place"] == "under"]
+        self.style = {i: Style(c["font"], float(c["size"])) for i, c in enumerate(self.comms)}
+        self.side_lh = {i: self.comms[i]["size"] * self.lh_k for i in self.sides}
+        self.note_lh = {i: self.comms[i]["size"] * self.note_k for i in self.bottoms}
+
+        labels = [it["label"] for it in self.all_items if it["type"] == "v" and not it["noComm"]]
+        # each translation / commentary is one stream of entries in verse order
+        self.streams, self.first_idx = {}, {}
+        for i in self.sides + self.bottoms:
+            st, first = [], {}
+            for v, raws in enumerate(self.parsed[i]):
+                if not raws:
+                    continue
+                first[v] = len(st)
+                if i in self.sides:
+                    st.append({"v": v, "label": labels[v], "tokens": [t for r in raws for t in entry_tokens(r)], "note": False})
+                else:
+                    for r in raws:
+                        st.append({"v": v, "label": f"({labels[v]})", "tokens": entry_tokens(r), "note": True})
+            self.streams[i], self.first_idx[i] = st, first
+        self.ptrs = {i: (0, 0) for i in self.streams}
+        self.sec_end = {}
+        self.items = [it for it in self.all_items if not it["noComm"]]
+        self.col_w = {}
+        self._auto_widths()
+
+    # ------------------------------------------------------------ text of the page
+
+    def segments(self, a, b, lst=None):
+        lst = self.items if lst is None else lst
+        segs = []
+        last_i = b[0] if b[1] > 0 else b[0] - 1
+        for i in range(a[0], min(last_i, len(lst) - 1) + 1):
+            it = lst[i]
+            n = len(it["words"]) if it["type"] == "v" else 0
+            segs.append((i, it, a[1] if i == a[0] else 0, b[1] if i == b[0] else n))
+        return segs
+
+    def text_specs(self, segs, cut_at_end):
+        P = self.P
+        specs, para = [], []
+        bold = self.main.with_bold(True)
+
+        def flush():
+            if para:
+                specs.append(Spec(list(para), self.main, self.main_lh))
+                para.clear()
+
+        for i, it, frm, to in segs:
+            if it["type"] == "h":
+                flush()
+                st = self.main.scaled(1.2, bold=True)
+                hw = words_of([(w, True) for w in it["text"].split()], st, lambda k, i=i: ("h", i))
+                mt = 1 * PT_PER_MM if it["noComm"] else 0.0
+                specs.append(Spec(hw, st, st.size * self.lh_k, "center", mt, 0.6 * PT_PER_MM if it["noComm"] else 0.0, kind="h"))
+                continue
+            if P["numbers"] and frm == 0:
+                para.append(Word(it["label"], bold, width(bold, it["label"]), ("l", i)))
+            para.extend(words_of(it["words"][frm:to], self.main, lambda k, i=i, frm=frm: (i, frm + k)))
+            und = []
+            if to == len(it["words"]) and it["idx"] >= 0:
+                for u in self.unders:
+                    ent = self.parsed[u][it["idx"]]
+                    if ent:
+                        st = self.style[u]
+                        toks = [t for r in ent for t in entry_tokens(r)]
+                        und.append(Spec(words_of(toks, st), st, st.size * self.note_k, mt=0.3 * PT_PER_MM, kind="u"))
+            if P["verseNewLine"] or und:
+                flush()
+                specs.extend(und)
+        flush()
+        if cut_at_end and specs:
+            specs[-1].cut = True
+        return specs
+
+    # ------------------------------------------------------------ streams
+
+    def list_from(self, c, ptr, max_v):
+        st, out = self.streams[c], []
+        for j in range(ptr[0], len(st)):
+            e = st[j]
+            if max_v is not None and e["v"] > max_v:
+                break
+            if j == ptr[0] and ptr[1]:
+                out.append(dict(e, start=ptr[1], cont=True))
+            else:
+                out.append(dict(e, start=0, cont=False))
+        return out
+
+    def entry_words(self, c, lst):
+        base = self.style[c]
+        bold = base.with_bold(True)
+        words = []
+        for j, e in enumerate(lst):
+            if not e["cont"]:
+                words.append(Word(e["label"], bold, width(bold, e["label"]), ("L", j)))
+            for k, (t, b) in enumerate(e["tokens"][e["start"]:]):
+                st = bold if b else base
+                words.append(Word(t, st, width(st, t), (j, e["start"] + k)))
+        return words
+
+    def advance(self, ptr, words, n_taken, n_entries):
+        if n_taken >= len(words):
+            return (ptr[0] + n_entries, 0)
+        ref = words[n_taken].ref
+        if ref[0] == "L":
+            return (ptr[0] + ref[1], 0)
+        return (ptr[0] + ref[0], ref[1])
+
+    def started(self, c, v, ptr):
+        idx = self.first_idx[c].get(v)
+        if idx is None:
+            return True
+        return ptr[0] > idx or (ptr[0] == idx and ptr[1] >= 3)
+
+    def done(self, c, ptr):
+        return ptr[0] >= self.sec_end.get(c, len(self.streams[c]))
+
+    def take(self, words, base, lh, w, max_lines):
+        """The first max_lines lines of words at width w (a new entry is not started
+        with fewer than three of its words). Returns (lines, number of words taken)."""
+        lines = break_lines(words, base, lh, full_width(w))
+        if len(lines) <= max_lines:
+            return lines, len(words)
+        lines = lines[:max(0, max_lines)]
+        n = sum(len(l.words) for l in lines)
+        # find where the entry that is cut began
+        k = n - 1
+        while k >= 0 and words[k].ref[0] != "L":
+            k -= 1
+        if k >= 0 and 0 < n - k - 1 < 3:
+            lines = break_lines(words[:k], base, lh, full_width(w))
+            n = k
+        if lines:
+            lines[-1].last = False
+        return lines, n
+
+    # ------------------------------------------------------------ geometry
+
+    def side_width(self, c):
+        return self.W * self.col_w[c] / 100 - self.gap / 2
+
+    def width_at(self, heights):
+        def f(y):
+            right = left = 0.0
+            for c in self.sides:
+                if heights.get(c, 0) > y + EPS:
+                    if self.comms[c]["side"] == "right":
+                        right += self.side_width(c) + self.gap
+                    else:
+                        left += self.side_width(c) + self.gap
+            return right, self.W - right - left
+        return f
+
+    def title_h(self, c):
+        if not self.P["names"]:
+            return 0.0
+        return self.style[c].size * 1.05 * self.lh_k + 0.5 * PT_PER_MM
+
+    def note_title_h(self, c):
+        if not self.P["names"]:
+            return 0.0
+        return self.style[c].size * 1.1 * self.note_k + 0.5 * PT_PER_MM
+
+    def note_col_w(self, c):
+        n = self.comms[c]["cols"]
+        return (self.W - (n - 1) * self.gap) / n
+
+    def note_pad(self):
+        return self.sgap * 0.6
+
+    def section_h(self, c, n_lines, nlh=None):
+        rows = math.ceil(n_lines / self.comms[c]["cols"])
+        return self.note_pad() + self.note_title_h(c) + rows * (nlh or self.note_lh[c])
+
+    def _auto_widths(self):
+        """Give an automatic-width translation column the share of the line at which the
+        text and the translation come out the same height, so they run out together."""
+        for c in self.sides:
+            self.col_w[c] = min(60, max(10, float(self.comms[c]["width"] or 30)))
+        sample = self.items[:600]
+        segs = [(i, it, 0, len(it["words"]) if it["type"] == "v" else 0) for i, it in enumerate(sample)]
+        specs = self.text_specs(segs, False)
+        verses = {it["idx"] for it in sample if it["type"] == "v"}
+        for c in self.sides:
+            if not self.comms[c]["autoW"]:
+                continue
+            toks = [t for v, raws in enumerate(self.parsed[c]) if v in verses for r in raws for t in entry_tokens(r)]
+            if not toks:
+                continue
+            sw = words_of(toks, self.style[c])
+            others = sum(self.col_w[o] for o in self.sides if o != c)
+            lo, hi = 10.0, min(60.0, 90.0 - others)
+            for _ in range(9):
+                w = (lo + hi) / 2
+                _, h_main = layout_specs(specs, full_width(self.W * (100 - others - w) / 100))
+                n_side = len(break_lines(sw, self.style[c], self.side_lh[c], full_width(self.W * w / 100)))
+                if n_side * self.side_lh[c] > h_main * 0.97:
+                    lo = w
+                else:
+                    hi = w
+            self.col_w[c] = round(hi, 1)
+        total = sum(self.col_w[c] for c in self.sides)
+        if total > 75:
+            self.warnings.append("סכום רוחב הטורים הצמודים גדול מדי — הוקטן כך שלטקסט העיקרי יישאר 25%.")
+            for c in self.sides:
+                self.col_w[c] *= 75 / total
+
+    # ------------------------------------------------------------ one page
+
+    def compose(self, a, b, force=False, pre=None):
+        """Lay out the page that holds the text from a to b. pre: lines of a haftara's
+        end set above it."""
+        items = self.items
+        segs = self.segments(a, b)
+        at_end = b[0] >= len(items)
+        cut = b[1] > 0
+        r = {"a": a, "b": b, "at_end": at_end, "pre": pre, "ptrs": dict(self.ptrs), "side": {}, "sections": [],
+             "post": None, "req_fit": True, "side_short": False}
+        max_v = last_full = -1
+        for i in range(min(b[0] if b[1] > 0 else b[0] - 1, len(items) - 1), -1, -1):
+            if items[i]["type"] == "v":
+                max_v = items[i]["idx"]
+                break
+        for i in range(min(b[0] - 1, len(items) - 1), -1, -1):
+            if items[i]["type"] == "v":
+                last_full = items[i]["idx"]
+                break
+        used = self.head_h + (pre["h"] + self.sgap + 3 * PT_PER_MM if pre else 0.0)
+        avail = self.contentH - used
+
+        # translation columns beside the text
+        specs = self.text_specs(segs, cut)
+        heights, info = {}, {}
+        for c in self.sides:
+            ptr = self.ptrs[c]
+            lst = self.list_from(c, ptr, max_v if at_end else last_full)
+            words = self.entry_words(c, lst)
+            lines = break_lines(words, self.style[c], self.side_lh[c], full_width(self.side_width(c)))
+            th = self.title_h(c) if lines else 0.0
+            info[c] = {"lst": lst, "words": words, "nat": lines, "k": len(lines), "th": th, "ptr": ptr}
+            heights[c] = th + len(lines) * self.side_lh[c] if lines else 0.0
+        text_lines, text_h = layout_specs(specs, self.width_at(heights))
+        for _ in range(8):
+            changed = False
+            for c in self.sides:
+                inf = info[c]
+                if inf["nat"] and heights[c] > text_h + EPS:
+                    k = max(0, int((text_h - inf["th"] + EPS) // self.side_lh[c]))
+                    if k < inf["k"]:
+                        inf["k"] = k
+                        heights[c] = inf["th"] + k * self.side_lh[c] if k > 0 else 0.0
+                        changed = True
+            if not changed:
+                break
+            text_lines, text_h = layout_specs(specs, self.width_at(heights))
+        top_h = max([text_h] + [heights[c] for c in self.sides])
+        for c in self.sides:
+            inf = info[c]
+            slh = self.side_lh[c]
+            col_lines = inf["nat"][:inf["k"]]
+            n_col = sum(len(l.words) for l in col_lines)
+            band, n_band = [], 0
+            rest = inf["words"][n_col:]
+            if rest:
+                room = avail - top_h - 1 * PT_PER_MM
+                max_lines = int((room + EPS) // slh) if room > 0 else 0
+                if force and max_lines < 1 and not col_lines:
+                    max_lines = 1
+                band, n_band = self.take(rest, self.style[c], slh, self.W, max_lines)
+                if band:
+                    top_h += 1 * PT_PER_MM + len(band) * slh
+                if col_lines:
+                    col_lines[-1].last = False
+            mode = "wrap" if not band and n_col == len(inf["words"]) else "band"
+            new_ptr = self.advance(inf["ptr"], inf["words"], n_col + n_band, len(inf["lst"]))
+            r["ptrs"][c] = new_ptr
+            req = len(self.list_from(c, inf["ptr"], max_v if at_end else last_full))
+            if new_ptr[0] - inf["ptr"][0] < req:
+                r["side_short"] = True
+            r["side"][c] = {"col": col_lines, "band": band, "th": inf["th"] if col_lines else 0.0, "mode": mode,
+                            "slh": slh, "h": (inf["th"] + len(col_lines) * slh) if col_lines else 0.0}
+        r["text"] = text_lines
+        r["text_h"] = text_h
+        r["top_h"] = top_h
+        top_fits = used + top_h <= self.contentH + EPS
+
+        # commentaries under the text
+        room = self.contentH - used - top_h - self.sgap
+        plans = []
+        for c in self.bottoms:
+            ptr = self.ptrs[c]
+            req = self.list_from(c, ptr, last_full)
+            alll = self.list_from(c, ptr, max_v)
+            req_h = 0.0
+            if req:
+                rw = self.entry_words(c, req)
+                req_h = self.section_h(c, len(break_lines(rw, self.style[c], self.note_lh[c], full_width(self.note_col_w(c)))))
+            plans.append((c, ptr, req, alll, req_h))
+        req_total = sum(p[4] for p in plans if p[2]) + 1.2 * PT_PER_MM * max(0, sum(1 for p in plans if p[2]) - 1)
+        r["req_fit"] = top_fits and req_total <= room + EPS and not r["side_short"]
+        placed_any = False
+        for n, (c, ptr, req, alll, req_h) in enumerate(plans):
+            r["ptrs"][c] = ptr
+            if not alll:
+                continue
+            later = sum(p[4] + 1.2 * PT_PER_MM for p in plans[n + 1:] if p[2]) if r["req_fit"] else 0.0
+            budget = room - later - (1.2 * PT_PER_MM if placed_any else 0.0)
+            nlh = self.note_lh[c]
+            rows = int((budget - self.note_pad() - self.note_title_h(c) + EPS) // nlh)
+            if force and not placed_any and rows < 1:
+                rows = 1
+            if rows < 1:
+                continue
+            words = self.entry_words(c, alll)
+            lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"])
+            if not lines:
+                continue
+            h = self.section_h(c, len(lines))
+            r["sections"].append({"c": c, "lines": lines, "nlh": nlh, "cut": ntake < len(words), "h": h})
+            room -= h + (1.2 * PT_PER_MM if placed_any else 0.0)
+            placed_any = True
+            r["ptrs"][c] = self.advance(ptr, words, ntake, len(alll))
+        return r
+
+    def notes_h(self, r):
+        if not r["sections"]:
+            return 0.0
+        return self.sgap + sum(s["h"] for s in r["sections"]) + 1.2 * PT_PER_MM * (len(r["sections"]) - 1)
+
+    def total_h(self, r):
+        h = self.head_h
+        if r["pre"]:
+            h += r["pre"]["h"] + self.sgap + 3 * PT_PER_MM
+        h += r["top_h"] + self.notes_h(r)
+        if r["post"]:
+            h += r["post"]["mt"] + r["post"]["h"]
+        return h
+
+    def recompute_top(self, r):
+        text_h = restack(r["text"])
+        r["text_h"] = text_h
+        top_h = max([text_h] + [s["h"] for s in r["side"].values()])
+        for s in r["side"].values():
+            if s["band"]:
+                top_h += 1 * PT_PER_MM + len(s["band"]) * s["slh"]
+        r["top_h"] = top_h
+
+    # ------------------------------------------------------------ closing the gaps
+
+    def merge_tails(self, r):
+        """A translation that runs on under the text by a single line stays in its
+        column, and the text's line spacing opens a little so both end together."""
+        for c, s in r["side"].items():
+            if not s["band"] or len(s["band"]) != 1 or not s["col"]:
+                continue
+            text = [l for l in r["text"] if l.kind == "p"]
+            if len(text) < 3:
+                continue
+            words = [w for l in s["col"] for w in l.words] + s["band"][0].words
+            lines = break_lines(words, self.style[c], s["slh"], full_width(self.side_width(c)))
+            col_h = s["th"] + len(lines) * s["slh"]
+            extra = col_h - r["text_h"]
+            if extra < 0 or extra / len(text) > self.main_lh * 0.25:
+                continue
+            saved = (s["col"], s["band"], s["h"], [(l.h) for l in r["text"]])
+            s["col"], s["band"], s["h"] = lines, [], col_h
+            for l in text:
+                l.h += extra / len(text)
+            self.recompute_top(r)
+            if self.total_h(r) > self.contentH + EPS:
+                s["col"], s["band"], s["h"] = saved[0], saved[1], saved[2]
+                for l, h in zip(r["text"], saved[3]):
+                    l.h = h
+                self.recompute_top(r)
+            else:
+                s["mode"] = "merged"
+
+    def align_columns(self, r):
+        # the translation column ends exactly where the text beside it ends (band), or
+        # exactly where the next line of the text under it begins (wrap)
+        for c, s in r["side"].items():
+            if not s["col"]:
+                continue
+            n = len(s["col"])
+            if s["mode"] == "band":
+                target = r["text_h"]
+            elif s["mode"] == "wrap":
+                tops = [l.y for l in r["text"] if l.y >= s["h"] - EPS]
+                target = min(tops) if tops else r["text_h"]
+            else:
+                continue
+            if n >= 2 and 0.3 < target - s["h"] <= s["slh"] * 1.5:
+                for l in s["col"]:
+                    l.h = (target - s["th"]) / n
+                s["h"] = target
+            if s["mode"] == "band":
+                s["col"][-1].last = False
+        self.recompute_top(r)
+
+    def justify(self, r):
+        spare = self.contentH - self.total_h(r)
+        # no commentary on the page: open the text's line spacing to the bottom
+        if not r["sections"] and not r["post"] and not r["at_end"] and r["text"] and 0 < spare < self.main_lh * 1.5:
+            text = [l for l in r["text"] if l.kind == "p"]
+            if text:
+                for l in text:
+                    l.h += spare / len(text)
+                self.recompute_top(r)
+        self.align_columns(r)
+        self.recompute_top(r)
+        spare = self.contentH - self.total_h(r)
+        if spare < 0.5 or not r["sections"] or r["post"]:
+            return
+        secs = r["sections"]
+        last = secs[-1]
+        if not last["cut"]:
+            rows = sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in secs)
+            if rows and spare / rows < secs[0]["nlh"] * 0.25:
+                for s in secs:
+                    s["nlh"] += spare / rows
+                    s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
+        else:
+            rows = math.ceil(len(last["lines"]) / self.comms[last["c"]]["cols"])
+            if rows:
+                last["nlh"] += spare / rows
+                last["h"] = self.section_h(last["c"], len(last["lines"]), last["nlh"])
+        # still a little room: share it out between the lines of the text and of the commentaries
+        spare = self.contentH - self.total_h(r)
+        text = [l for l in r["text"] if l.kind == "p"]
+        rows = sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in secs)
+        units = len(text) + rows
+        if spare > 0.5 and units and spare / units <= 0.35 * min([self.main_lh] + [s["nlh"] for s in secs]):
+            d = spare / units
+            for l in text:
+                l.h += d
+            for s in secs:
+                s["nlh"] += d
+                s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
+            self.recompute_top(r)
+            self.align_columns(r)
+
+    # ------------------------------------------------------------ text without commentary
+
+    def fill_plain(self, lst, a, budget):
+        """Set as much plain text (a haftara) from position a as fits in budget, ending on
+        a full line. Returns (lines, height, end position, done)."""
+        n = len(lst)
+        segs = self.segments(a, (n, 0), lst)
+        specs = self.text_specs(segs, False)
+        lines, h = layout_specs(specs, full_width(self.W))
+        if h <= budget + EPS:
+            return lines, h, (n, 0), True
+        k = 0
+        while k < len(lines) and lines[k].y + lines[k].h <= budget + EPS:
+            k += 1
+        while k > 0 and lines[k - 1].kind == "h":
+            k -= 1
+        if k == 0:
+            return [], 0.0, a, False
+        nxt = lines[k].words[0].ref
+        end = (nxt[1], 0) if nxt[0] in ("h", "l") else nxt
+        taken = lines[:k]
+        taken[-1].last = False
+        taken[-1].mb = 0.0
+        h = restack(taken)
+        return taken, h, end, False
+
+    def stretch_lines(self, lines, spare, cap):
+        n = len([l for l in lines if l.kind == "p"])
+        if n and 0.5 < spare <= cap:
+            for l in lines:
+                if l.kind == "p":
+                    l.h += spare / n
+        return restack(lines)
+
+    # ------------------------------------------------------------ the whole book
+
+    def units(self, lst):
+        off, t = [], 0
+        for it in lst:
+            off.append(t)
+            t += len(it["words"]) if it["type"] == "v" else 1
+        return off, t
+
+    def to_pos(self, off, total, n, g):
+        if g >= total:
+            return (n, 0)
+        lo, hi = 0, n - 1
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if off[mid] <= g:
+                lo = mid
+            else:
+                hi = mid - 1
+        return (lo, g - off[lo])
+
+    def set_items(self, lst):
+        self.items = lst
+        self.off, self.total = self.units(lst)
+        vs = [it["idx"] for it in lst if it["type"] == "v"]
+        last_v = vs[-1] if vs else None
+        self.sec_end = {}
+        for c, st in self.streams.items():
+            k = 0
+            while k < len(st) and last_v is not None and st[k]["v"] <= last_v:
+                k += 1
+            self.sec_end[c] = k
+
+    def pos(self, g):
+        return self.to_pos(self.off, self.total, len(self.items), g)
+
+    def g_of(self, p):
+        return self.total if p[0] >= len(self.items) else self.off[p[0]] + p[1]
+
+    def text_height(self, a, g):
+        b = self.pos(g)
+        _, h = layout_specs(self.text_specs(self.segments(a, b), b[1] > 0), full_width(self.W))
+        return h
+
+    def full_line_end(self, r, g0, g):
+        """If the text ends in the middle of a line, end it at the end of the line before."""
+        if g >= self.total or not r["text"]:
+            return g
+        b = self.pos(g)
+        nxt = self.items[b[0]]
+        if b[1] == 0 and (nxt["type"] == "h" or self.P["verseNewLine"] or (b[0] > 0 and self.items[b[0] - 1]["type"] == "h")):
+            return g
+        last = r["text"][-1]
+        if last.kind != "p":
+            return g
+        if nxt["type"] == "v":
+            t, bold = nxt["words"][b[1]]
+            st = self.main.with_bold(bold)
+            nw = Word(t, st, width(st, t))
+            if b[1] == 0 and self.P["numbers"]:
+                bst = self.main.with_bold(True)
+                nw.w += width(bst, nxt["label"]) + space(self.main)
+            if not last.fits_more(nw):
+                return g
+        # a line that is mostly full is simply justified to the full width
+        if last.natural >= last.width * 0.6:
+            return g
+        first = next((w.ref for w in last.words if isinstance(w.ref, tuple) and isinstance(w.ref[0], int)), None)
+        if first is None:
+            return g
+        if last.words[0].ref and last.words[0].ref[0] == "l":
+            first = (last.words[0].ref[1], 0)
+        g2 = self.g_of(first)
+        return g2 if g2 > g0 else g
+
+    def run(self):
+        sections = []
+        for it in self.all_items:
+            if sections and sections[-1]["noComm"] == it["noComm"]:
+                sections[-1]["items"].append(it)
+            else:
+                sections.append({"noComm": it["noComm"], "items": [it]})
+        self.pages = []
+        self.plain_start = (0, 0)
+        self.pre = None
+        for si, sec in enumerate(sections):
+            nxt = sections[si + 1] if si + 1 < len(sections) else None
+            if sec["noComm"]:
+                self.run_plain(sec["items"], nxt)
+                self.plain_start = (0, 0)
+            else:
+                self.run_comm(sec["items"], nxt["items"] if nxt else None)
+        pages = []
+        first = int(self.P.get("firstPage") or 1)
+        for n, (r, chapter, parasha) in enumerate(self.pages):
+            pages.append(self.finalize(r, chapter, parasha, heb(first + n)))
+        return pages
+
+    def tick(self):
+        if self.progress:
+            self.progress(len(self.pages))
+
+    def run_comm(self, lst, next_plain):
+        self.set_items(lst)
+        pre = self.pre
+        self.pre = None
+        pos = (0, 0)
+        guard = 0
+
+        def pending():
+            return pos[0] < len(self.items) or any(not self.done(c, p) for c, p in self.ptrs.items())
+
+        while pending() and guard < 5000:
+            guard += 1
+            self.tick()
+            if pos[0] >= len(self.items):
+                best = self.compose(pos, pos, True, pre)
+            else:
+                g0 = self.g_of(pos)
+                hi = min(self.total, g0 + 64)
+                while hi < self.total and self.text_height(pos, hi) < self.contentH - self.head_h:
+                    hi = min(self.total, g0 + (hi - g0) * 2)
+                lo, g = g0 + 1, 0
+                while lo <= hi:
+                    mid = (lo + hi) // 2
+                    if self.compose(pos, self.pos(mid), False, pre)["req_fit"]:
+                        g, lo = mid, mid + 1
+                    else:
+                        hi = mid - 1
+                # wrapping the translation makes the fit only roughly monotone: look a little further
+                if g:
+                    x, misses = g + 1, 0
+                    while x <= min(self.total, g + 60) and misses < 10:
+                        if self.compose(pos, self.pos(x), False, pre)["req_fit"]:
+                            g, misses = x, 0
+                        else:
+                            misses += 1
+                        x += 1
+                if not g or self.text_height(pos, g) < self.min_text_h:
+                    # a commentary longer than a page: keep the minimum of text, the rest runs on
+                    lo, hi2 = g0 + 1, min(self.total, max(g0 + 1, hi))
+                    m = hi2
+                    while lo <= hi2:
+                        mid = (lo + hi2) // 2
+                        if self.text_height(pos, mid) >= self.min_text_h:
+                            m, hi2 = mid, mid - 1
+                        else:
+                            lo = mid + 1
+                    g = max(g, m)
+                best = self.compose(pos, self.pos(g), False, pre)
+                g2 = self.full_line_end(best, g0, g)
+                end = self.pos(g2)
+                # don't leave a chapter heading alone at the bottom of a page
+                if end[1] == 0 and end[0] - 1 > pos[0] and self.items[end[0] - 1]["type"] == "h":
+                    g2 = self.off[end[0] - 1]
+                if g2 != g:
+                    alt = self.compose(pos, self.pos(g2), False, pre)
+                    # ending a line earlier must not open a hole at the bottom of the page
+                    if self.total_h(alt) >= self.total_h(best) - self.main_lh * 1.5 or not best["req_fit"]:
+                        best = alt
+            self.merge_tails(best)
+            last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
+            if last and next_plain:
+                budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM
+                lines, h, end, done = self.fill_plain(next_plain, self.plain_start, budget)
+                if lines:
+                    best["post"] = {"lines": lines, "h": h, "mt": self.sgap + 3 * PT_PER_MM}
+                    self.plain_start = end
+                    if not done:
+                        spare = self.contentH - self.total_h(best)
+                        best["post"]["h"] = self.stretch_lines(lines, spare, self.main_lh * 3)
+            self.justify(best)
+            first = self.items[min(pos[0], len(self.items) - 1)]
+            self.pages.append((best, first["chapter"], first["parasha"]))
+            pre = None
+            stuck = best["b"] == pos and all(best["ptrs"].get(c) == p for c, p in self.ptrs.items())
+            self.ptrs.update(best["ptrs"])
+            pos = best["b"]
+            if stuck:
+                self.warnings.append("חלק מהטקסט לא נכנס לעמוד (פסוק או פירוש ארוך מעמוד שלם). הקטינו את הגופן.")
+                break
+
+    def run_plain(self, lst, next_sec):
+        off, total = self.units(lst)
+        guard = 0
+        while (total if self.plain_start[0] >= len(lst) else off[self.plain_start[0]] + self.plain_start[1]) < total and guard < 5000:
+            guard += 1
+            self.tick()
+            budget = self.contentH - self.head_h
+            frm = self.plain_start
+            lines, h, end, done = self.fill_plain(lst, frm, budget)
+            if not lines:
+                break
+            self.plain_start = end
+            it = lst[min(frm[0], len(lst) - 1)]
+            spare = budget - h
+            if done and next_sec and not next_sec["noComm"] and spare > self.main_lh * 3 + self.min_text_h:
+                # the commented text continues under the end of the haftara on this page
+                self.pre = {"lines": lines, "h": h, "chapter": it["chapter"], "parasha": it["parasha"]}
+                break
+            if not done or next_sec:
+                h = self.stretch_lines(lines, spare, self.main_lh * 3)
+            r = {"a": frm, "b": end, "at_end": True, "pre": None, "ptrs": {}, "side": {}, "sections": [],
+                 "post": {"lines": lines, "h": h, "mt": 0.0}, "text": [], "text_h": 0.0, "top_h": 0.0}
+            self.pages.append((r, it["chapter"], it["parasha"]))
+
+    # ------------------------------------------------------------ to absolute coordinates
+
+    def finalize(self, r, chapter, parasha, number):
+        P = self.P
+        L, R, T = self.m, self.page_w - self.m, self.m
+        page = Page(self.page_w, self.page_h)
+        y = T
+        if P["header"]:
+            title = P["title"]
+            right = f"{title} · {parasha}" if parasha and title else (parasha or title)
+            center = chapter if chapter and chapter != parasha else ""
+            hs = self.head_style
+            page.head = (right, center, number, hs, y + 9.0 * 1.3 * 0.8)
+            ry = y + 9.0 * 1.3 + 1 * PT_PER_MM
+            page.rules.append((L, ry, R))
+            y += self.head_h
+        if r.get("pre"):
+            restack(r["pre"]["lines"])
+            page.frames.append(Frame(r["pre"]["lines"], R, y))
+            y += r["pre"]["h"] + self.sgap + 3 * PT_PER_MM
+        if r["text"] or r["side"]:
+            page.frames.append(Frame(r["text"], R, y))
+            off_r = off_l = 0.0
+            for c in self.sides:
+                s = r["side"].get(c)
+                if not s:
+                    continue
+                cw = self.side_width(c)
+                if s["col"]:
+                    lines = []
+                    if s["th"]:
+                        tst = self.style[c].scaled(1.05, bold=True)
+                        t = break_lines(words_of([(w, True) for w in self.comms[c]["name"].split()], tst), tst, s["th"], full_width(cw), 0.0, "center")
+                        lines += t[:1]
+                    yy = s["th"]
+                    for l in s["col"]:
+                        l.y = yy
+                        yy += l.h
+                        l.right, l.width = 0.0, cw
+                    lines += s["col"]
+                    if self.comms[c]["side"] == "right":
+                        x = R - off_r
+                        off_r += cw + self.gap
+                    else:
+                        x = L + off_l + cw
+                        off_l += cw + self.gap
+                    page.frames.append(Frame(lines, x, y))
+            band_y = y + max([r["text_h"]] + [s["h"] for s in r["side"].values()])
+            for c in self.sides:
+                s = r["side"].get(c)
+                if s and s["band"]:
+                    band_y += 1 * PT_PER_MM
+                    yy = 0.0
+                    for l in s["band"]:
+                        l.y = yy
+                        yy += l.h
+                    page.frames.append(Frame(s["band"], R, band_y))
+                    band_y += yy
+            y += r["top_h"]
+        if r["sections"]:
+            y += self.sgap
+            for n, s in enumerate(r["sections"]):
+                if n:
+                    y += 1.2 * PT_PER_MM
+                c = s["c"]
+                y0 = y + self.note_pad()
+                th = self.note_title_h(c)
+                if th:
+                    tst = self.style[c].scaled(1.1, bold=True)
+                    t = break_lines(words_of([(w, True) for w in self.comms[c]["name"].split()], tst), tst, th, full_width(self.W), 0.0, "center")
+                    page.frames.append(Frame(t[:1], R, y0))
+                cols = self.comms[c]["cols"]
+                cw = self.note_col_w(c)
+                rows = math.ceil(len(s["lines"]) / cols)
+                for k in range(cols):
+                    chunk = s["lines"][k * rows:(k + 1) * rows]
+                    for j, l in enumerate(chunk):
+                        l.y = j * s["nlh"]
+                        l.h = s["nlh"]
+                    if chunk:
+                        page.frames.append(Frame(chunk, R - k * (cw + self.gap), y0 + th))
+                y += s["h"]
+        if r.get("post"):
+            y += r["post"]["mt"]
+            restack(r["post"]["lines"])
+            page.frames.append(Frame(r["post"]["lines"], R, y))
+            y += r["post"]["h"]
+        page.overfull = y - T > self.contentH + 1
+        return page
+
+
+def layout_project(project, progress=None):
+    """Lay out a whole project. Returns (pages, warnings)."""
+    eng = Engine(project, progress)
+    pages = eng.run()
+    return pages, eng.warnings
