@@ -99,7 +99,7 @@
   .tcol p, .scol p { margin: 0; }
   .tcol, .scol, .nsec { text-align: justify; overflow-wrap: break-word; }
   .tcol .hrow { text-align: center; font-weight: 700; }
-  .tcol .vline + .vline { margin-top: .3mm; }
+  .tcol .vline.jlast { text-align-last: justify; }
   .tcol .under { margin-top: .2mm; text-align: justify; }
   .lbl { font-weight: 700; }
   .scol.sep-right { border-right: .4pt solid #888; padding-right: 1.4mm; }
@@ -335,12 +335,13 @@ function entryHtml(raw) {
   const m = s.match(/^(.{1,90}?)\s+[-–—]\s+([\s\S]*)$/);
   return m ? `<b>${m[1]}</b> ${m[2]}` : s;
 }
-function splitWords(html, n) {
+const openB = (s) => (s.match(/<b>/g) || []).length - (s.match(/<\/b>/g) || []).length;
+function sliceWords(html, from, to) {
   const words = html.split(" ");
-  let a = words.slice(0, n).join(" "), b = words.slice(n).join(" ");
-  const open = (a.match(/<b>/g) || []).length - (a.match(/<\/b>/g) || []).length;
-  if (open > 0) { a += "</b>"; b = "<b>" + b; }
-  return [a, b];
+  let mid = words.slice(from, to).join(" ");
+  if (openB(words.slice(0, from).join(" ")) > 0) mid = "<b>" + mid;
+  if (openB(mid) > 0) mid += "</b>";
+  return mid;
 }
 
 /* ---------- parsing ---------- */
@@ -360,7 +361,8 @@ function parseMain() {
     let label = heb(inChap), text = t;
     const m = t.match(/^\[([^\]]{1,12})\]\s*(.*)$/);
     if (m) { label = m[1]; text = m[2]; }
-    items.push({ type: "v", idx: verses++, label, html: bold(esc(text)), plain: text, chapter });
+    const html = bold(esc(text)).replace(/\s+/g, " ");
+    items.push({ type: "v", idx: verses++, label, html, words: html.split(" "), plain: text, chapter });
   });
   return { items, count: verses };
 }
@@ -514,17 +516,21 @@ function renderCheckTable() {
 
 /* ---------- layout engine (Mikraot Gedolot method) ----------
    Fonts never change. Each page gets: the text (top) with the side translations
-   beside it, cut to the height of the text; under it every commentary as a
-   full-width block of columns. A page takes as many verses as possible, as long
-   as the translation and each commentary of the last verse still START on the
-   page; whatever does not fit is carried, in order, to the top of the next page.
-   Until the page has `minLines` lines of text, verses are added regardless. */
+   beside it, filled to exactly the height of the text; under it every commentary
+   as a full-width block of columns. A page takes as much text as possible (down to
+   single words, so a verse may continue on the next page), as long as each
+   commentary of the last complete verse still STARTS on the page; whatever does not
+   fit continues, in order, at the top of the next page. Until the page has
+   `minLines` lines of text, text is added regardless. Finally the last commentary
+   is set into columns that reach the bottom of the page, so no page has a hole. */
 let layoutRun = 0;
 
 async function layout() {
   const run = ++layoutRun;
   const fonts = new Set([S.mainFont, ...S.comms.map((c) => c.font)]);
-  try { await Promise.all([...fonts].map((f) => document.fonts.load(`16px "${f}"`, "אבג"))); } catch (e) { /* fall back */ }
+  try {
+    await Promise.all([...fonts].flatMap((f) => [document.fonts.load(`16px "${f}"`, "אבג"), document.fonts.load(`bold 16px "${f}"`, "אבג")]));
+  } catch (e) { /* fall back */ }
   if (run !== layoutRun) return;
 
   const [Wmm, Hmm] = SIZES[S.pageSize] || SIZES.A4;
@@ -538,25 +544,10 @@ async function layout() {
   const left = sides.filter((c) => c.side !== "right");
   const unders = S.comms.filter((c) => c.place === "under");
   const bottoms = S.comms.filter((c) => c.place === "bottom");
-  const flowing = [...sides, ...bottoms];
   const parsed = new Map(S.comms.map((c) => [c, parseComm(c, count)]));
   S.comms.forEach((c) => { const p = parsed.get(c); if (p.problem) warnings.push(`${c.name}: ${p.problem}`); });
 
   const verseLabels = items.filter((it) => it.type === "v").map((it) => it.label);
-  // per flowing commentary: entries indexed by verse
-  const entriesOf = new Map();
-  sides.forEach((c) => {
-    entriesOf.set(c, parsed.get(c).entries.map((list, v) => {
-      if (!list.length) return [];
-      return [{ v, lbl: `<span class="slbl">${esc(labelOf(v))}</span> `, html: list.map(entryHtml).join(" "), cont: false }];
-    }));
-  });
-  bottoms.forEach((c) => {
-    entriesOf.set(c, parsed.get(c).entries.map((list, v) =>
-      list.map((raw) => ({ v, lbl: `<span class="nlbl">(${esc(labelOf(v))})</span> `, html: entryHtml(raw), cont: false }))));
-  });
-  function labelOf(v) { return verseLabels[v]; }
-
   const cols = [...right, null, ...left];
   const mainPx = S.mainSize * PT;
   const minTextH = S.minLines * mainPx * S.lineHeight - 1;
@@ -568,26 +559,34 @@ async function layout() {
   const measure = $("measure");
   measure.innerHTML = "";
 
-  function renderText(its) {
+  // A text range is a list of segments {it, from, to}: whole headings, and verses
+  // (or the part of a verse, in words) that fall on the page.
+  function renderSegs(segs, cutAtEnd) {
     let h = "", para = [];
-    const flush = () => { if (para.length) { h += `<p class="vline">${para.join(" ")}</p>`; para = []; } };
-    its.forEach((it) => {
+    const flush = (last) => {
+      if (para.length) { h += `<p class="vline${last && cutAtEnd ? " jlast" : ""}">${para.join(" ")}</p>`; para = []; }
+    };
+    segs.forEach((s) => {
+      const it = s.it;
       if (it.type === "h") {
         flush();
         h += `<div class="hrow" style="font-size:${(mainPx * 1.2).toFixed(2)}px">${esc(it.text)}</div>`;
         return;
       }
-      const v = (S.numbers ? `<span class="lbl">${esc(it.label)}</span> ` : "") + it.html;
-      const und = unders.map((u) => {
+      const whole = s.from === 0 && s.to === it.words.length;
+      const v = (S.numbers && s.from === 0 ? `<span class="lbl">${esc(it.label)}</span> ` : "") +
+        (whole ? it.html : sliceWords(it.html, s.from, s.to));
+      const und = s.to === it.words.length ? unders.map((u) => {
         const e = parsed.get(u).entries[it.idx];
         return e.length ? `<div class="under" style="${fontCss(u.font, u.size, noteLh)}">${e.map(entryHtml).join(" ")}</div>` : "";
-      }).join("");
-      if (S.verseNewLine || und) { flush(); h += `<p class="vline">${v}</p>${und}`; }
+      }).join("") : "";
+      if (S.verseNewLine || und) { para.push(v); flush(); h += und; }
       else para.push(v);
     });
-    flush();
+    flush(true);
     return h;
   }
+  const renderText = (its) => renderSegs(its.map((it) => ({ it, from: 0, to: it.type === "v" ? it.words.length : 0 })), false);
 
   // Auto width: measure the whole text and each translation as one running column
   // and pick the width at which both come out the same height, so they run out
@@ -615,7 +614,7 @@ async function layout() {
       const w = (lo + hi) / 2;
       const hMain = heightAt(mainHtml, mainCss, usable * (100 - others - w) / 100);
       const hSide = heightAt(html, css, usable * w / 100 - 1.4 * PX_MM);
-      if (hSide > hMain * 0.95) lo = w; else hi = w;
+      if (hSide > hMain * 0.97) lo = w; else hi = w;
     }
     c._w = Math.round(hi * 10) / 10;
   });
@@ -631,7 +630,8 @@ async function layout() {
     const inner = el("div", "pinner");
     let head = null;
     if (S.header) {
-      head = el("div", "phead", `<span class="pt"></span><span class="pc"></span><span class="pn"></span>`);
+      // filled in after pagination; a placeholder keeps its height right while measuring
+      head = el("div", "phead", `<span class="pt">${esc(S.title) || "&nbsp;"}</span><span class="pc">&nbsp;</span><span class="pn">&nbsp;</span>`);
       head.style.fontFamily = `"${S.mainFont}",serif`;
       inner.append(head);
     }
@@ -667,7 +667,8 @@ async function layout() {
   }
 
   // Put as many entries as fit (fits() is checked after each trial render), splitting the
-  // first one that doesn't by words. Returns the leftover entries and which verses started.
+  // first one that doesn't by words. Returns how many entries went in whole (m) and how
+  // many words of the next one (w).
   function fill(target, prefix, list, fits, force) {
     const render = (arr, part) => {
       target.innerHTML = prefix + arr.map((e) => (e.cont ? "" : e.lbl) + e.html).join(" ") +
@@ -676,94 +677,243 @@ async function layout() {
     const n = list.length;
     let m = n;
     render(list);
-    if (!fits()) {
-      let lo = 0, hi = n - 1;
-      m = 0;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        render(list.slice(0, mid));
-        if (fits()) { m = mid; lo = mid + 1; } else hi = mid - 1;
-      }
-    }
-    const started = new Set(list.slice(0, m).filter((e) => !e.cont).map((e) => e.v));
-    if (m === n) { render(list); return { rest: [], started, any: n > 0 }; }
-    const e = list[m];
-    const words = e.html.split(" ").length;
-    let lo = 1, hi = words - 1, w = 0;
+    if (fits()) return { m: n, w: 0 };
+    let lo = 0, hi = n - 1;
+    m = 0;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      render(list.slice(0, m), Object.assign({}, e, { html: splitWords(e.html, mid)[0] }));
+      render(list.slice(0, mid));
+      if (fits()) { m = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    const e = list[m];
+    const words = e.html.split(" ").length;
+    let w = 0;
+    lo = 1; hi = words - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      render(list.slice(0, m), Object.assign({}, e, { html: sliceWords(e.html, 0, mid) }));
       if (fits()) { w = mid; lo = mid + 1; } else hi = mid - 1;
     }
-    const minW = force && m === 0 ? 1 : 3;
     if (force && m === 0 && w < 1) w = 1;
-    if (w >= minW && w < words) {
-      const [a, b] = splitWords(e.html, w);
-      render(list.slice(0, m), Object.assign({}, e, { html: a }));
-      if (!e.cont) started.add(e.v);
-      return { rest: [Object.assign({}, e, { html: b, cont: true }), ...list.slice(m + 1)], started, any: true };
+    const minW = force && m === 0 ? 1 : (e.cont ? 1 : 3);
+    if (w >= minW) {
+      render(list.slice(0, m), Object.assign({}, e, { html: sliceWords(e.html, 0, w) }));
+      return { m, w };
     }
     render(list.slice(0, m));
-    return { rest: list.slice(m), started, any: m > 0 };
+    return { m, w: 0 };
   }
 
-  let carry = new Map(flowing.map((c) => [c, []]));
+  // Every translation / commentary is one stream of entries in verse order; a pointer
+  // {e, w} says how far it has been set (entry index, words into that entry).
+  const streams = new Map();
+  const firstIdx = new Map();
+  [...sides, ...bottoms].forEach((c) => {
+    const list = [];
+    const first = new Map();
+    parsed.get(c).entries.forEach((raws, v) => {
+      if (!raws.length) return;
+      first.set(v, list.length);
+      if (c.place === "side") {
+        list.push({ v, lbl: `<span class="slbl">${esc(verseLabels[v])}</span> `, html: raws.map(entryHtml).join(" ") });
+      } else {
+        raws.forEach((raw) => list.push({ v, lbl: `<span class="nlbl">(${esc(verseLabels[v])})</span> `, html: entryHtml(raw) }));
+      }
+    });
+    streams.set(c, list);
+    firstIdx.set(c, first);
+  });
+  function listFrom(c, ptr, maxV, limit) {
+    const st = streams.get(c), out = [];
+    for (let i = ptr.e; i < st.length && out.length < limit; i++) {
+      const e = st[i];
+      if (maxV != null && e.v > maxV) break;
+      if (i === ptr.e && ptr.w) out.push(Object.assign({}, e, { html: sliceWords(e.html, ptr.w, Infinity), cont: true }));
+      else out.push(Object.assign({}, e, { cont: false }));
+    }
+    return out;
+  }
+  function advance(ptr, f, n) {
+    if (f.m >= n) return { e: ptr.e + n, w: 0 };
+    const base = f.m === 0 ? ptr.w : 0;
+    return { e: ptr.e + f.m, w: base + f.w };
+  }
+  function started(c, v, ptr) {
+    const idx = firstIdx.get(c).get(v);
+    if (idx === undefined) return true;
+    return ptr.e > idx || (ptr.e === idx && ptr.w >= 3);
+  }
+  const done = (c, ptr) => ptr.e >= streams.get(c).length;
 
-  function compose(pos, k, force) {
+  function segments(a, b) {
+    const segs = [];
+    const lastI = b.w > 0 ? b.i : b.i - 1;
+    for (let i = a.i; i <= lastI && i < items.length; i++) {
+      const it = items[i];
+      const n = it.type === "v" ? it.words.length : 0;
+      segs.push({ it, from: i === a.i ? a.w : 0, to: i === b.i ? b.w : n });
+    }
+    return segs;
+  }
+
+  let ptrs = new Map([...sides, ...bottoms].map((c) => [c, { e: 0, w: 0 }]));
+
+  function compose(a, b, force) {
     const pg = makePage();
-    const its = items.slice(pos, pos + k);
-    const verses = its.filter((it) => it.type === "v");
-    pg.text.innerHTML = renderText(its);
+    const segs = segments(a, b);
+    pg.text.innerHTML = renderSegs(segs, b.w > 0);
+    if (!segs.length) pg.top.hidden = !sides.some((c) => !done(c, ptrs.get(c)));
     const textH = pg.text.offsetHeight;
-    const res = { pg, k, textH, ok: true, rest: new Map() };
+    const atEnd = b.i >= items.length;
+    const res = { pg, a, b, textH, atEnd, ok: true, topFits: true, bottomFail: false, ptrs: new Map(), info: new Map() };
     const fitsPage = () => pg.inner.offsetHeight <= contentH + 0.5;
+    const versesHere = segs.filter((s) => s.it.type === "v");
+    const complete = versesHere.filter((s) => s.from === 0 && s.to === s.it.words.length).map((s) => s.it.idx);
+    // commentary may be set for every verse whose text has appeared, here or earlier
+    let maxV = -1;
+    for (let i = Math.min(b.w > 0 ? b.i : b.i - 1, items.length - 1); i >= 0; i--) {
+      if (items[i].type === "v") { maxV = items[i].idx; break; }
+    }
 
     sides.forEach((c) => {
       const col = pg.sideCols.get(c);
+      const ptr = ptrs.get(c);
       const title = S.colTitles ? `<div class="ctitle">${esc(c.name)}</div>` : "";
-      const list = [...carry.get(c), ...verses.flatMap((v) => entriesOf.get(c)[v.idx])];
-      // on the last page (or a page of leftovers only) the column may run past the text
-      const limit = k && pos + k < items.length ? Math.max(textH, 1) : contentH;
+      // the column is filled to the height of the text, running ahead into the next
+      // verses' translation if needed so it never ends short
+      const list = listFrom(c, ptr, null, atEnd ? Infinity : 40);
+      const limit = !atEnd && textH ? textH : contentH;
       const f = fill(col, title, list, () => col.offsetHeight <= limit + 0.5 && fitsPage(), force);
-      res.rest.set(c, f.rest);
-      // the translation may trail the text by at most one verse
-      const withT = verses.filter((v) => entriesOf.get(c)[v.idx].length);
-      const need = withT.length > 1 ? withT[withT.length - 2] : null;
-      if (need && !f.started.has(need.idx)) res.ok = false;
+      const np = advance(ptr, f, list.length);
+      res.ptrs.set(c, np);
+      res.info.set(c, { full: f.m < list.length });
+      // how many verses of text on this page still wait for their translation
+      res.lag = Math.max(res.lag || 0, complete.filter((v) => !started(c, v, np)).length);
     });
-    res.topFits = fitsPage();
+    res.topFits = fitsPage(); 
 
     bottoms.forEach((c) => {
       const sec = pg.secs.get(c);
-      const list = [...carry.get(c), ...verses.flatMap((v) => entriesOf.get(c)[v.idx])];
-      if (!list.length) { res.rest.set(c, []); return; }
+      const ptr = ptrs.get(c);
+      const list = listFrom(c, ptr, maxV, Infinity);
+      res.ptrs.set(c, ptr);
+      if (!list.length) return;
       const firstShown = pg.notes.hidden;
       sec.hidden = false;
       pg.notes.hidden = false;
-      const f = fill(sec, `<span class="nname">${esc(c.name)}</span> `, list, fitsPage, force && firstShown);
-      if (!f.any) sec.hidden = true;
+      const prefix = `<span class="nname">${esc(c.name)}</span> `;
+      const f = fill(sec, prefix, list, fitsPage, force && firstShown);
+      if (!f.m && !f.w) sec.hidden = true;
       pg.notes.hidden = ![...pg.secs.values()].some((s) => !s.hidden);
-      res.rest.set(c, f.rest);
-      const last = verses.filter((v) => entriesOf.get(c)[v.idx].length).pop();
-      if (last && !f.started.has(last.idx)) { res.ok = false; res.bottomFail = true; }
+      res.ptrs.set(c, advance(ptr, f, list.length));
+      res.info.set(c, { list, ptr, prefix, full: f.m < list.length });
+      const need = complete.filter((v) => firstIdx.get(c).has(v)).pop();
+      if (need != null && !started(c, need, res.ptrs.get(c))) { res.ok = false; res.bottomFail = true; }
     });
     if (!fitsPage()) res.ok = false;
     return res;
   }
 
+  // Close the remaining gaps on a finished page: the translation column is stretched
+  // to end exactly with the text, and the last commentary is set into columns of a
+  // fixed height that reach the bottom of the page.
+  function justify(res) {
+    const pg = res.pg;
+    const fitsPage = () => pg.inner.offsetHeight <= contentH + 0.5;
+    const textEnds = res.atEnd;
+    if (pg.notes.hidden && !textEnds && res.textH) {
+      const lh = mainPx * S.lineHeight;
+      const lines = Math.round(res.textH / lh);
+      const spare = contentH - pg.inner.offsetHeight;
+      if (lines > 0 && spare > 0 && spare < lh * 1.5) {
+        pg.text.style.lineHeight = ((res.textH + spare) / lines).toFixed(3) + "px";
+        res.textH = pg.text.offsetHeight;
+      }
+    }
+    sides.forEach((c) => {
+      const col = pg.sideCols.get(c);
+      if (!res.info.get(c) || !res.info.get(c).full || !res.textH || textEnds) return;
+      const lh = c.size * PT * S.lineHeight;
+      const lines = Math.round(col.offsetHeight / lh);
+      if (lines > 0 && res.textH > col.offsetHeight) {
+        col.style.lineHeight = (res.textH / lines).toFixed(3) + "px";
+        for (let i = 0; i < 40 && col.offsetHeight > res.textH + 0.5; i++) col.style.lineHeight = (parseFloat(col.style.lineHeight) - 0.05) + "px";
+      }
+      col.style.textAlignLast = "justify";
+    });
+    if (pg.notes.hidden) return;
+    const shown = bottoms.filter((c) => !pg.secs.get(c).hidden);
+    const c = shown[shown.length - 1];
+    const inf = res.info.get(c);
+    const sec = pg.secs.get(c);
+    const spare = contentH - pg.inner.offsetHeight;
+    if (!inf || !inf.full || spare < -0.5) {
+      if (spare > 0) pg.notes.style.marginTop = `calc(${gap} + ${spare.toFixed(2)}px)`;
+      return;
+    }
+    const pad = parseFloat(getComputedStyle(sec).paddingTop) || 0;
+    const boxH = sec.offsetHeight + spare;
+    const lhPx = c.size * PT * noteLh;
+    const lines = Math.max(1, Math.floor((boxH - pad) / lhPx));
+    sec.style.height = boxH + "px";
+    sec.style.columnFill = "auto";
+    sec.style.lineHeight = ((boxH - pad) / lines).toFixed(3) + "px";
+    const f = fill(sec, inf.prefix, inf.list, () => sec.scrollWidth <= sec.clientWidth + 1, false);
+    res.ptrs.set(c, advance(inf.ptr, f, inf.list.length));
+    if (f.m < inf.list.length) sec.style.textAlignLast = "justify";
+  }
+
+  // If the page's last line of text is less than 80% full and lies inside one verse,
+  // returns the position where that line starts (so the page can end just before it).
+  function lastLineStart(res) {
+    const saved = res.pg.text.innerHTML;
+    const t = findLastLineStart(res);
+    res.pg.text.innerHTML = saved;
+    return t;
+  }
+  function findLastLineStart(res) {
+    const p = res.pg.text.querySelector("p.vline:last-of-type");
+    if (!p || p !== res.pg.text.lastElementChild) return null;
+    p.classList.remove("jlast");
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    const rects = [...r.getClientRects()];
+    const lastTop = Math.max(...rects.map((x) => x.top));
+    const line = rects.filter((x) => Math.abs(x.top - lastTop) < 2);
+    const used = Math.max(...line.map((x) => x.right)) - Math.min(...line.map((x) => x.left));
+    if (used >= p.clientWidth * 0.8) return null;
+    const segs = segments(res.a, res.b);
+    const seg = segs[segs.length - 1];
+    if (!seg || seg.it.type !== "v") return null;
+    const vi = items.indexOf(seg.it);
+    const H = res.textH;
+    const heightTo = (w) => {
+      res.pg.text.innerHTML = renderSegs(segments(res.a, w >= seg.it.words.length ? { i: vi + 1, w: 0 } : { i: vi, w }), false);
+      return res.pg.text.offsetHeight;
+    };
+    if (heightTo(seg.from) >= H) return null; // the whole last line is not from this verse
+    let lo = seg.from, hi = seg.to; // largest w that still ends on the line before
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (heightTo(mid) < H) lo = mid; else hi = mid;
+    }
+    if (lo === seg.from && seg.from === 0) return segs.length > 1 ? { i: vi, w: 0 } : null;
+    return lo > (vi === res.a.i ? res.a.w : 0) ? { i: vi, w: lo } : null;
+  }
+
   const pages = [];
-  let pos = 0, guard = 0, lagPages = 0;
-  const anyCarry = () => [...carry.values()].some((l) => l.length);
-  while ((pos < items.length || anyCarry()) && guard++ < 5000) {
+  let pos = { i: 0, w: 0 }, guard = 0, lagPages = 0;
+  const pending = () => pos.i < items.length || [...ptrs.entries()].some(([c, p]) => !done(c, p));
+  while (pending() && guard++ < 5000) {
     if (run !== layoutRun) return;
     let best = null;
-    const remaining = items.length - pos;
-    if (!remaining) best = compose(pos, 0, true);
+    const remaining = items.length - pos.i;
+    if (!remaining) best = compose(pos, pos, true);
     // Whether the last verse's translation still starts on the page goes up and down as
     // verses are added, so keep trying until the text itself or the commentaries run out
     // of room, and keep the largest count that works.
     for (let k = 1; k <= remaining; k++) {
-      const r = compose(pos, k, false);
+      const r = compose(pos, { i: pos.i + k, w: 0 }, false);
       const short = !best || best.textH < minTextH;
       if (!best || r.ok || short) {
         if (best) best.pg.page.remove();
@@ -771,29 +921,48 @@ async function layout() {
       } else r.pg.page.remove();
       if (!r.topFits || r.bottomFail) break;
     }
+    // then fill the rest of the page with the beginning of the next verse, word by word
+    if (remaining) {
+      const firstTooBig = best.b.i === pos.i + 1 && !best.topFits;
+      const vi = firstTooBig ? pos.i : best.b.i;
+      const it = items[vi];
+      if (it && it.type === "v" && (best.ok || firstTooBig)) {
+        let lo = vi === pos.i ? pos.w + 1 : 1, hi = it.words.length - 1, got = null;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          const r = compose(pos, { i: vi, w: mid }, false);
+          if (firstTooBig ? r.topFits : r.ok) { if (got) got.pg.page.remove(); got = r; lo = mid + 1; }
+          else { r.pg.page.remove(); hi = mid - 1; }
+        }
+        if (got) { best.pg.page.remove(); best = got; }
+      }
+    }
+    // a short last line of text leaves a hole: end the page at the end of the line before it
+    if (!best.atEnd && best.textH > minTextH) {
+      const t = lastLineStart(best);
+      if (t && (t.i > pos.i || (t.i === pos.i && t.w > pos.w))) {
+        best.pg.page.remove();
+        best = compose(pos, t, false);
+      }
+    }
     // don't leave a chapter heading alone at the bottom of a page
-    if (best.k > 1 && items[pos + best.k - 1].type === "h") {
+    if (best.b.w === 0 && best.b.i - pos.i > 1 && items[best.b.i - 1].type === "h") {
       best.pg.page.remove();
-      best = compose(pos, best.k - 1, false);
+      best = compose(pos, { i: best.b.i - 1, w: 0 }, false);
     }
-    if (best.k === 1 && !best.ok && best.textH + 1 > contentH) {
-      const it = items[pos];
-      warnings.push(`פסוק ${it.label || ""} (${it.chapter}) ארוך מעמוד שלם — חלק ממנו נחתך.`);
-      best.pg.page.classList.add("overfull");
-    }
-    const first = items[pos] || items[items.length - 1];
+    justify(best);
+    const first = items[pos.i] || items[items.length - 1];
     best.pg.chapter = first ? first.chapter : "";
     pages.push(best.pg);
-    carry = best.rest;
-    if (sides.some((c) => (carry.get(c) || []).length > 1)) lagPages++;
-    flowing.forEach((c) => { if (!carry.has(c)) carry.set(c, []); });
-    pos += best.k;
+    best.ptrs.forEach((p, c) => ptrs.set(c, p));
+    if (best.lag > 2) lagPages++;
+    pos = best.b;
     $("pv-info").textContent = `מעמד… עמוד ${pages.length}`;
     if (pages.length % 4 === 0) await new Promise((r) => setTimeout(r));
   }
 
-  if (lagPages > Math.max(2, pages.length * 0.3)) {
-    warnings.push("התרגום שבטור הצמוד ארוך מהטקסט בהרבה עמודים ומעכב אותו — כדאי להגדיל את רוחב הטור או להקטין את האות שלו.");
+  if (lagPages) {
+    warnings.push(`בעמודים ${lagPages} התרגום שבטור הצמוד מפגר יותר משני פסוקים אחרי הטקסט. כדאי להגדיל את רוחב הטור (או לסמן "רוחב אוטומטי") או להקטין את האות שלו.`);
   }
   pages.forEach((p, i) => {
     if (!p.head) return;
