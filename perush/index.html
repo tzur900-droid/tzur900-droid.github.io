@@ -105,10 +105,10 @@
   .lbl { font-weight: 700; }
 
   .slbl { font-weight: 700; }
-  .ctitle { font-weight: 700; text-align: center; font-size: .85em; margin-bottom: .8mm; }
+  .ctitle { font-weight: 700; text-align: center; text-align-last: center; font-size: 1.05em; margin-bottom: .5mm; }
   .nsec + .nsec { margin-top: 1.2mm; }
   .tcol .hrow.haft { margin-top: 1mm; margin-bottom: .6mm; }
-  .nname { font-weight: 700; font-size: 1.15em; }
+  .ntitle { column-span: all; text-align: center; text-align-last: center; font-weight: 700; font-size: 1.1em; margin-bottom: .5mm; }
   .nlbl { font-weight: 700; }
   .nsec b, .scol b, .tcol b { font-weight: 700; }
 
@@ -150,6 +150,7 @@
     </div>
     <p class="hint">
       שורה שמתחילה ב־<code>#</code> היא כותרת (למשל <code># פרק א</code>), והמספור מתחיל מחדש אחריה.
+      כותרת שמתחילה ב"פרשת" (<code># פרשת נח</code>) נכתבת בראש כל עמוד עד הפרשה הבאה.
       שורה שמתחילה ב־<code>##</code> פותחת קטע <b>בלי פירוש</b>, כמו הפטרה (<code>## הפטרת בראשית</code>); הוא מתחיל מתחת לסוף הפרשה. <code>#</code> רגיל אחריו חוזר לטקסט עם פירושים.
       אפשר לתת סימון משלך: <code>[יב] טקסט</code>. מודגש: <code>**מילים**</code>.
     </p>
@@ -186,10 +187,11 @@
       <label><span>רווח בין טורים (מ"מ)</span><input type="number" id="colGap" min="0" max="15" step="0.5"></label>
       <label><span>רווח בין חלקי העמוד (מ"מ)</span><input type="number" id="sectionGap" min="0" max="10" step="0.5"></label>
       <label><span>מינימום שורות טקסט בעמוד</span><input type="number" id="minLines" min="1" max="40" step="1"></label>
+      <label><span>מספר העמוד הראשון</span><input type="number" id="firstPage" min="1" max="2000" step="1"></label>
       <label class="check"><input type="checkbox" id="verseNewLine"> <span>כל פסוק בשורה חדשה</span></label>
       <label class="check"><input type="checkbox" id="numbers"> <span>אותיות פסוקים</span></label>
       <label class="check"><input type="checkbox" id="header"> <span>כותרת עליונה ומספר עמוד</span></label>
-      <label class="check"><input type="checkbox" id="colTitles"> <span>שם מעל הטור הצמוד</span></label>
+      <label class="check"><input type="checkbox" id="names"> <span>שם המתרגם / המפרש מעל כל טור</span></label>
     </div>
     <div class="addbtns">
       <button id="btn-compact">חיסכון מקסימלי במקום</button>
@@ -233,6 +235,7 @@ const PLACE_NAMES = { side: "טור צמוד לטקסט", bottom: "מתחת לט
 const EXAMPLE = {
   title: "בראשית",
   main: [
+    "# פרשת בראשית",
     "# פרק א",
     "בראשית ברא אלהים את השמים ואת הארץ.",
     "והארץ היתה תהו ובהו וחשך על פני תהום ורוח אלהים מרחפת על פני המים.",
@@ -274,7 +277,7 @@ const DEFAULTS = {
   comms: [],
   pageSize: "A4", margin: 14, mainFont: "Frank Ruhl Libre", mainSize: 16, lineHeight: 1.45,
   colGap: 5, sectionGap: 2, minLines: 4,
-  verseNewLine: false, numbers: true, header: true, colTitles: false,
+  verseNewLine: false, numbers: true, header: true, names: true, firstPage: 1,
 };
 
 const COMPACT = { margin: 8, lineHeight: 1.3, colGap: 3, sectionGap: 1, minLines: 3 };
@@ -351,7 +354,7 @@ function sliceWords(html, from, to) {
 /* ---------- parsing ---------- */
 function parseMain() {
   const items = [];
-  let verses = 0, inChap = 0, chapter = "", noComm = false;
+  let verses = 0, inChap = 0, chapter = "", noComm = false, parasha = "";
   S.main.replace(/\r/g, "").split("\n").forEach((line) => {
     const t = line.trim();
     if (!t) return;
@@ -359,8 +362,9 @@ function parseMain() {
       // "## ..." opens a section with no commentary (a haftara); "# ..." returns to the commented text
       noComm = t.startsWith("##");
       chapter = t.replace(/^#+\s*/, "");
+      if (!noComm && /^פרש(ת|ה)\s/.test(chapter)) parasha = chapter;
       inChap = 0;
-      items.push({ type: "h", text: chapter, chapter, noComm });
+      items.push({ type: "h", text: chapter, chapter, parasha, noComm });
       return;
     }
     inChap++;
@@ -368,7 +372,7 @@ function parseMain() {
     const m = t.match(/^\[([^\]]{1,12})\]\s*(.*)$/);
     if (m) { label = m[1]; text = m[2]; }
     const html = bold(esc(text)).replace(/\s+/g, " ");
-    items.push({ type: "v", idx: noComm ? -1 : verses++, label, html, words: html.split(" "), plain: text, chapter, noComm });
+    items.push({ type: "v", idx: noComm ? -1 : verses++, label, html, words: html.split(" "), plain: text, chapter, parasha, noComm });
   });
   return { items, count: verses };
 }
@@ -407,8 +411,8 @@ function parseComm(c, n) {
 }
 
 /* ---------- editor UI ---------- */
-const SETTINGS = ["pageSize", "margin", "mainFont", "mainSize", "lineHeight", "colGap", "sectionGap", "minLines"];
-const CHECKS = ["verseNewLine", "numbers", "header", "colTitles"];
+const SETTINGS = ["pageSize", "margin", "mainFont", "mainSize", "lineHeight", "colGap", "sectionGap", "minLines", "firstPage"];
+const CHECKS = ["verseNewLine", "numbers", "header", "names"];
 
 function fontOptions(sel) {
   return FONTS.map(([v, n]) => `<option value="${v}"${v === sel ? " selected" : ""}>${n}</option>`).join("");
@@ -817,7 +821,7 @@ async function layout() {
     // on the page at all moves to the next page.
     const sidePlans = sides.map((c) => {
       const ptr = ptrs.get(c);
-      const title = S.colTitles ? `<div class="ctitle">${esc(c.name)}</div>` : "";
+      const title = S.names ? `<div class="ctitle">${esc(c.name)}</div>` : "";
       // a verse's translation is set on the page where its text is complete
       const list = listFrom(c, ptr, atEnd ? maxV : lastFull, Infinity);
       const col = pg.sideCols.get(c);
@@ -868,7 +872,7 @@ async function layout() {
 
     const plans = bottoms.map((c) => ({
       c, ptr: ptrs.get(c), sec: pg.secs.get(c),
-      prefix: `<span class="nname">${esc(c.name)}</span> `,
+      prefix: S.names ? `<div class="ntitle">${esc(c.name)}</div>` : "",
       req: listFrom(c, ptrs.get(c), lastFull, Infinity),
       all: listFrom(c, ptrs.get(c), maxV, Infinity),
     }));
@@ -1185,6 +1189,7 @@ async function layout() {
       justify(best);
       const first = items[pos.i] || items[items.length - 1];
       best.pg.chapter = first ? first.chapter : "";
+      best.pg.parasha = first ? first.parasha : "";
       pages.push(best.pg);
       curPre = null;
       best.ptrs.forEach((p, c) => ptrs.set(c, p));
@@ -1210,6 +1215,7 @@ async function layout() {
       plainStart = r.end;
       const it = sec.items[Math.min(from.i, sec.items.length - 1)];
       pg.chapter = it.chapter;
+      pg.parasha = it.parasha;
       if (r.done && nextComm && contentH - pg.inner.offsetHeight > mainPx * S.lineHeight * 3 + minTextH) {
         // the commented text continues under the end of the haftara on this page
         preHtml = pg.post.innerHTML;
@@ -1238,9 +1244,9 @@ async function layout() {
 
   pages.forEach((p, i) => {
     if (!p.head) return;
-    p.head.querySelector(".pt").textContent = S.title;
-    p.head.querySelector(".pc").textContent = p.chapter || "";
-    p.head.querySelector(".pn").textContent = heb(i + 1);
+    p.head.querySelector(".pt").textContent = p.parasha ? (S.title ? `${S.title} · ${p.parasha}` : p.parasha) : S.title;
+    p.head.querySelector(".pc").textContent = p.chapter && p.chapter !== p.parasha ? p.chapter : "";
+    p.head.querySelector(".pn").textContent = heb((+S.firstPage || 1) + i);
   });
 
   const out = $("pages");
