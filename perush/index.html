@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>עימוד פירושים</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=David+Libre:wght@400;700&family=Frank+Ruhl+Libre:wght@400;700&family=Heebo:wght@400;700&family=Noto+Rashi+Hebrew:wght@400;700&family=Noto+Serif+Hebrew:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3f1ec;
+    --panel: #ffffff;
+    --ink: #1d1d1f;
+    --muted: #6b6b70;
+    --line: #dcd8cf;
+    --accent: #0d3b66;
+    --warn: #b45309;
+    --ok: #15803d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Heebo", system-ui, sans-serif;
+    font-size: 15px;
+  }
+  header.top {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 16px; background: var(--accent); color: #fff;
+    position: sticky; top: 0; z-index: 5;
+  }
+  header.top h1 { font-size: 18px; margin: 0 0 0 auto; }
+  header.top button, header.top label.btn {
+    background: rgba(255,255,255,.14); color: #fff; border: 1px solid rgba(255,255,255,.3);
+    border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer;
+  }
+  header.top button.primary { background: #fff; color: var(--accent); font-weight: 700; }
+  header.top input[type=file] { display: none; }
+
+  .layout { display: grid; grid-template-columns: minmax(340px, 480px) 1fr; min-height: calc(100vh - 52px); }
+  .editor { background: var(--panel); border-left: 1px solid var(--line); padding: 14px 16px 60px; overflow-y: auto; max-height: calc(100vh - 52px); position: sticky; top: 52px; }
+  .preview { padding: 16px; overflow-x: hidden; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .editor { max-height: none; position: static; border-left: 0; border-bottom: 1px solid var(--line); }
+  }
+
+  .editor h2 { font-size: 15px; margin: 18px 0 8px; color: var(--accent); }
+  .editor h2:first-child { margin-top: 0; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .field > span, .grid2 label > span { font-size: 12.5px; color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; margin-bottom: 8px; }
+  .grid2 label { display: flex; flex-direction: column; gap: 3px; }
+  .grid2 label.check { flex-direction: row; align-items: center; gap: 6px; }
+  input[type=text], input[type=number], select, textarea {
+    font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); width: 100%;
+  }
+  textarea { min-height: 120px; resize: vertical; font-family: "Frank Ruhl Libre", serif; font-size: 15px; line-height: 1.5; }
+  .hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 2px 0 8px; }
+  .hint code { background: #f1efe9; padding: 0 4px; border-radius: 4px; direction: rtl; }
+
+  .comm { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 12px; background: #fcfbf8; }
+  .comm .chead { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .comm .chead input { font-weight: 700; }
+  .comm .chead button { flex: none; border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 6px 9px; cursor: pointer; font: inherit; }
+  .comm .grid2 { grid-template-columns: 1fr 1fr 1fr; }
+  .status { font-size: 12.5px; margin-top: 4px; }
+  .status.ok { color: var(--ok); }
+  .status.warn { color: var(--warn); font-weight: 700; }
+  .addbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .addbtns button, .smallbtn { border: 1px dashed var(--accent); color: var(--accent); background: #fff; border-radius: 8px; padding: 7px 12px; cursor: pointer; font: inherit; }
+
+  table.check { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+  table.check th, table.check td { border: 1px solid var(--line); padding: 3px 5px; vertical-align: top; text-align: right; }
+  table.check th { background: #f1efe9; }
+  table.check td.miss { background: #fff4e5; }
+  table.check td { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .pv-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; color: var(--muted); font-size: 13.5px; }
+  .warnings { background: #fff4e5; border: 1px solid #f5c98b; color: #7c3a06; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13.5px; }
+  .warnings:empty { display: none; }
+  .warnings div + div { margin-top: 3px; }
+  #pages { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .pwrap { position: relative; box-shadow: 0 2px 10px rgba(0,0,0,.15); background: #fff; flex: none; }
+  .pwrap > .page { position: absolute; top: 0; right: 0; transform-origin: top right; }
+  #measure { position: absolute; top: 0; left: -20000px; visibility: hidden; }
+
+  /* ---------- the typeset page ---------- */
+  .page { background: #fff; color: #000; overflow: hidden; direction: rtl; }
+  .page.overfull { outline: 2px solid #dc2626; }
+  .pinner { width: 100%; }
+  .phead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 9pt; border-bottom: .6pt solid #000; padding-bottom: 1mm; margin-bottom: 2mm; white-space: nowrap; overflow: hidden; }
+  .phead .pt { font-weight: 700; }
+  .phead .pc { flex: 1; text-align: center; }
+  .item { break-inside: avoid; }
+  .vrow { display: grid; align-items: start; }
+  .cell { min-width: 0; }
+  .mtext, .ctext, .under { text-align: justify; text-align-last: auto; overflow-wrap: break-word; }
+  .lbl { font-weight: 700; margin-left: .25em; }
+  .under { margin-top: .4mm; }
+  .colhead { display: grid; font-size: 8pt; font-weight: 700; text-align: center; border-bottom: .4pt solid #000; margin-bottom: 1.2mm; padding-bottom: .5mm; }
+  .hrow { text-align: center; font-weight: 700; }
+  .ctext.sep-right { border-right: .4pt solid #999; padding-right: 1.2mm; }
+  .ctext.sep-left { border-left: .4pt solid #999; padding-left: 1.2mm; }
+  .pnotes { margin-top: 1.5mm; }
+  .pnotes hr { border: 0; border-top: .6pt solid #000; margin: 0 0 1.2mm; width: 100%; }
+  .ncont { text-align: justify; column-rule: .4pt solid #bbb; }
+  .nsec { margin-bottom: .6mm; }
+  .nname { font-weight: 700; }
+  .nlbl { font-weight: 700; }
+  b.dh { font-weight: 700; }
+
+  @media print {
+    body { background: #fff; }
+    header.top, .editor, .pv-bar, .warnings, #measure { display: none !important; }
+    .layout { display: block; }
+    .preview { padding: 0; }
+    #pages { display: block; }
+    .pwrap { width: auto !important; height: auto !important; box-shadow: none; break-after: page; }
+    .pwrap:last-child { break-after: auto; }
+    .pwrap > .page { position: static; transform: none !important; }
+    .page.overfull { outline: 0; }
+  }
+</style>
+<style id="page-size"></style>
+</head>
+<body>
+
+<header class="top">
+  <h1>עימוד פירושים</h1>
+  <button class="primary" id="btn-print">הדפסה / PDF</button>
+  <button id="btn-save">שמירת קובץ</button>
+  <label class="btn">פתיחת קובץ<input type="file" id="file-open" accept=".json,application/json"></label>
+  <button id="btn-example">דוגמה</button>
+  <button id="btn-clear">חדש</button>
+</header>
+
+<div class="layout">
+  <aside class="editor" id="editor">
+    <h2>טקסט עיקרי</h2>
+    <div class="field">
+      <span>כותרת (מופיעה בראש כל עמוד)</span>
+      <input type="text" id="title">
+    </div>
+    <div class="field">
+      <span>הטקסט — כל פסוק / קטע בשורה נפרדת</span>
+      <textarea id="main" rows="10"></textarea>
+    </div>
+    <p class="hint">
+      שורה שמתחילה ב־<code>#</code> היא כותרת (למשל <code># פרק א</code>), והמספור מתחיל מחדש אחריה.
+      אפשר לתת סימון משלך: <code>[יב] טקסט</code>. מודגש: <code>**מילים**</code>.
+    </p>
+
+    <h2>פירושים ותרגומים</h2>
+    <div id="comms"></div>
+    <div class="addbtns">
+      <button data-add="side">+ פירוש בצד הפסוק</button>
+      <button data-add="under">+ פירוש מתחת לפסוק</button>
+      <button data-add="bottom">+ פירוש בתחתית העמוד</button>
+    </div>
+    <p class="hint" style="margin-top:10px">
+      <b>איך מחברים פירוש לפסוק?</b> שתי דרכים:<br>
+      1. <b>לפי סדר</b> — שורה 1 של הפירוש שייכת לפסוק 1, שורה 2 לפסוק 2 וכו'. שורה ריקה = אין פירוש לפסוק.<br>
+      2. <b>לפי הפניה</b> — שורה שמתחילה ב־<code>@3</code> שייכת לפסוק השלישי (בספירה רצופה מתחילת הטקסט). אפשר כמה שורות לאותו פסוק.<br>
+      ד"ה מודגש אוטומטית: <code>בראשית - פירוש...</code>
+    </p>
+
+    <h2>עימוד וחיסכון במקום</h2>
+    <div class="grid2">
+      <label><span>גודל עמוד</span>
+        <select id="pageSize">
+          <option value="A4">A4 (21×29.7)</option>
+          <option value="B5">B5 (17.6×25)</option>
+          <option value="S17">ספר 17×24</option>
+          <option value="A5">A5 (14.8×21)</option>
+          <option value="Letter">Letter</option>
+        </select>
+      </label>
+      <label><span>שוליים (מ"מ)</span><input type="number" id="margin" min="3" max="40" step="1"></label>
+      <label><span>גופן טקסט עיקרי</span><select id="mainFont"></select></label>
+      <label><span>גודל טקסט עיקרי (נק')</span><input type="number" id="mainSize" min="6" max="40" step="0.5"></label>
+      <label><span>מרווח שורות</span><input type="number" id="lineHeight" min="1" max="2.5" step="0.05"></label>
+      <label><span>רווח בין פסוקים (מ"מ)</span><input type="number" id="rowGap" min="0" max="10" step="0.5"></label>
+      <label><span>רווח בין טורים (מ"מ)</span><input type="number" id="colGap" min="0" max="15" step="0.5"></label>
+      <label><span>טורים בתחתית העמוד</span>
+        <select id="notesCols"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+      </label>
+      <label><span>הקטנת פירוש עד (%)</span><input type="number" id="minScale" min="40" max="100" step="5"></label>
+      <label><span>הגדלת פירוש עד (%)</span><input type="number" id="maxScale" min="100" max="160" step="5"></label>
+      <label class="check"><input type="checkbox" id="fit"> <span>יישור סוף פירוש לסוף פסוק</span></label>
+      <label class="check"><input type="checkbox" id="colTitles"> <span>שמות הטורים בראש עמוד</span></label>
+      <label class="check"><input type="checkbox" id="header"> <span>כותרת עליונה ומספר עמוד</span></label>
+      <label class="check"><input type="checkbox" id="numbers"> <span>מספור פסוקים</span></label>
+    </div>
+    <div class="addbtns">
+      <button id="btn-compact">חיסכון מקסימלי במקום</button>
+      <button id="btn-roomy">מרווח ונוח לקריאה</button>
+    </div>
+    <p class="hint" style="margin-top:10px">
+      "יישור סוף פירוש לסוף פסוק": בכל שורת פסוק התוכנה מקטינה או מגדילה את אות הפירוש שבצד (בגבולות שקבעת) ומותחת את המרווח, כך שהפירוש מסתיים בדיוק בשורה שבה נגמר הפסוק — והפסוק הבא ופירושו מתחילים יחד.
+    </p>
+
+    <h2>בדיקת התאמה</h2>
+    <button class="smallbtn" id="btn-check">הצגת טבלת פסוקים ↔ פירושים</button>
+    <div id="checkTable"></div>
+  </aside>
+
+  <main class="preview">
+    <div class="pv-bar"><span id="pv-info">טוען…</span></div>
+    <div class="warnings" id="warnings"></div>
+    <div id="pages"></div>
+  </main>
+</div>
+<div id="measure"></div>
+
+<script>
+"use strict";
+
+const STORE_KEY = "perush-layout-v1";
+const PX_MM = 96 / 25.4;
+const PT = 4 / 3;
+const SIZES = { A4: [210, 297], B5: [176, 250], S17: [170, 240], A5: [148, 210], Letter: [216, 279] };
+const FONTS = [
+  ["Frank Ruhl Libre", "פרנק רוהל"],
+  ["David Libre", "דוד"],
+  ["Noto Serif Hebrew", "נוטו סריף"],
+  ["Noto Rashi Hebrew", "כתב רש\"י"],
+  ["Heebo", "היבו (ללא תגים)"],
+];
+const PLACE_NAMES = { side: "בצד הפסוק", under: "מתחת לפסוק", bottom: "בתחתית העמוד" };
+
+const EXAMPLE = {
+  title: "בראשית",
+  main: [
+    "# פרק א",
+    "בראשית ברא אלהים את השמים ואת הארץ.",
+    "והארץ היתה תהו ובהו וחשך על פני תהום ורוח אלהים מרחפת על פני המים.",
+    "ויאמר אלהים יהי אור ויהי אור.",
+    "וירא אלהים את האור כי טוב ויבדל אלהים בין האור ובין החשך.",
+    "ויקרא אלהים לאור יום ולחשך קרא לילה ויהי ערב ויהי בקר יום אחד.",
+  ].join("\n"),
+  comms: [
+    {
+      name: "אונקלוס", place: "side", side: "left", font: "Noto Serif Hebrew", size: 11, width: 38,
+      text: [
+        "בקדמין ברא יי ית שמיא וית ארעא.",
+        "וארעא הות צדיא וריקניא וחשוכא על אפי תהומא ורוחא מן קדם יי מנשבא על אפי מיא.",
+        "ואמר יי יהי נהורא והוה נהורא.",
+        "וחזא יי ית נהורא ארי טב ואפריש יי בין נהורא ובין חשוכא.",
+        "וקרא יי לנהורא יממא ולחשוכא קרא ליליא והוה רמש והוה צפר יום חד.",
+      ].join("\n"),
+    },
+    {
+      name: "רש\"י", place: "bottom", side: "left", font: "Noto Rashi Hebrew", size: 9, width: 30,
+      text: [
+        "@1 בראשית - אמר רבי יצחק לא היה צריך להתחיל את התורה אלא מהחדש הזה לכם, שהיא מצוה ראשונה שנצטוו בה ישראל. ומה טעם פתח בבראשית, משום כח מעשיו הגיד לעמו לתת להם נחלת גוים.",
+        "@2 תהו ובהו - תהו לשון תמה ושממון, שאדם תוהא ומשתומם על בהו שבו.",
+        "@2 ורוח אלהים מרחפת - כסא הכבוד עומד באויר ומרחף על פני המים ברוח פיו של הקב\"ה ובמאמרו, כיונה המרחפת על הקן.",
+        "@4 וירא אלהים את האור כי טוב ויבדל - אף בזה אנו צריכים לדברי אגדה, ראהו שאינו כדאי להשתמש בו רשעים, והבדילו לצדיקים לעתיד לבא.",
+        "@5 יום אחד - לפי סדר לשון הפרשה היה לו לכתוב יום ראשון, כמו שכתוב בשאר הימים שני שלישי רביעי. למה כתב אחד, לפי שהיה הקב\"ה יחיד בעולמו.",
+      ].join("\n"),
+    },
+  ],
+};
+
+const DEFAULTS = {
+  title: "",
+  main: "",
+  comms: [],
+  pageSize: "A4", margin: 14, mainFont: "Frank Ruhl Libre", mainSize: 15, lineHeight: 1.45,
+  rowGap: 1.5, colGap: 5, notesCols: 2, minScale: 75, maxScale: 115,
+  fit: true, colTitles: true, header: true, numbers: true,
+};
+
+const COMPACT = { margin: 8, lineHeight: 1.3, rowGap: 0.5, colGap: 3, notesCols: 3, minScale: 60, maxScale: 110, colTitles: false };
+const ROOMY = { margin: 16, lineHeight: 1.6, rowGap: 2.5, colGap: 6, notesCols: 2, minScale: 85, maxScale: 120, colTitles: true };
+
+let S = load();
+let nextId = 1;
+S.comms.forEach((c) => { c.id = nextId++; });
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) return Object.assign({}, DEFAULTS, JSON.parse(raw));
+  } catch (e) { /* storage unavailable */ }
+  return Object.assign({}, DEFAULTS, JSON.parse(JSON.stringify(EXAMPLE)));
+}
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(exportState())); } catch (e) { /* ignore */ }
+}
+function exportState() {
+  const o = Object.assign({}, S);
+  o.comms = S.comms.map(({ id, ...rest }) => rest);
+  return o;
+}
+
+/* ---------- helpers ---------- */
+const $ = (id) => document.getElementById(id);
+function el(tag, cls, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html != null) e.innerHTML = html;
+  return e;
+}
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function heb(n) {
+  const ones = ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"];
+  const tens = ["", "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ"];
+  const hund = ["", "ק", "ר", "ש", "ת"];
+  let s = "";
+  while (n >= 400) { s += "ת"; n -= 400; }
+  if (n >= 100) { s += hund[Math.floor(n / 100)]; n %= 100; }
+  if (n === 15) s += "טו";
+  else if (n === 16) s += "טז";
+  else s += tens[Math.floor(n / 10)] + ones[n % 10];
+  return s;
+}
+function bold(s) { return s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>"); }
+function entryHtml(raw) {
+  const s = esc(raw.trim());
+  if (s.includes("**")) return bold(s);
+  const m = s.match(/^(.{1,90}?)\s+[-–—]\s+([\s\S]*)$/);
+  return m ? `<b class="dh">${m[1]}</b> ${m[2]}` : s;
+}
+
+/* ---------- parsing ---------- */
+function parseMain() {
+  const items = [];
+  let verses = 0, inChap = 0, chapter = "";
+  S.main.replace(/\r/g, "").split("\n").forEach((line) => {
+    const t = line.trim();
+    if (!t) return;
+    if (t.startsWith("#")) {
+      chapter = t.replace(/^#+\s*/, "");
+      inChap = 0;
+      items.push({ type: "h", text: chapter, chapter });
+      return;
+    }
+    inChap++;
+    let label = heb(inChap), text = t;
+    const m = t.match(/^\[([^\]]{1,12})\]\s*(.*)$/);
+    if (m) { label = m[1]; text = m[2]; }
+    items.push({ type: "v", idx: verses++, label, html: bold(esc(text)), plain: text, chapter });
+  });
+  return { items, count: verses };
+}
+
+function parseComm(c, n) {
+  const entries = Array.from({ length: n }, () => []);
+  const lines = c.text.replace(/\r/g, "").split("\n");
+  const byRef = lines.some((l) => /^\s*@\s*\d+/.test(l));
+  let problem = "", info = "";
+  if (byRef) {
+    let cur = -1, bad = [];
+    lines.forEach((l) => {
+      const m = l.match(/^\s*@\s*(\d+)\s*([\s\S]*)$/);
+      if (m) {
+        cur = +m[1] - 1;
+        if (cur < 0 || cur >= n) { bad.push(m[1]); cur = -2; return; }
+        if (m[2].trim()) entries[cur].push(m[2]);
+      } else if (l.trim()) {
+        if (cur >= 0) entries[cur].push(l);
+        else if (cur === -1) bad.push("שורה ללא @");
+      }
+    });
+    const covered = entries.filter((e) => e.length).length;
+    info = `לפי הפניה · ${covered} מתוך ${n} פסוקים עם פירוש`;
+    if (bad.length) problem = `הפניה לפסוק שלא קיים: ${[...new Set(bad)].join(", ")} (יש ${n} פסוקים)`;
+  } else {
+    const rows = lines.filter((l) => !l.trim().startsWith("#"));
+    while (rows.length && !rows[rows.length - 1].trim()) rows.pop();
+    rows.forEach((l, i) => { if (i < n && l.trim()) entries[i].push(l); });
+    if (!rows.length) info = "ריק";
+    else if (rows.length !== n) problem = `${rows.length} שורות מול ${n} פסוקים — הפירוש לא יתאים לפסוקים!`;
+    else info = `לפי סדר · ${n} שורות = ${n} פסוקים ✓`;
+  }
+  return { entries, byRef, problem, info };
+}
+
+/* ---------- editor UI ---------- */
+const SETTINGS = ["pageSize", "margin", "mainFont", "mainSize", "lineHeight", "rowGap", "colGap", "notesCols", "minScale", "maxScale"];
+const CHECKS = ["fit", "colTitles", "header", "numbers"];
+
+function fontOptions(sel) {
+  return FONTS.map(([v, n]) => `<option value="${v}"${v === sel ? " selected" : ""}>${n}</option>`).join("");
+}
+
+function fillEditor() {
+  $("title").value = S.title;
+  $("main").value = S.main;
+  $("mainFont").innerHTML = fontOptions(S.mainFont);
+  SETTINGS.forEach((k) => { $(k).value = S[k]; });
+  CHECKS.forEach((k) => { $(k).checked = !!S[k]; });
+  renderComms();
+}
+
+function renderComms() {
+  const box = $("comms");
+  box.innerHTML = "";
+  S.comms.forEach((c, i) => {
+    const d = el("div", "comm");
+    d.innerHTML = `
+      <div class="chead">
+        <input type="text" data-k="name" value="${esc(c.name)}" placeholder="שם הפירוש">
+        <button data-act="up" title="הזזה למעלה"${i === 0 ? " disabled" : ""}>▲</button>
+        <button data-act="del" title="מחיקה">✕</button>
+      </div>
+      <div class="grid2">
+        <label><span>מיקום</span>
+          <select data-k="place">${Object.entries(PLACE_NAMES).map(([v, n]) => `<option value="${v}"${v === c.place ? " selected" : ""}>${n}</option>`).join("")}</select>
+        </label>
+        <label${c.place === "side" ? "" : " hidden"}><span>צד</span>
+          <select data-k="side"><option value="left"${c.side === "left" ? " selected" : ""}>משמאל לטקסט</option><option value="right"${c.side === "right" ? " selected" : ""}>מימין לטקסט</option></select>
+        </label>
+        <label${c.place === "side" ? "" : " hidden"}><span>רוחב (% מהשורה)</span><input type="number" data-k="width" min="10" max="70" value="${c.width}"></label>
+        <label><span>גופן</span><select data-k="font">${fontOptions(c.font)}</select></label>
+        <label><span>גודל (נק')</span><input type="number" data-k="size" min="5" max="30" step="0.5" value="${c.size}"></label>
+      </div>
+      <textarea data-k="text" rows="6" placeholder="שורה לכל פסוק, או @מספר-פסוק בתחילת שורה">${esc(c.text)}</textarea>
+      <div class="status"></div>`;
+    d.addEventListener("input", (ev) => {
+      const k = ev.target.dataset.k;
+      if (!k) return;
+      c[k] = ev.target.type === "number" ? +ev.target.value : ev.target.value;
+      if (k === "place") renderComms();
+      changed();
+    });
+    d.addEventListener("click", (ev) => {
+      const act = ev.target.dataset.act;
+      if (act === "del" && confirm(`למחוק את "${c.name}"?`)) { S.comms.splice(i, 1); renderComms(); changed(); }
+      if (act === "up" && i > 0) { [S.comms[i - 1], S.comms[i]] = [S.comms[i], S.comms[i - 1]]; renderComms(); changed(); }
+    });
+    c._statusEl = d.querySelector(".status");
+    box.append(d);
+  });
+  updateStatuses();
+}
+
+function updateStatuses() {
+  const { count } = parseMain();
+  S.comms.forEach((c) => {
+    if (!c._statusEl) return;
+    const p = parseComm(c, count);
+    c._statusEl.className = "status " + (p.problem ? "warn" : "ok");
+    c._statusEl.textContent = p.problem ? "⚠ " + p.problem : p.info;
+  });
+}
+
+function addComm(place) {
+  const names = { side: "תרגום", under: "ביאור", bottom: "פירוש" };
+  S.comms.push({
+    id: nextId++, name: names[place], place, side: "left",
+    font: place === "bottom" ? "Noto Rashi Hebrew" : "Noto Serif Hebrew",
+    size: place === "bottom" ? 9 : 11, width: 35, text: "",
+  });
+  renderComms();
+  changed();
+}
+
+let timer = 0;
+function changed() {
+  save();
+  updateStatuses();
+  if (checkShown) renderCheckTable();
+  clearTimeout(timer);
+  timer = setTimeout(layout, 450);
+}
+
+let checkShown = false;
+function renderCheckTable() {
+  const { items, count } = parseMain();
+  const parsed = S.comms.map((c) => parseComm(c, count));
+  let h = `<table class="check"><tr><th>#</th><th>פסוק</th>${S.comms.map((c) => `<th>${esc(c.name)}</th>`).join("")}</tr>`;
+  items.filter((it) => it.type === "v").forEach((v) => {
+    h += `<tr><td>${v.idx + 1} (${esc(v.label)})</td><td title="${esc(v.plain)}">${esc(v.plain)}</td>`;
+    parsed.forEach((p) => {
+      const e = p.entries[v.idx];
+      const txt = e.join(" · ");
+      h += e.length ? `<td title="${esc(txt)}">${esc(txt)}</td>` : `<td class="miss">—</td>`;
+    });
+    h += "</tr>";
+  });
+  $("checkTable").innerHTML = h + "</table>";
+}
+
+/* ---------- layout engine ---------- */
+let layoutRun = 0;
+
+async function layout() {
+  const run = ++layoutRun;
+  const fonts = new Set([S.mainFont, ...S.comms.map((c) => c.font)]);
+  try { await Promise.all([...fonts].map((f) => document.fonts.load(`16px "${f}"`, "אבג"))); } catch (e) { /* fall back */ }
+  if (run !== layoutRun) return;
+
+  const [Wmm, Hmm] = SIZES[S.pageSize] || SIZES.A4;
+  $("page-size").textContent = `@page { size: ${Wmm}mm ${Hmm}mm; margin: 0; }`;
+  const contentH = (Hmm - 2 * S.margin) * PX_MM;
+  const { items, count } = parseMain();
+  const warnings = [];
+
+  const sides = S.comms.filter((c) => c.place === "side");
+  const right = sides.filter((c) => c.side === "right");
+  const left = sides.filter((c) => c.side !== "right");
+  const unders = S.comms.filter((c) => c.place === "under");
+  const bottoms = S.comms.filter((c) => c.place === "bottom");
+  const parsed = new Map(S.comms.map((c) => [c, parseComm(c, count)]));
+  S.comms.forEach((c) => { const p = parsed.get(c); if (p.problem) warnings.push(`${c.name}: ${p.problem}`); });
+
+  const sideW = sides.reduce((a, c) => a + (+c.width || 30), 0);
+  const mainW = Math.max(20, 100 - sideW);
+  if (100 - sideW < 20) warnings.push("סכום רוחב הפירושים שבצד גדול מדי — הטקסט העיקרי קיבל 20%.");
+  const cols = [...right, null, ...left];
+  const gridCols = cols.map((c) => (c ? (+c.width || 30) : mainW) + "fr").join(" ");
+  const mainPx = S.mainSize * PT;
+
+  const measure = $("measure");
+  measure.innerHTML = "";
+  const pages = [];
+  let carry = [];
+  let chapter = "";
+
+  function fontCss(font, sizePt, lh) {
+    return `font-family:"${font}",serif;font-size:${(sizePt * PT).toFixed(2)}px;line-height:${lh}`;
+  }
+
+  function makePage() {
+    const page = el("div", "page");
+    page.style.cssText = `width:${Wmm}mm;height:${Hmm}mm;padding:${S.margin}mm`;
+    const inner = el("div", "pinner");
+    const head = el("div", "phead");
+    if (S.header) {
+      head.innerHTML = `<span class="pt"></span><span class="pc"></span><span class="pn"></span>`;
+      head.style.fontFamily = `"${S.mainFont}",serif`;
+      inner.append(head);
+    }
+    const body = el("div", "pbody");
+    body.style.cssText = fontCss(S.mainFont, S.mainSize, S.lineHeight);
+    if (S.colTitles && sides.length) {
+      const ch = el("div", "colhead");
+      ch.style.gridTemplateColumns = gridCols;
+      ch.style.columnGap = S.colGap + "mm";
+      ch.style.fontFamily = `"${S.mainFont}",serif`;
+      ch.innerHTML = cols.map((c) => `<div>${c ? esc(c.name) : esc(S.title || "")}</div>`).join("");
+      body.append(ch);
+    }
+    inner.append(body);
+    const notes = el("div", "pnotes");
+    notes.innerHTML = "<hr>";
+    const ncont = el("div", "ncont");
+    ncont.style.columnCount = S.notesCols;
+    ncont.style.columnGap = S.colGap + "mm";
+    const secs = new Map();
+    bottoms.forEach((c) => {
+      const sec = el("div", "nsec", `<span class="nname">${esc(c.name)}</span> `);
+      sec.style.cssText = fontCss(c.font, c.size, Math.max(1.15, S.lineHeight - 0.15));
+      secs.set(c, sec);
+      ncont.append(sec);
+    });
+    notes.append(ncont);
+    inner.append(notes);
+    page.append(inner);
+    measure.append(page);
+    const pg = { page, inner, head, body, notes, secs, chapter, verses: 0, hasHeading: false };
+    refreshNotes(pg);
+    pages.push(pg);
+    return pg;
+  }
+
+  const overflow = (pg) => pg.inner.offsetHeight > contentH + 0.5;
+
+  function refreshNotes(pg) {
+    let any = false;
+    pg.secs.forEach((sec) => {
+      const has = !!sec.querySelector(".nspan");
+      sec.style.display = has ? "" : "none";
+      any = any || has;
+    });
+    pg.notes.style.display = any ? "" : "none";
+  }
+
+  function addNote(pg, n, key) {
+    const span = el("span", "nspan", (n.cont ? "" : `<span class="nlbl">(${esc(n.label)})</span> `) + n.html + " ");
+    span.dataset.key = key;
+    span._n = n;
+    pg.secs.get(n.comm).append(span);
+    refreshNotes(pg);
+    return span;
+  }
+
+  // Moves bottom-notes (eligible: key >= minKey) off the end of the page until it fits,
+  // splitting the last one by words so the page is filled. Returns what spills over.
+  function trim(pg, minKey) {
+    const spans = [...pg.notes.querySelectorAll(".nspan")].filter((s) => +s.dataset.key >= minKey);
+    const removed = [];
+    while (overflow(pg) && spans.length) {
+      const s = spans.pop();
+      removed.unshift(s._n);
+      s.remove();
+      refreshNotes(pg);
+    }
+    if (overflow(pg)) return { ok: false, keptAny: false, carry: removed };
+    if (!removed.length) return { ok: true, keptAny: true, carry: [] };
+    const first = removed[0];
+    const words = first.html.split(" ");
+    const key = minKey;
+    let lo = 0, hi = words.length - 1, best = 0, probe = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (probe) probe.remove();
+      probe = addNote(pg, Object.assign({}, first, { html: words.slice(0, mid).join(" ") }), key);
+      if (overflow(pg)) hi = mid - 1; else { best = mid; lo = mid + 1; }
+    }
+    if (probe) { probe.remove(); refreshNotes(pg); }
+    let keptPart = false;
+    if (best >= 3) {
+      addNote(pg, Object.assign({}, first, { html: words.slice(0, best).join(" ") }), key);
+      removed[0] = Object.assign({}, first, { html: words.slice(best).join(" "), cont: true });
+      keptPart = true;
+    }
+    return { ok: true, keptAny: spans.length > 0 || keptPart, carry: removed };
+  }
+
+  function freshPage() {
+    let pg = makePage();
+    let guard = 0;
+    while (carry.length && guard++ < 500) {
+      const items2 = carry;
+      carry = [];
+      items2.forEach((n) => addNote(pg, n, -1));
+      if (!overflow(pg)) break;
+      const r = trim(pg, -1);
+      carry = r.carry;
+      if (!pg.notes.querySelector(".nspan") && carry.length) {
+        // a single fragment bigger than an empty page: force it in to guarantee progress
+        addNote(pg, carry.shift(), -1);
+        pg.page.classList.add("overfull");
+      }
+      if (carry.length) pg = makePage();
+    }
+    return pg;
+  }
+
+  function buildItem(it) {
+    if (it.type === "h") {
+      const d = el("div", "item hrow", esc(it.text));
+      d.style.fontSize = (mainPx * 1.25).toFixed(2) + "px";
+      d.style.margin = `${S.rowGap + 1}mm 0 ${S.rowGap + 0.5}mm`;
+      return d;
+    }
+    const row = el("div", "item vrow");
+    row.style.gridTemplateColumns = gridCols;
+    row.style.columnGap = S.colGap + "mm";
+    row.style.marginBottom = S.rowGap + "mm";
+    cols.forEach((c) => {
+      if (!c) {
+        const cell = el("div", "cell cmain");
+        const m = el("div", "mtext", (S.numbers ? `<span class="lbl">${esc(it.label)}</span>` : "") + it.html);
+        cell.append(m);
+        unders.forEach((u) => {
+          const e = parsed.get(u).entries[it.idx];
+          if (!e.length) return;
+          const ud = el("div", "under", e.map(entryHtml).join(" "));
+          ud.style.cssText = fontCss(u.font, u.size, Math.max(1.15, S.lineHeight - 0.1));
+          cell.append(ud);
+        });
+        row.append(cell);
+        return;
+      }
+      const cell = el("div", "cell cside");
+      const e = parsed.get(c).entries[it.idx];
+      const t = el("div", "ctext " + (c.side === "right" ? "sep-left" : "sep-right"), e.map(entryHtml).join(" "));
+      t.style.cssText = fontCss(c.font, c.size, S.lineHeight);
+      t.dataset.size = c.size * PT;
+      cell.append(t);
+      row.append(cell);
+    });
+    return row;
+  }
+
+  // Make each side commentary end on the same line as its verse:
+  // pick the largest font (within limits) that is not taller than the verse,
+  // then stretch the line spacing of whatever is shorter so the bottoms meet.
+  function fitRow(row) {
+    if (!S.fit) return;
+    const main = row.querySelector(".cmain");
+    const H = main.offsetHeight;
+    const texts = [...row.querySelectorAll(".cside .ctext")].filter((t) => t.textContent.trim());
+    texts.forEach((t) => {
+      const base = +t.dataset.size;
+      let lo = base * S.minScale / 100, hi = base * S.maxScale / 100, best;
+      t.style.fontSize = hi + "px";
+      if (t.offsetHeight <= H) best = hi;
+      else {
+        t.style.fontSize = lo + "px";
+        if (t.offsetHeight > H) best = lo;
+        else {
+          best = lo;
+          for (let i = 0; i < 9; i++) {
+            const mid = (lo + hi) / 2;
+            t.style.fontSize = mid + "px";
+            if (t.offsetHeight <= H) { best = mid; lo = mid; } else hi = mid;
+          }
+        }
+      }
+      t.style.fontSize = best.toFixed(2) + "px";
+    });
+    const rowH = Math.max(H, ...texts.map((t) => t.offsetHeight));
+    const stretch = (t, fs) => {
+      const lh = S.lineHeight;
+      const h = t.offsetHeight;
+      const lines = Math.round(h / (fs * lh));
+      if (lines < 2 || rowH - h < 1) return;
+      const newLh = Math.min(lh * 1.9, rowH / (lines * fs));
+      t.style.lineHeight = newLh.toFixed(4);
+      for (let i = 0; i < 4 && t.offsetHeight > rowH + 0.5; i++) {
+        t.style.lineHeight = (parseFloat(t.style.lineHeight) * 0.995).toFixed(4);
+      }
+    };
+    texts.forEach((t) => stretch(t, parseFloat(t.style.fontSize)));
+    if (!main.querySelector(".under")) stretch(main.querySelector(".mtext"), mainPx);
+  }
+
+  function notesFor(it) {
+    if (it.type !== "v") return [];
+    const out = [];
+    bottoms.forEach((c) => {
+      parsed.get(c).entries[it.idx].forEach((raw) => out.push({ comm: c, label: it.label, html: entryHtml(raw), cont: false }));
+    });
+    return out;
+  }
+
+  function place(pg, it, row, notes) {
+    pg.body.append(row);
+    if (it.type === "v") pg.verses++;
+    else { pg.hasHeading = true; if (!pg.verses) pg.chapter = it.chapter; }
+    notes.forEach((n) => addNote(pg, n, it.idx));
+  }
+  function unplace(pg, it, row) {
+    row.remove();
+    if (it.type === "v") pg.verses--;
+    pg.notes.querySelectorAll(".nspan").forEach((s) => { if (+s.dataset.key === it.idx && it.type === "v") s.remove(); });
+    refreshNotes(pg);
+  }
+
+  let pg = freshPage();
+  for (const it of items) {
+    if (run !== layoutRun) return;
+    if (it.type === "h") chapter = it.chapter;
+    const row = buildItem(it);
+    const notes = notesFor(it);
+    const key = it.type === "v" ? it.idx : 1e9;
+    place(pg, it, row, notes);
+    if (it.type === "v") fitRow(row);
+    if (!overflow(pg)) continue;
+
+    const alone = pg.body.querySelectorAll(".item").length === 1;
+    const r = trim(pg, key);
+    if (r.ok && (alone || r.keptAny || !notes.length)) {
+      carry = r.carry;
+      if (carry.length) pg = freshPage();
+      continue;
+    }
+    if (alone) {
+      warnings.push(`פסוק ${it.label} (${it.chapter}) ארוך מעמוד שלם — חלק ממנו נחתך. הקטינו גופן או חלקו אותו לשתי שורות.`);
+      pg.page.classList.add("overfull");
+      carry = r.carry;
+      pg = freshPage();
+      continue;
+    }
+    // doesn't fit: move the verse (with its notes) to a new page
+    unplace(pg, it, row);
+    carry = [];
+    pg = freshPage();
+    pg.chapter = chapter;
+    place(pg, it, row, notes);
+    if (!overflow(pg)) continue;
+    const r2 = trim(pg, key);
+    carry = r2.carry;
+    if (!r2.ok) {
+      warnings.push(`פסוק ${it.label} (${it.chapter}) ארוך מעמוד שלם — חלק ממנו נחתך. הקטינו גופן או חלקו אותו לשתי שורות.`);
+      pg.page.classList.add("overfull");
+    }
+    if (carry.length) pg = freshPage();
+  }
+  // a trailing empty page (no verses, no notes) is dropped
+  const last = pages[pages.length - 1];
+  if (pages.length > 1 && !last.body.querySelector(".item") && !last.notes.querySelector(".nspan")) {
+    last.page.remove();
+    pages.pop();
+  }
+
+  pages.forEach((p, i) => {
+    if (!S.header) return;
+    p.head.querySelector(".pt").textContent = S.title;
+    p.head.querySelector(".pc").textContent = p.chapter || "";
+    p.head.querySelector(".pn").textContent = heb(i + 1);
+  });
+
+  // move pages to the visible preview, scaled down to fit the screen
+  const out = $("pages");
+  out.innerHTML = "";
+  const Wpx = Wmm * PX_MM, Hpx = Hmm * PX_MM;
+  const avail = out.clientWidth || 600;
+  const scale = Math.min(1, (avail - 4) / Wpx);
+  pages.forEach((p) => {
+    const w = el("div", "pwrap");
+    w.style.width = Wpx * scale + "px";
+    w.style.height = Hpx * scale + "px";
+    p.page.style.transform = `scale(${scale})`;
+    w.append(p.page);
+    out.append(w);
+  });
+  $("pv-info").textContent = `${pages.length} עמודים · ${count} פסוקים · ${S.comms.length} פירושים · תצוגה ${Math.round(scale * 100)}%`;
+  $("warnings").innerHTML = warnings.map((w) => `<div>⚠ ${esc(w)}</div>`).join("");
+}
+
+/* ---------- wiring ---------- */
+$("title").addEventListener("input", (e) => { S.title = e.target.value; changed(); });
+$("main").addEventListener("input", (e) => { S.main = e.target.value; changed(); });
+SETTINGS.forEach((k) => $(k).addEventListener("input", (e) => {
+  S[k] = e.target.type === "number" || k === "notesCols" ? +e.target.value : e.target.value;
+  changed();
+}));
+CHECKS.forEach((k) => $(k).addEventListener("change", (e) => { S[k] = e.target.checked; changed(); }));
+document.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => addComm(b.dataset.add)));
+$("btn-compact").addEventListener("click", () => { Object.assign(S, COMPACT); fillEditor(); changed(); });
+$("btn-roomy").addEventListener("click", () => { Object.assign(S, ROOMY); fillEditor(); changed(); });
+$("btn-check").addEventListener("click", () => {
+  checkShown = !checkShown;
+  if (checkShown) renderCheckTable(); else $("checkTable").innerHTML = "";
+});
+$("btn-print").addEventListener("click", () => window.print());
+$("btn-save").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(exportState(), null, 2)], { type: "application/json" });
+  const a = el("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (S.title || "perush") + ".json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$("file-open").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  f.text().then((txt) => {
+    try {
+      S = Object.assign({}, DEFAULTS, JSON.parse(txt));
+      S.comms.forEach((c) => { c.id = nextId++; });
+      fillEditor();
+      changed();
+    } catch (err) { alert("הקובץ אינו קובץ פרויקט תקין"); }
+  });
+  e.target.value = "";
+});
+$("btn-example").addEventListener("click", () => {
+  if (!confirm("לטעון את הדוגמה? הטקסט הנוכחי יוחלף (כדאי לשמור קובץ קודם).")) return;
+  S = Object.assign({}, S, JSON.parse(JSON.stringify(EXAMPLE)));
+  S.comms.forEach((c) => { c.id = nextId++; });
+  fillEditor();
+  changed();
+});
+$("btn-clear").addEventListener("click", () => {
+  if (!confirm("להתחיל פרויקט חדש? הטקסט הנוכחי יימחק (כדאי לשמור קובץ קודם).")) return;
+  S = Object.assign({}, DEFAULTS, { comms: [] });
+  fillEditor();
+  changed();
+});
+let resizeT = 0;
+window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(layout, 250); });
+window.addEventListener("beforeprint", () => {
+  document.querySelectorAll(".pwrap > .page").forEach((p) => { p.dataset.t = p.style.transform; p.style.transform = "none"; });
+});
+window.addEventListener("afterprint", () => {
+  document.querySelectorAll(".pwrap > .page").forEach((p) => { p.style.transform = p.dataset.t || ""; });
+});
+
+fillEditor();
+document.fonts.ready.then(layout);
+</script>
+</body>
+</html>
