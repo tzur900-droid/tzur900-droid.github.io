@@ -94,23 +94,24 @@
   .phead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 9pt; border-bottom: .6pt solid #000; padding-bottom: 1mm; margin-bottom: 2mm; white-space: nowrap; overflow: hidden; }
   .phead .pt { font-weight: 700; }
   .phead .pc { flex: 1; text-align: center; }
-  .item { break-inside: avoid; }
-  .vrow { display: grid; align-items: start; }
-  .cell { min-width: 0; }
-  .mtext, .ctext, .under { text-align: justify; text-align-last: auto; overflow-wrap: break-word; }
-  .lbl { font-weight: 700; margin-left: .25em; }
-  .under { margin-top: .4mm; }
-  .colhead { display: grid; font-size: 8pt; font-weight: 700; text-align: center; border-bottom: .4pt solid #000; margin-bottom: 1.2mm; padding-bottom: .5mm; }
-  .hrow { text-align: center; font-weight: 700; }
-  .ctext.sep-right { border-right: .4pt solid #999; padding-right: 1.2mm; }
-  .ctext.sep-left { border-left: .4pt solid #999; padding-left: 1.2mm; }
-  .pnotes { margin-top: 1.5mm; }
-  .pnotes hr { border: 0; border-top: .6pt solid #000; margin: 0 0 1.2mm; width: 100%; }
-  .ncont { text-align: justify; column-rule: .4pt solid #bbb; }
-  .nsec { margin-bottom: .6mm; }
-  .nname { font-weight: 700; }
+  .ptop { display: grid; align-items: start; }
+  .ptop > div { min-width: 0; }
+  .tcol p, .scol p { margin: 0; }
+  .tcol, .scol, .nsec { text-align: justify; overflow-wrap: break-word; }
+  .tcol .hrow { text-align: center; font-weight: 700; }
+  .tcol .vline + .vline { margin-top: .3mm; }
+  .tcol .under { margin-top: .2mm; text-align: justify; }
+  .lbl { font-weight: 700; }
+  .scol.sep-right { border-right: .4pt solid #888; padding-right: 1.4mm; }
+  .scol.sep-left { border-left: .4pt solid #888; padding-left: 1.4mm; }
+  .slbl { font-weight: 700; }
+  .ctitle { font-weight: 700; text-align: center; font-size: .85em; border-bottom: .4pt solid #000; margin-bottom: .8mm; }
+  .pnotes { border-top: .6pt solid #000; }
+  .nsec { column-rule: .4pt solid #aaa; }
+  .nsec + .nsec { border-top: .4pt solid #888; }
+  .nname { font-weight: 700; font-size: 1.15em; }
   .nlbl { font-weight: 700; }
-  b.dh { font-weight: 700; }
+  .nsec b, .scol b, .tcol b { font-weight: 700; }
 
   @media print {
     body { background: #fff; }
@@ -156,18 +157,18 @@
     <h2>פירושים ותרגומים</h2>
     <div id="comms"></div>
     <div class="addbtns">
-      <button data-add="side">+ פירוש בצד הפסוק</button>
-      <button data-add="under">+ פירוש מתחת לפסוק</button>
-      <button data-add="bottom">+ פירוש בתחתית העמוד</button>
+      <button data-add="side">+ תרגום בטור צמוד</button>
+      <button data-add="bottom">+ פירוש מתחת לטקסט</button>
+      <button data-add="under">+ ביאור אחרי כל פסוק</button>
     </div>
     <p class="hint" style="margin-top:10px">
       <b>איך מחברים פירוש לפסוק?</b> שתי דרכים:<br>
       1. <b>לפי סדר</b> — שורה 1 של הפירוש שייכת לפסוק 1, שורה 2 לפסוק 2 וכו'. שורה ריקה = אין פירוש לפסוק.<br>
-      2. <b>לפי הפניה</b> — שורה שמתחילה ב־<code>@3</code> שייכת לפסוק השלישי (בספירה רצופה מתחילת הטקסט). אפשר כמה שורות לאותו פסוק.<br>
+      2. <b>לפי הפניה</b> — שורה שמתחילה ב־<code>@3</code> שייכת לפסוק השלישי (בספירה רצופה מתחילת הטקסט). אפשר כמה שורות לאותו פסוק — כל שורה דיבור המתחיל.<br>
       ד"ה מודגש אוטומטית: <code>בראשית - פירוש...</code>
     </p>
 
-    <h2>עימוד וחיסכון במקום</h2>
+    <h2>עימוד</h2>
     <div class="grid2">
       <label><span>גודל עמוד</span>
         <select id="pageSize">
@@ -182,24 +183,22 @@
       <label><span>גופן טקסט עיקרי</span><select id="mainFont"></select></label>
       <label><span>גודל טקסט עיקרי (נק')</span><input type="number" id="mainSize" min="6" max="40" step="0.5"></label>
       <label><span>מרווח שורות</span><input type="number" id="lineHeight" min="1" max="2.5" step="0.05"></label>
-      <label><span>רווח בין פסוקים (מ"מ)</span><input type="number" id="rowGap" min="0" max="10" step="0.5"></label>
       <label><span>רווח בין טורים (מ"מ)</span><input type="number" id="colGap" min="0" max="15" step="0.5"></label>
-      <label><span>טורים בתחתית העמוד</span>
-        <select id="notesCols"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
-      </label>
-      <label><span>הקטנת פירוש עד (%)</span><input type="number" id="minScale" min="40" max="100" step="5"></label>
-      <label><span>הגדלת פירוש עד (%)</span><input type="number" id="maxScale" min="100" max="160" step="5"></label>
-      <label class="check"><input type="checkbox" id="fit"> <span>יישור סוף פירוש לסוף פסוק</span></label>
-      <label class="check"><input type="checkbox" id="colTitles"> <span>שמות הטורים בראש עמוד</span></label>
+      <label><span>רווח בין חלקי העמוד (מ"מ)</span><input type="number" id="sectionGap" min="0" max="10" step="0.5"></label>
+      <label><span>מינימום שורות טקסט בעמוד</span><input type="number" id="minLines" min="1" max="40" step="1"></label>
+      <label class="check"><input type="checkbox" id="verseNewLine"> <span>כל פסוק בשורה חדשה</span></label>
+      <label class="check"><input type="checkbox" id="numbers"> <span>אותיות פסוקים</span></label>
       <label class="check"><input type="checkbox" id="header"> <span>כותרת עליונה ומספר עמוד</span></label>
-      <label class="check"><input type="checkbox" id="numbers"> <span>מספור פסוקים</span></label>
+      <label class="check"><input type="checkbox" id="colTitles"> <span>שם מעל הטור הצמוד</span></label>
     </div>
     <div class="addbtns">
       <button id="btn-compact">חיסכון מקסימלי במקום</button>
       <button id="btn-roomy">מרווח ונוח לקריאה</button>
     </div>
     <p class="hint" style="margin-top:10px">
-      "יישור סוף פירוש לסוף פסוק": בכל שורת פסוק התוכנה מקטינה או מגדילה את אות הפירוש שבצד (בגבולות שקבעת) ומותחת את המרווח, כך שהפירוש מסתיים בדיוק בשורה שבה נגמר הפסוק — והפסוק הבא ופירושו מתחילים יחד.
+      <b>שיטת העימוד (כמו מקראות גדולות):</b> גודל האותיות קבוע. בראש העמוד הפסוקים, ולצדם התרגום. מתחת — כל פירוש ברוחב מלא בטורים.
+      התוכנה מכניסה לכל עמוד כמה שיותר פסוקים, בתנאי שהפירוש של כל פסוק (ושל התרגום) <b>מתחיל</b> באותו עמוד. מה שלא נכנס ממשיך בעמוד הבא, לפני הפירוש של הפסוקים החדשים.
+      "מינימום שורות טקסט" מבטיח שבכל עמוד יהיה לפחות כמה שורות מהטקסט עצמו גם כשהפירוש ארוך.
     </p>
 
     <h2>בדיקת התאמה</h2>
@@ -218,7 +217,7 @@
 <script>
 "use strict";
 
-const STORE_KEY = "perush-layout-v1";
+const STORE_KEY = "perush-layout-v2";
 const PX_MM = 96 / 25.4;
 const PT = 4 / 3;
 const SIZES = { A4: [210, 297], B5: [176, 250], S17: [170, 240], A5: [148, 210], Letter: [216, 279] };
@@ -229,7 +228,7 @@ const FONTS = [
   ["Noto Rashi Hebrew", "כתב רש\"י"],
   ["Heebo", "היבו (ללא תגים)"],
 ];
-const PLACE_NAMES = { side: "בצד הפסוק", under: "מתחת לפסוק", bottom: "בתחתית העמוד" };
+const PLACE_NAMES = { side: "טור צמוד לטקסט", bottom: "מתחת לטקסט", under: "אחרי כל פסוק" };
 
 const EXAMPLE = {
   title: "בראשית",
@@ -243,7 +242,7 @@ const EXAMPLE = {
   ].join("\n"),
   comms: [
     {
-      name: "אונקלוס", place: "side", side: "left", font: "Noto Serif Hebrew", size: 11, width: 38,
+      name: "אונקלוס", place: "side", side: "left", font: "Noto Serif Hebrew", size: 11, width: 34, cols: 2,
       text: [
         "בקדמין ברא יי ית שמיא וית ארעא.",
         "וארעא הות צדיא וריקניא וחשוכא על אפי תהומא ורוחא מן קדם יי מנשבא על אפי מיא.",
@@ -253,7 +252,7 @@ const EXAMPLE = {
       ].join("\n"),
     },
     {
-      name: "רש\"י", place: "bottom", side: "left", font: "Noto Rashi Hebrew", size: 9, width: 30,
+      name: "רש\"י", place: "bottom", side: "left", font: "Noto Rashi Hebrew", size: 10, width: 30, cols: 2,
       text: [
         "@1 בראשית - אמר רבי יצחק לא היה צריך להתחיל את התורה אלא מהחדש הזה לכם, שהיא מצוה ראשונה שנצטוו בה ישראל. ומה טעם פתח בבראשית, משום כח מעשיו הגיד לעמו לתת להם נחלת גוים.",
         "@2 תהו ובהו - תהו לשון תמה ושממון, שאדם תוהא ומשתומם על בהו שבו.",
@@ -269,18 +268,26 @@ const DEFAULTS = {
   title: "",
   main: "",
   comms: [],
-  pageSize: "A4", margin: 14, mainFont: "Frank Ruhl Libre", mainSize: 15, lineHeight: 1.45,
-  rowGap: 1.5, colGap: 5, notesCols: 2, minScale: 75, maxScale: 115,
-  fit: true, colTitles: true, header: true, numbers: true,
+  pageSize: "A4", margin: 14, mainFont: "Frank Ruhl Libre", mainSize: 16, lineHeight: 1.45,
+  colGap: 5, sectionGap: 2, minLines: 4,
+  verseNewLine: false, numbers: true, header: true, colTitles: false,
 };
 
-const COMPACT = { margin: 8, lineHeight: 1.3, rowGap: 0.5, colGap: 3, notesCols: 3, minScale: 60, maxScale: 110, colTitles: false };
-const ROOMY = { margin: 16, lineHeight: 1.6, rowGap: 2.5, colGap: 6, notesCols: 2, minScale: 85, maxScale: 120, colTitles: true };
+const COMPACT = { margin: 8, lineHeight: 1.3, colGap: 3, sectionGap: 1, minLines: 3 };
+const ROOMY = { margin: 16, lineHeight: 1.6, colGap: 6, sectionGap: 3, minLines: 6 };
 
 let S = load();
 let nextId = 1;
-S.comms.forEach((c) => { c.id = nextId++; });
+S.comms.forEach(normComm);
 
+function normComm(c) {
+  c.id = nextId++;
+  if (!PLACE_NAMES[c.place]) c.place = "bottom";
+  if (!c.cols) c.cols = 2;
+  if (!c.width) c.width = 32;
+  if (!c.side) c.side = "left";
+  if (c.autoW === undefined) c.autoW = true;
+}
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -293,7 +300,7 @@ function save() {
 }
 function exportState() {
   const o = Object.assign({}, S);
-  o.comms = S.comms.map(({ id, ...rest }) => rest);
+  o.comms = S.comms.map((c) => Object.fromEntries(Object.entries(c).filter(([k]) => k !== "id" && !k.startsWith("_"))));
   return o;
 }
 
@@ -320,12 +327,20 @@ function heb(n) {
   else s += tens[Math.floor(n / 10)] + ones[n % 10];
   return s;
 }
+// Only bare <b>/</b> tags are generated inside entry text, so it can be split safely on spaces.
 function bold(s) { return s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>"); }
 function entryHtml(raw) {
   const s = esc(raw.trim());
   if (s.includes("**")) return bold(s);
   const m = s.match(/^(.{1,90}?)\s+[-–—]\s+([\s\S]*)$/);
-  return m ? `<b class="dh">${m[1]}</b> ${m[2]}` : s;
+  return m ? `<b>${m[1]}</b> ${m[2]}` : s;
+}
+function splitWords(html, n) {
+  const words = html.split(" ");
+  let a = words.slice(0, n).join(" "), b = words.slice(n).join(" ");
+  const open = (a.match(/<b>/g) || []).length - (a.match(/<\/b>/g) || []).length;
+  if (open > 0) { a += "</b>"; b = "<b>" + b; }
+  return [a, b];
 }
 
 /* ---------- parsing ---------- */
@@ -356,7 +371,8 @@ function parseComm(c, n) {
   const byRef = lines.some((l) => /^\s*@\s*\d+/.test(l));
   let problem = "", info = "";
   if (byRef) {
-    let cur = -1, bad = [];
+    let cur = -1;
+    const bad = [];
     lines.forEach((l) => {
       const m = l.match(/^\s*@\s*(\d+)\s*([\s\S]*)$/);
       if (m) {
@@ -383,8 +399,8 @@ function parseComm(c, n) {
 }
 
 /* ---------- editor UI ---------- */
-const SETTINGS = ["pageSize", "margin", "mainFont", "mainSize", "lineHeight", "rowGap", "colGap", "notesCols", "minScale", "maxScale"];
-const CHECKS = ["fit", "colTitles", "header", "numbers"];
+const SETTINGS = ["pageSize", "margin", "mainFont", "mainSize", "lineHeight", "colGap", "sectionGap", "minLines"];
+const CHECKS = ["verseNewLine", "numbers", "header", "colTitles"];
 
 function fontOptions(sel) {
   return FONTS.map(([v, n]) => `<option value="${v}"${v === sel ? " selected" : ""}>${n}</option>`).join("");
@@ -404,6 +420,7 @@ function renderComms() {
   box.innerHTML = "";
   S.comms.forEach((c, i) => {
     const d = el("div", "comm");
+    const opt = (v, n, cur) => `<option value="${v}"${String(v) === String(cur) ? " selected" : ""}>${n}</option>`;
     d.innerHTML = `
       <div class="chead">
         <input type="text" data-k="name" value="${esc(c.name)}" placeholder="שם הפירוש">
@@ -412,12 +429,16 @@ function renderComms() {
       </div>
       <div class="grid2">
         <label><span>מיקום</span>
-          <select data-k="place">${Object.entries(PLACE_NAMES).map(([v, n]) => `<option value="${v}"${v === c.place ? " selected" : ""}>${n}</option>`).join("")}</select>
+          <select data-k="place">${Object.entries(PLACE_NAMES).map(([v, n]) => opt(v, n, c.place)).join("")}</select>
         </label>
         <label${c.place === "side" ? "" : " hidden"}><span>צד</span>
-          <select data-k="side"><option value="left"${c.side === "left" ? " selected" : ""}>משמאל לטקסט</option><option value="right"${c.side === "right" ? " selected" : ""}>מימין לטקסט</option></select>
+          <select data-k="side">${opt("left", "משמאל לטקסט", c.side)}${opt("right", "מימין לטקסט", c.side)}</select>
         </label>
-        <label${c.place === "side" ? "" : " hidden"}><span>רוחב (% מהשורה)</span><input type="number" data-k="width" min="10" max="70" value="${c.width}"></label>
+        <label${c.place === "side" ? "" : " hidden"}><span>רוחב הטור (%)</span><input type="number" data-k="width" min="10" max="60" value="${c.width}"${c.autoW ? " disabled" : ""}></label>
+        <label class="check"${c.place === "side" ? "" : " hidden"}><input type="checkbox" data-k="autoW"${c.autoW ? " checked" : ""}> <span>רוחב אוטומטי</span></label>
+        <label${c.place === "bottom" ? "" : " hidden"}><span>מספר טורים</span>
+          <select data-k="cols">${opt(1, "1", c.cols)}${opt(2, "2", c.cols)}${opt(3, "3", c.cols)}</select>
+        </label>
         <label><span>גופן</span><select data-k="font">${fontOptions(c.font)}</select></label>
         <label><span>גודל (נק')</span><input type="number" data-k="size" min="5" max="30" step="0.5" value="${c.size}"></label>
       </div>
@@ -426,8 +447,9 @@ function renderComms() {
     d.addEventListener("input", (ev) => {
       const k = ev.target.dataset.k;
       if (!k) return;
-      c[k] = ev.target.type === "number" ? +ev.target.value : ev.target.value;
-      if (k === "place") renderComms();
+      if (ev.target.type === "checkbox") c[k] = ev.target.checked;
+      else c[k] = ev.target.type === "number" || k === "cols" ? +ev.target.value : ev.target.value;
+      if (k === "place" || k === "autoW") renderComms();
       changed();
     });
     d.addEventListener("click", (ev) => {
@@ -453,11 +475,13 @@ function updateStatuses() {
 
 function addComm(place) {
   const names = { side: "תרגום", under: "ביאור", bottom: "פירוש" };
-  S.comms.push({
-    id: nextId++, name: names[place], place, side: "left",
+  const c = {
+    name: names[place], place, side: "left", cols: 2, width: 32,
     font: place === "bottom" ? "Noto Rashi Hebrew" : "Noto Serif Hebrew",
-    size: place === "bottom" ? 9 : 11, width: 35, text: "",
-  });
+    size: place === "bottom" ? 10 : 11, text: "",
+  };
+  normComm(c);
+  S.comms.push(c);
   renderComms();
   changed();
 }
@@ -488,7 +512,13 @@ function renderCheckTable() {
   $("checkTable").innerHTML = h + "</table>";
 }
 
-/* ---------- layout engine ---------- */
+/* ---------- layout engine (Mikraot Gedolot method) ----------
+   Fonts never change. Each page gets: the text (top) with the side translations
+   beside it, cut to the height of the text; under it every commentary as a
+   full-width block of columns. A page takes as many verses as possible, as long
+   as the translation and each commentary of the last verse still START on the
+   page; whatever does not fit is carried, in order, to the top of the next page.
+   Until the page has `minLines` lines of text, verses are added regardless. */
 let layoutRun = 0;
 
 async function layout() {
@@ -508,300 +538,270 @@ async function layout() {
   const left = sides.filter((c) => c.side !== "right");
   const unders = S.comms.filter((c) => c.place === "under");
   const bottoms = S.comms.filter((c) => c.place === "bottom");
+  const flowing = [...sides, ...bottoms];
   const parsed = new Map(S.comms.map((c) => [c, parseComm(c, count)]));
   S.comms.forEach((c) => { const p = parsed.get(c); if (p.problem) warnings.push(`${c.name}: ${p.problem}`); });
 
-  const sideW = sides.reduce((a, c) => a + (+c.width || 30), 0);
-  const mainW = Math.max(20, 100 - sideW);
-  if (100 - sideW < 20) warnings.push("סכום רוחב הפירושים שבצד גדול מדי — הטקסט העיקרי קיבל 20%.");
+  const verseLabels = items.filter((it) => it.type === "v").map((it) => it.label);
+  // per flowing commentary: entries indexed by verse
+  const entriesOf = new Map();
+  sides.forEach((c) => {
+    entriesOf.set(c, parsed.get(c).entries.map((list, v) => {
+      if (!list.length) return [];
+      return [{ v, lbl: `<span class="slbl">${esc(labelOf(v))}</span> `, html: list.map(entryHtml).join(" "), cont: false }];
+    }));
+  });
+  bottoms.forEach((c) => {
+    entriesOf.set(c, parsed.get(c).entries.map((list, v) =>
+      list.map((raw) => ({ v, lbl: `<span class="nlbl">(${esc(labelOf(v))})</span> `, html: entryHtml(raw), cont: false }))));
+  });
+  function labelOf(v) { return verseLabels[v]; }
+
   const cols = [...right, null, ...left];
-  const gridCols = cols.map((c) => (c ? (+c.width || 30) : mainW) + "fr").join(" ");
   const mainPx = S.mainSize * PT;
+  const minTextH = S.minLines * mainPx * S.lineHeight - 1;
+  const gap = S.sectionGap + "mm";
+
+  const fontCss = (font, sizePt, lh) => `font-family:"${font}",serif;font-size:${(sizePt * PT).toFixed(2)}px;line-height:${lh}`;
+  const noteLh = Math.max(1.2, S.lineHeight - 0.12);
 
   const measure = $("measure");
   measure.innerHTML = "";
-  const pages = [];
-  let carry = [];
-  let chapter = "";
 
-  function fontCss(font, sizePt, lh) {
-    return `font-family:"${font}",serif;font-size:${(sizePt * PT).toFixed(2)}px;line-height:${lh}`;
+  function renderText(its) {
+    let h = "", para = [];
+    const flush = () => { if (para.length) { h += `<p class="vline">${para.join(" ")}</p>`; para = []; } };
+    its.forEach((it) => {
+      if (it.type === "h") {
+        flush();
+        h += `<div class="hrow" style="font-size:${(mainPx * 1.2).toFixed(2)}px">${esc(it.text)}</div>`;
+        return;
+      }
+      const v = (S.numbers ? `<span class="lbl">${esc(it.label)}</span> ` : "") + it.html;
+      const und = unders.map((u) => {
+        const e = parsed.get(u).entries[it.idx];
+        return e.length ? `<div class="under" style="${fontCss(u.font, u.size, noteLh)}">${e.map(entryHtml).join(" ")}</div>` : "";
+      }).join("");
+      if (S.verseNewLine || und) { flush(); h += `<p class="vline">${v}</p>${und}`; }
+      else para.push(v);
+    });
+    flush();
+    return h;
   }
+
+  // Auto width: measure the whole text and each translation as one running column
+  // and pick the width at which both come out the same height, so they run out
+  // together page after page (the way the Onkelos column is sized in Mikraot Gedolot).
+  const usable = (Wmm - 2 * S.margin) * PX_MM - sides.length * S.colGap * PX_MM;
+  const probe = el("div", "tcol");
+  measure.append(probe);
+  const heightAt = (html, css, px) => {
+    probe.style.cssText = css + `;width:${px}px`;
+    probe.innerHTML = html;
+    return probe.offsetHeight;
+  };
+  const sampleItems = items.slice(0, 600);
+  const sampleVerses = new Set(sampleItems.filter((it) => it.type === "v").map((it) => it.idx));
+  const mainHtml = renderText(sampleItems);
+  const mainCss = fontCss(S.mainFont, S.mainSize, S.lineHeight);
+  sides.forEach((c) => { c._w = Math.min(60, Math.max(10, +c.width || 30)); });
+  sides.filter((c) => c.autoW).forEach((c) => {
+    const html = parsed.get(c).entries.filter((_, v) => sampleVerses.has(v)).map((l) => l.map(entryHtml).join(" ")).join(" ");
+    if (!html.trim()) return;
+    const css = fontCss(c.font, c.size, S.lineHeight);
+    const others = sides.filter((o) => o !== c).reduce((a, o) => a + o._w, 0);
+    let lo = 10, hi = Math.min(60, 90 - others);
+    for (let i = 0; i < 9; i++) {
+      const w = (lo + hi) / 2;
+      const hMain = heightAt(mainHtml, mainCss, usable * (100 - others - w) / 100);
+      const hSide = heightAt(html, css, usable * w / 100 - 1.4 * PX_MM);
+      if (hSide > hMain * 0.95) lo = w; else hi = w;
+    }
+    c._w = Math.round(hi * 10) / 10;
+  });
+  probe.remove();
+  const sideW = sides.reduce((a, c) => a + c._w, 0);
+  const mainW = Math.max(25, 100 - sideW);
+  if (100 - sideW < 25) warnings.push("סכום רוחב הטורים הצמודים גדול מדי — הטקסט העיקרי קיבל 25%.");
+  const gridCols = cols.map((c) => (c ? c._w : mainW) + "fr").join(" ");
 
   function makePage() {
     const page = el("div", "page");
     page.style.cssText = `width:${Wmm}mm;height:${Hmm}mm;padding:${S.margin}mm`;
     const inner = el("div", "pinner");
-    const head = el("div", "phead");
+    let head = null;
     if (S.header) {
-      head.innerHTML = `<span class="pt"></span><span class="pc"></span><span class="pn"></span>`;
+      head = el("div", "phead", `<span class="pt"></span><span class="pc"></span><span class="pn"></span>`);
       head.style.fontFamily = `"${S.mainFont}",serif`;
       inner.append(head);
     }
-    const body = el("div", "pbody");
-    body.style.cssText = fontCss(S.mainFont, S.mainSize, S.lineHeight);
-    if (S.colTitles && sides.length) {
-      const ch = el("div", "colhead");
-      ch.style.gridTemplateColumns = gridCols;
-      ch.style.columnGap = S.colGap + "mm";
-      ch.style.fontFamily = `"${S.mainFont}",serif`;
-      ch.innerHTML = cols.map((c) => `<div>${c ? esc(c.name) : esc(S.title || "")}</div>`).join("");
-      body.append(ch);
-    }
-    inner.append(body);
+    const top = el("div", "ptop");
+    top.style.gridTemplateColumns = gridCols;
+    top.style.columnGap = S.colGap + "mm";
+    const text = el("div", "tcol");
+    text.style.cssText = fontCss(S.mainFont, S.mainSize, S.lineHeight);
+    const sideCols = new Map();
+    cols.forEach((c) => {
+      if (!c) { top.append(text); return; }
+      const sc = el("div", "scol " + (c.side === "right" ? "sep-left" : "sep-right"));
+      sc.style.cssText = fontCss(c.font, c.size, S.lineHeight);
+      top.append(sc);
+      sideCols.set(c, sc);
+    });
+    inner.append(top);
     const notes = el("div", "pnotes");
-    notes.innerHTML = "<hr>";
-    const ncont = el("div", "ncont");
-    ncont.style.columnCount = S.notesCols;
-    ncont.style.columnGap = S.colGap + "mm";
+    notes.style.marginTop = gap;
+    notes.hidden = true;
     const secs = new Map();
     bottoms.forEach((c) => {
-      const sec = el("div", "nsec", `<span class="nname">${esc(c.name)}</span> `);
-      sec.style.cssText = fontCss(c.font, c.size, Math.max(1.15, S.lineHeight - 0.15));
+      const sec = el("div", "nsec");
+      sec.style.cssText = fontCss(c.font, c.size, noteLh) + `;column-count:${c.cols};column-gap:${S.colGap}mm;padding-top:${S.sectionGap * 0.6}mm`;
+      sec.hidden = true;
+      notes.append(sec);
       secs.set(c, sec);
-      ncont.append(sec);
     });
-    notes.append(ncont);
     inner.append(notes);
     page.append(inner);
     measure.append(page);
-    const pg = { page, inner, head, body, notes, secs, chapter, verses: 0, hasHeading: false };
-    refreshNotes(pg);
-    pages.push(pg);
-    return pg;
+    return { page, inner, head, top, text, sideCols, notes, secs };
   }
 
-  const overflow = (pg) => pg.inner.offsetHeight > contentH + 0.5;
-
-  function refreshNotes(pg) {
-    let any = false;
-    pg.secs.forEach((sec) => {
-      const has = !!sec.querySelector(".nspan");
-      sec.style.display = has ? "" : "none";
-      any = any || has;
-    });
-    pg.notes.style.display = any ? "" : "none";
-  }
-
-  function addNote(pg, n, key) {
-    const span = el("span", "nspan", (n.cont ? "" : `<span class="nlbl">(${esc(n.label)})</span> `) + n.html + " ");
-    span.dataset.key = key;
-    span._n = n;
-    pg.secs.get(n.comm).append(span);
-    refreshNotes(pg);
-    return span;
-  }
-
-  // Moves bottom-notes (eligible: key >= minKey) off the end of the page until it fits,
-  // splitting the last one by words so the page is filled. Returns what spills over.
-  function trim(pg, minKey) {
-    const spans = [...pg.notes.querySelectorAll(".nspan")].filter((s) => +s.dataset.key >= minKey);
-    const removed = [];
-    while (overflow(pg) && spans.length) {
-      const s = spans.pop();
-      removed.unshift(s._n);
-      s.remove();
-      refreshNotes(pg);
+  // Put as many entries as fit (fits() is checked after each trial render), splitting the
+  // first one that doesn't by words. Returns the leftover entries and which verses started.
+  function fill(target, prefix, list, fits, force) {
+    const render = (arr, part) => {
+      target.innerHTML = prefix + arr.map((e) => (e.cont ? "" : e.lbl) + e.html).join(" ") +
+        (part ? " " + (part.cont ? "" : part.lbl) + part.html : "");
+    };
+    const n = list.length;
+    let m = n;
+    render(list);
+    if (!fits()) {
+      let lo = 0, hi = n - 1;
+      m = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        render(list.slice(0, mid));
+        if (fits()) { m = mid; lo = mid + 1; } else hi = mid - 1;
+      }
     }
-    if (overflow(pg)) return { ok: false, keptAny: false, carry: removed };
-    if (!removed.length) return { ok: true, keptAny: true, carry: [] };
-    const first = removed[0];
-    const words = first.html.split(" ");
-    const key = minKey;
-    let lo = 0, hi = words.length - 1, best = 0, probe = null;
+    const started = new Set(list.slice(0, m).filter((e) => !e.cont).map((e) => e.v));
+    if (m === n) { render(list); return { rest: [], started, any: n > 0 }; }
+    const e = list[m];
+    const words = e.html.split(" ").length;
+    let lo = 1, hi = words - 1, w = 0;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (probe) probe.remove();
-      probe = addNote(pg, Object.assign({}, first, { html: words.slice(0, mid).join(" ") }), key);
-      if (overflow(pg)) hi = mid - 1; else { best = mid; lo = mid + 1; }
+      render(list.slice(0, m), Object.assign({}, e, { html: splitWords(e.html, mid)[0] }));
+      if (fits()) { w = mid; lo = mid + 1; } else hi = mid - 1;
     }
-    if (probe) { probe.remove(); refreshNotes(pg); }
-    let keptPart = false;
-    if (best >= 3) {
-      addNote(pg, Object.assign({}, first, { html: words.slice(0, best).join(" ") }), key);
-      removed[0] = Object.assign({}, first, { html: words.slice(best).join(" "), cont: true });
-      keptPart = true;
+    const minW = force && m === 0 ? 1 : 3;
+    if (force && m === 0 && w < 1) w = 1;
+    if (w >= minW && w < words) {
+      const [a, b] = splitWords(e.html, w);
+      render(list.slice(0, m), Object.assign({}, e, { html: a }));
+      if (!e.cont) started.add(e.v);
+      return { rest: [Object.assign({}, e, { html: b, cont: true }), ...list.slice(m + 1)], started, any: true };
     }
-    return { ok: true, keptAny: spans.length > 0 || keptPart, carry: removed };
+    render(list.slice(0, m));
+    return { rest: list.slice(m), started, any: m > 0 };
   }
 
-  function freshPage() {
-    let pg = makePage();
-    let guard = 0;
-    while (carry.length && guard++ < 500) {
-      const items2 = carry;
-      carry = [];
-      items2.forEach((n) => addNote(pg, n, -1));
-      if (!overflow(pg)) break;
-      const r = trim(pg, -1);
-      carry = r.carry;
-      if (!pg.notes.querySelector(".nspan") && carry.length) {
-        // a single fragment bigger than an empty page: force it in to guarantee progress
-        addNote(pg, carry.shift(), -1);
-        pg.page.classList.add("overfull");
-      }
-      if (carry.length) pg = makePage();
-    }
-    return pg;
-  }
+  let carry = new Map(flowing.map((c) => [c, []]));
 
-  function buildItem(it) {
-    if (it.type === "h") {
-      const d = el("div", "item hrow", esc(it.text));
-      d.style.fontSize = (mainPx * 1.25).toFixed(2) + "px";
-      d.style.margin = `${S.rowGap + 1}mm 0 ${S.rowGap + 0.5}mm`;
-      return d;
-    }
-    const row = el("div", "item vrow");
-    row.style.gridTemplateColumns = gridCols;
-    row.style.columnGap = S.colGap + "mm";
-    row.style.marginBottom = S.rowGap + "mm";
-    cols.forEach((c) => {
-      if (!c) {
-        const cell = el("div", "cell cmain");
-        const m = el("div", "mtext", (S.numbers ? `<span class="lbl">${esc(it.label)}</span>` : "") + it.html);
-        cell.append(m);
-        unders.forEach((u) => {
-          const e = parsed.get(u).entries[it.idx];
-          if (!e.length) return;
-          const ud = el("div", "under", e.map(entryHtml).join(" "));
-          ud.style.cssText = fontCss(u.font, u.size, Math.max(1.15, S.lineHeight - 0.1));
-          cell.append(ud);
-        });
-        row.append(cell);
-        return;
-      }
-      const cell = el("div", "cell cside");
-      const e = parsed.get(c).entries[it.idx];
-      const t = el("div", "ctext " + (c.side === "right" ? "sep-left" : "sep-right"), e.map(entryHtml).join(" "));
-      t.style.cssText = fontCss(c.font, c.size, S.lineHeight);
-      t.dataset.size = c.size * PT;
-      cell.append(t);
-      row.append(cell);
+  function compose(pos, k, force) {
+    const pg = makePage();
+    const its = items.slice(pos, pos + k);
+    const verses = its.filter((it) => it.type === "v");
+    pg.text.innerHTML = renderText(its);
+    const textH = pg.text.offsetHeight;
+    const res = { pg, k, textH, ok: true, rest: new Map() };
+    const fitsPage = () => pg.inner.offsetHeight <= contentH + 0.5;
+
+    sides.forEach((c) => {
+      const col = pg.sideCols.get(c);
+      const title = S.colTitles ? `<div class="ctitle">${esc(c.name)}</div>` : "";
+      const list = [...carry.get(c), ...verses.flatMap((v) => entriesOf.get(c)[v.idx])];
+      // on the last page (or a page of leftovers only) the column may run past the text
+      const limit = k && pos + k < items.length ? Math.max(textH, 1) : contentH;
+      const f = fill(col, title, list, () => col.offsetHeight <= limit + 0.5 && fitsPage(), force);
+      res.rest.set(c, f.rest);
+      // the translation may trail the text by at most one verse
+      const withT = verses.filter((v) => entriesOf.get(c)[v.idx].length);
+      const need = withT.length > 1 ? withT[withT.length - 2] : null;
+      if (need && !f.started.has(need.idx)) res.ok = false;
     });
-    return row;
-  }
+    res.topFits = fitsPage();
 
-  // Make each side commentary end on the same line as its verse:
-  // pick the largest font (within limits) that is not taller than the verse,
-  // then stretch the line spacing of whatever is shorter so the bottoms meet.
-  function fitRow(row) {
-    if (!S.fit) return;
-    const main = row.querySelector(".cmain");
-    const H = main.offsetHeight;
-    const texts = [...row.querySelectorAll(".cside .ctext")].filter((t) => t.textContent.trim());
-    texts.forEach((t) => {
-      const base = +t.dataset.size;
-      let lo = base * S.minScale / 100, hi = base * S.maxScale / 100, best;
-      t.style.fontSize = hi + "px";
-      if (t.offsetHeight <= H) best = hi;
-      else {
-        t.style.fontSize = lo + "px";
-        if (t.offsetHeight > H) best = lo;
-        else {
-          best = lo;
-          for (let i = 0; i < 9; i++) {
-            const mid = (lo + hi) / 2;
-            t.style.fontSize = mid + "px";
-            if (t.offsetHeight <= H) { best = mid; lo = mid; } else hi = mid;
-          }
-        }
-      }
-      t.style.fontSize = best.toFixed(2) + "px";
-    });
-    const rowH = Math.max(H, ...texts.map((t) => t.offsetHeight));
-    const stretch = (t, fs) => {
-      const lh = S.lineHeight;
-      const h = t.offsetHeight;
-      const lines = Math.round(h / (fs * lh));
-      if (lines < 2 || rowH - h < 1) return;
-      const newLh = Math.min(lh * 1.9, rowH / (lines * fs));
-      t.style.lineHeight = newLh.toFixed(4);
-      for (let i = 0; i < 4 && t.offsetHeight > rowH + 0.5; i++) {
-        t.style.lineHeight = (parseFloat(t.style.lineHeight) * 0.995).toFixed(4);
-      }
-    };
-    texts.forEach((t) => stretch(t, parseFloat(t.style.fontSize)));
-    if (!main.querySelector(".under")) stretch(main.querySelector(".mtext"), mainPx);
-  }
-
-  function notesFor(it) {
-    if (it.type !== "v") return [];
-    const out = [];
     bottoms.forEach((c) => {
-      parsed.get(c).entries[it.idx].forEach((raw) => out.push({ comm: c, label: it.label, html: entryHtml(raw), cont: false }));
+      const sec = pg.secs.get(c);
+      const list = [...carry.get(c), ...verses.flatMap((v) => entriesOf.get(c)[v.idx])];
+      if (!list.length) { res.rest.set(c, []); return; }
+      const firstShown = pg.notes.hidden;
+      sec.hidden = false;
+      pg.notes.hidden = false;
+      const f = fill(sec, `<span class="nname">${esc(c.name)}</span> `, list, fitsPage, force && firstShown);
+      if (!f.any) sec.hidden = true;
+      pg.notes.hidden = ![...pg.secs.values()].some((s) => !s.hidden);
+      res.rest.set(c, f.rest);
+      const last = verses.filter((v) => entriesOf.get(c)[v.idx].length).pop();
+      if (last && !f.started.has(last.idx)) { res.ok = false; res.bottomFail = true; }
     });
-    return out;
+    if (!fitsPage()) res.ok = false;
+    return res;
   }
 
-  function place(pg, it, row, notes) {
-    pg.body.append(row);
-    if (it.type === "v") pg.verses++;
-    else { pg.hasHeading = true; if (!pg.verses) pg.chapter = it.chapter; }
-    notes.forEach((n) => addNote(pg, n, it.idx));
-  }
-  function unplace(pg, it, row) {
-    row.remove();
-    if (it.type === "v") pg.verses--;
-    pg.notes.querySelectorAll(".nspan").forEach((s) => { if (+s.dataset.key === it.idx && it.type === "v") s.remove(); });
-    refreshNotes(pg);
-  }
-
-  let pg = freshPage();
-  for (const it of items) {
+  const pages = [];
+  let pos = 0, guard = 0, lagPages = 0;
+  const anyCarry = () => [...carry.values()].some((l) => l.length);
+  while ((pos < items.length || anyCarry()) && guard++ < 5000) {
     if (run !== layoutRun) return;
-    if (it.type === "h") chapter = it.chapter;
-    const row = buildItem(it);
-    const notes = notesFor(it);
-    const key = it.type === "v" ? it.idx : 1e9;
-    place(pg, it, row, notes);
-    if (it.type === "v") fitRow(row);
-    if (!overflow(pg)) continue;
-
-    const alone = pg.body.querySelectorAll(".item").length === 1;
-    const r = trim(pg, key);
-    if (r.ok && (alone || r.keptAny || !notes.length)) {
-      carry = r.carry;
-      if (carry.length) pg = freshPage();
-      continue;
+    let best = null;
+    const remaining = items.length - pos;
+    if (!remaining) best = compose(pos, 0, true);
+    // Whether the last verse's translation still starts on the page goes up and down as
+    // verses are added, so keep trying until the text itself or the commentaries run out
+    // of room, and keep the largest count that works.
+    for (let k = 1; k <= remaining; k++) {
+      const r = compose(pos, k, false);
+      const short = !best || best.textH < minTextH;
+      if (!best || r.ok || short) {
+        if (best) best.pg.page.remove();
+        best = r;
+      } else r.pg.page.remove();
+      if (!r.topFits || r.bottomFail) break;
     }
-    if (alone) {
-      warnings.push(`פסוק ${it.label} (${it.chapter}) ארוך מעמוד שלם — חלק ממנו נחתך. הקטינו גופן או חלקו אותו לשתי שורות.`);
-      pg.page.classList.add("overfull");
-      carry = r.carry;
-      pg = freshPage();
-      continue;
+    // don't leave a chapter heading alone at the bottom of a page
+    if (best.k > 1 && items[pos + best.k - 1].type === "h") {
+      best.pg.page.remove();
+      best = compose(pos, best.k - 1, false);
     }
-    // doesn't fit: move the verse (with its notes) to a new page
-    unplace(pg, it, row);
-    carry = [];
-    pg = freshPage();
-    pg.chapter = chapter;
-    place(pg, it, row, notes);
-    if (!overflow(pg)) continue;
-    const r2 = trim(pg, key);
-    carry = r2.carry;
-    if (!r2.ok) {
-      warnings.push(`פסוק ${it.label} (${it.chapter}) ארוך מעמוד שלם — חלק ממנו נחתך. הקטינו גופן או חלקו אותו לשתי שורות.`);
-      pg.page.classList.add("overfull");
+    if (best.k === 1 && !best.ok && best.textH + 1 > contentH) {
+      const it = items[pos];
+      warnings.push(`פסוק ${it.label || ""} (${it.chapter}) ארוך מעמוד שלם — חלק ממנו נחתך.`);
+      best.pg.page.classList.add("overfull");
     }
-    if (carry.length) pg = freshPage();
-  }
-  // a trailing empty page (no verses, no notes) is dropped
-  const last = pages[pages.length - 1];
-  if (pages.length > 1 && !last.body.querySelector(".item") && !last.notes.querySelector(".nspan")) {
-    last.page.remove();
-    pages.pop();
+    const first = items[pos] || items[items.length - 1];
+    best.pg.chapter = first ? first.chapter : "";
+    pages.push(best.pg);
+    carry = best.rest;
+    if (sides.some((c) => (carry.get(c) || []).length > 1)) lagPages++;
+    flowing.forEach((c) => { if (!carry.has(c)) carry.set(c, []); });
+    pos += best.k;
+    $("pv-info").textContent = `מעמד… עמוד ${pages.length}`;
+    if (pages.length % 4 === 0) await new Promise((r) => setTimeout(r));
   }
 
+  if (lagPages > Math.max(2, pages.length * 0.3)) {
+    warnings.push("התרגום שבטור הצמוד ארוך מהטקסט בהרבה עמודים ומעכב אותו — כדאי להגדיל את רוחב הטור או להקטין את האות שלו.");
+  }
   pages.forEach((p, i) => {
-    if (!S.header) return;
+    if (!p.head) return;
     p.head.querySelector(".pt").textContent = S.title;
     p.head.querySelector(".pc").textContent = p.chapter || "";
     p.head.querySelector(".pn").textContent = heb(i + 1);
   });
 
-  // move pages to the visible preview, scaled down to fit the screen
   const out = $("pages");
   out.innerHTML = "";
   const Wpx = Wmm * PX_MM, Hpx = Hmm * PX_MM;
@@ -815,7 +815,7 @@ async function layout() {
     w.append(p.page);
     out.append(w);
   });
-  $("pv-info").textContent = `${pages.length} עמודים · ${count} פסוקים · ${S.comms.length} פירושים · תצוגה ${Math.round(scale * 100)}%`;
+  $("pv-info").textContent = `${pages.length} עמודים · ${count} פסוקים · ${S.comms.length} פירושים${sides.map((c) => ` · ${c.name}: רוחב ${Math.round(c._w)}%`).join("")} · תצוגה ${Math.round(scale * 100)}%`;
   $("warnings").innerHTML = warnings.map((w) => `<div>⚠ ${esc(w)}</div>`).join("");
 }
 
@@ -823,7 +823,7 @@ async function layout() {
 $("title").addEventListener("input", (e) => { S.title = e.target.value; changed(); });
 $("main").addEventListener("input", (e) => { S.main = e.target.value; changed(); });
 SETTINGS.forEach((k) => $(k).addEventListener("input", (e) => {
-  S[k] = e.target.type === "number" || k === "notesCols" ? +e.target.value : e.target.value;
+  S[k] = e.target.type === "number" ? +e.target.value : e.target.value;
   changed();
 }));
 CHECKS.forEach((k) => $(k).addEventListener("change", (e) => { S[k] = e.target.checked; changed(); }));
@@ -849,7 +849,7 @@ $("file-open").addEventListener("change", (e) => {
   f.text().then((txt) => {
     try {
       S = Object.assign({}, DEFAULTS, JSON.parse(txt));
-      S.comms.forEach((c) => { c.id = nextId++; });
+      S.comms.forEach(normComm);
       fillEditor();
       changed();
     } catch (err) { alert("הקובץ אינו קובץ פרויקט תקין"); }
@@ -859,7 +859,7 @@ $("file-open").addEventListener("change", (e) => {
 $("btn-example").addEventListener("click", () => {
   if (!confirm("לטעון את הדוגמה? הטקסט הנוכחי יוחלף (כדאי לשמור קובץ קודם).")) return;
   S = Object.assign({}, S, JSON.parse(JSON.stringify(EXAMPLE)));
-  S.comms.forEach((c) => { c.id = nextId++; });
+  S.comms.forEach(normComm);
   fillEditor();
   changed();
 });
