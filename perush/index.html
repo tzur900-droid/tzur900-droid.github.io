@@ -95,7 +95,7 @@
   .phead .pt { font-weight: 700; }
   .phead .pc { flex: 1; text-align: center; }
   .ptop { display: flow-root; }
-  .band { clear: both; text-align: justify; border-top: .4pt solid #888; margin-top: .6mm; padding-top: .4mm; }
+  .band { clear: both; text-align: justify; margin-top: 1mm; }
   .band b { font-weight: 700; }
   .tcol p, .scol p { margin: 0; }
   .tcol, .scol, .nsec { text-align: justify; overflow-wrap: break-word; }
@@ -103,13 +103,11 @@
   .tcol .vline.jlast { text-align-last: justify; }
   .tcol .under { margin-top: .2mm; text-align: justify; }
   .lbl { font-weight: 700; }
-  .scol.sep-right { border-right: .4pt solid #888; padding-right: 1.4mm; }
-  .scol.sep-left { border-left: .4pt solid #888; padding-left: 1.4mm; }
+
   .slbl { font-weight: 700; }
-  .ctitle { font-weight: 700; text-align: center; font-size: .85em; border-bottom: .4pt solid #000; margin-bottom: .8mm; }
-  .pnotes { border-top: .6pt solid #000; }
-  .nsec { column-rule: .4pt solid #aaa; }
-  .nsec + .nsec { border-top: .4pt solid #888; }
+  .ctitle { font-weight: 700; text-align: center; font-size: .85em; margin-bottom: .8mm; }
+  .nsec + .nsec { margin-top: 1.2mm; }
+  .tcol .hrow.haft { margin-top: 1mm; margin-bottom: .6mm; }
   .nname { font-weight: 700; font-size: 1.15em; }
   .nlbl { font-weight: 700; }
   .nsec b, .scol b, .tcol b { font-weight: 700; }
@@ -152,6 +150,7 @@
     </div>
     <p class="hint">
       שורה שמתחילה ב־<code>#</code> היא כותרת (למשל <code># פרק א</code>), והמספור מתחיל מחדש אחריה.
+      שורה שמתחילה ב־<code>##</code> פותחת קטע <b>בלי פירוש</b>, כמו הפטרה (<code>## הפטרת בראשית</code>); הוא מתחיל מתחת לסוף הפרשה. <code>#</code> רגיל אחריו חוזר לטקסט עם פירושים.
       אפשר לתת סימון משלך: <code>[יב] טקסט</code>. מודגש: <code>**מילים**</code>.
     </p>
 
@@ -240,6 +239,10 @@ const EXAMPLE = {
     "ויאמר אלהים יהי אור ויהי אור.",
     "וירא אלהים את האור כי טוב ויבדל אלהים בין האור ובין החשך.",
     "ויקרא אלהים לאור יום ולחשך קרא לילה ויהי ערב ויהי בקר יום אחד.",
+    "## הפטרת בראשית",
+    "[ה] כה אמר האל ה' בורא השמים ונוטיהם רקע הארץ וצאצאיה נתן נשמה לעם עליה ורוח להלכים בה.",
+    "[ו] אני ה' קראתיך בצדק ואחזק בידך ואצרך ואתנך לברית עם לאור גוים.",
+    "[ז] לפקח עינים עורות להוציא ממסגר אסיר מבית כלא ישבי חשך.",
   ].join("\n"),
   comms: [
     {
@@ -348,14 +351,16 @@ function sliceWords(html, from, to) {
 /* ---------- parsing ---------- */
 function parseMain() {
   const items = [];
-  let verses = 0, inChap = 0, chapter = "";
+  let verses = 0, inChap = 0, chapter = "", noComm = false;
   S.main.replace(/\r/g, "").split("\n").forEach((line) => {
     const t = line.trim();
     if (!t) return;
     if (t.startsWith("#")) {
+      // "## ..." opens a section with no commentary (a haftara); "# ..." returns to the commented text
+      noComm = t.startsWith("##");
       chapter = t.replace(/^#+\s*/, "");
       inChap = 0;
-      items.push({ type: "h", text: chapter, chapter });
+      items.push({ type: "h", text: chapter, chapter, noComm });
       return;
     }
     inChap++;
@@ -363,7 +368,7 @@ function parseMain() {
     const m = t.match(/^\[([^\]]{1,12})\]\s*(.*)$/);
     if (m) { label = m[1]; text = m[2]; }
     const html = bold(esc(text)).replace(/\s+/g, " ");
-    items.push({ type: "v", idx: verses++, label, html, words: html.split(" "), plain: text, chapter });
+    items.push({ type: "v", idx: noComm ? -1 : verses++, label, html, words: html.split(" "), plain: text, chapter, noComm });
   });
   return { items, count: verses };
 }
@@ -503,7 +508,7 @@ function renderCheckTable() {
   const { items, count } = parseMain();
   const parsed = S.comms.map((c) => parseComm(c, count));
   let h = `<table class="check"><tr><th>#</th><th>פסוק</th>${S.comms.map((c) => `<th>${esc(c.name)}</th>`).join("")}</tr>`;
-  items.filter((it) => it.type === "v").forEach((v) => {
+  items.filter((it) => it.type === "v" && !it.noComm).forEach((v) => {
     h += `<tr><td>${v.idx + 1} (${esc(v.label)})</td><td title="${esc(v.plain)}">${esc(v.plain)}</td>`;
     parsed.forEach((p) => {
       const e = p.entries[v.idx];
@@ -541,7 +546,9 @@ async function layout() {
   const [Wmm, Hmm] = SIZES[S.pageSize] || SIZES.A4;
   $("page-size").textContent = `@page { size: ${Wmm}mm ${Hmm}mm; margin: 0; }`;
   const contentH = (Hmm - 2 * S.margin) * PX_MM;
-  const { items, count } = parseMain();
+  const { items: allItems, count } = parseMain();
+  // the engine works on one section at a time; it starts with all commented text
+  let items = allItems.filter((it) => !it.noComm);
   const warnings = [];
 
   const sides = S.comms.filter((c) => c.place === "side");
@@ -575,13 +582,13 @@ async function layout() {
       const it = s.it;
       if (it.type === "h") {
         flush();
-        h += `<div class="hrow" style="font-size:${(mainPx * 1.2).toFixed(2)}px">${esc(it.text)}</div>`;
+        h += `<div class="hrow${it.noComm ? " haft" : ""}" style="font-size:${(mainPx * 1.2).toFixed(2)}px">${esc(it.text)}</div>`;
         return;
       }
       const whole = s.from === 0 && s.to === it.words.length;
       const v = (S.numbers && s.from === 0 ? `<span class="lbl">${esc(it.label)}</span> ` : "") +
         (whole ? it.html : sliceWords(it.html, s.from, s.to));
-      const und = s.to === it.words.length ? unders.map((u) => {
+      const und = s.to === it.words.length && it.idx >= 0 ? unders.map((u) => {
         const e = parsed.get(u).entries[it.idx];
         return e.length ? `<div class="under" style="${fontCss(u.font, u.size, noteLh)}">${e.map(entryHtml).join(" ")}</div>` : "";
       }).join("") : "";
@@ -630,6 +637,7 @@ async function layout() {
     sides.forEach((c) => { c._w = c._w * 75 / sideW; });
   }
 
+  let curPre = null;
   function makePage() {
     const page = el("div", "page");
     page.style.cssText = `width:${Wmm}mm;height:${Hmm}mm;padding:${S.margin}mm`;
@@ -661,6 +669,11 @@ async function layout() {
       top.append(band);
       bands.set(c, band);
     });
+    const pre = el("div", "tcol pre");
+    pre.style.cssText = fontCss(S.mainFont, S.mainSize, S.lineHeight) + `;margin-bottom:${S.sectionGap + 3}mm`;
+    pre.hidden = !curPre;
+    if (curPre) pre.innerHTML = curPre;
+    inner.append(pre);
     inner.append(top);
     const notes = el("div", "pnotes");
     notes.style.marginTop = gap;
@@ -674,9 +687,13 @@ async function layout() {
       secs.set(c, sec);
     });
     inner.append(notes);
+    const post = el("div", "tcol post");
+    post.style.cssText = fontCss(S.mainFont, S.mainSize, S.lineHeight) + `;margin-top:${S.sectionGap + 3}mm`;
+    post.hidden = true;
+    inner.append(post);
     page.append(inner);
     measure.append(page);
-    return { page, inner, head, top, text, sideCols, bands, notes, secs };
+    return { page, inner, head, top, text, sideCols, bands, notes, secs, pre, post };
   }
 
   // Put as many entries as fit (fits() is checked after each trial render), splitting the
@@ -756,9 +773,12 @@ async function layout() {
     if (idx === undefined) return true;
     return ptr.e > idx || (ptr.e === idx && ptr.w >= 3);
   }
-  const done = (c, ptr) => ptr.e >= streams.get(c).length;
+  // where the current section's entries end in each stream
+  let secEnd = new Map();
+  const done = (c, ptr) => ptr.e >= (secEnd.has(c) ? secEnd.get(c) : streams.get(c).length);
 
-  function segments(a, b) {
+  function segments(a, b, list = items) {
+    const items = list;
     const segs = [];
     const lastI = b.w > 0 ? b.i : b.i - 1;
     for (let i = a.i; i <= lastI && i < items.length; i++) {
@@ -879,6 +899,36 @@ async function layout() {
     return res;
   }
 
+  function mergeTails(res) {
+    const pg = res.pg;
+    // a translation that runs on under the text by less than a line: keep it in its column
+    // and open the text's line spacing a little so both end together
+    sides.forEach((c) => {
+      const col = pg.sideCols.get(c), band = pg.bands.get(c), inf = res.info.get(c);
+      if (!inf || inf.mode !== "band" || band.hidden || col.hidden) return;
+      const blh = c.size * PT * S.lineHeight;
+      if (band.offsetHeight > blh * 1.5) return;
+      const saved = [col.innerHTML, col.style.height, pg.text.style.lineHeight];
+      col.innerHTML += " " + band.innerHTML;
+      col.style.height = "";
+      band.hidden = true;
+      const tlh = mainPx * S.lineHeight;
+      const lines = Math.round(pg.text.offsetHeight / tlh);
+      const target = col.offsetHeight;
+      if (lines >= 3 && target > pg.text.offsetHeight) {
+        pg.text.style.lineHeight = (target / lines).toFixed(3) + "px";
+        for (let i = 0; i < 40 && pg.text.offsetHeight > target + 0.5; i++) pg.text.style.lineHeight = (parseFloat(pg.text.style.lineHeight) - 0.05) + "px";
+      }
+      if (lines < 3 || (target - pg.text.offsetHeight) > 2 || target / lines > tlh * 1.25 || pg.inner.offsetHeight > contentH + 0.5) {
+        [col.innerHTML, col.style.height, pg.text.style.lineHeight] = saved;
+        band.hidden = false;
+        return;
+      }
+      inf.mode = "merged";
+      res.textH = pg.text.offsetHeight;
+    });
+  }
+
   // Close the remaining gaps on a finished page: the translation column is stretched
   // to end exactly with the text, and the last commentary is set into columns of a
   // fixed height that reach the bottom of the page.
@@ -949,9 +999,19 @@ async function layout() {
   }
 
   // Text positions as one running count of units (a word of a verse, or a whole heading).
-  const off = [];
-  let totalUnits = 0;
-  items.forEach((it) => { off.push(totalUnits); totalUnits += it.type === "v" ? it.words.length : 1; });
+  let off = [], totalUnits = 0;
+  function setItems(list) {
+    items = list;
+    off = [];
+    totalUnits = 0;
+    items.forEach((it) => { off.push(totalUnits); totalUnits += it.type === "v" ? it.words.length : 1; });
+    const lastV = items.filter((it) => it.type === "v").map((it) => it.idx).pop();
+    secEnd = new Map([...streams.entries()].map(([c, st]) => {
+      let n = 0;
+      while (n < st.length && lastV != null && st[n].v <= lastV) n++;
+      return [c, n];
+    }));
+  }
   const toPos = (g) => {
     if (g >= totalUnits) return { i: items.length, w: 0 };
     let lo = 0, hi = items.length - 1;
@@ -959,6 +1019,7 @@ async function layout() {
     return { i: lo, w: g - off[lo] };
   };
   const toG = (p) => (p.i >= items.length ? totalUnits : off[p.i] + p.w);
+  setItems(items);
   const tprobe = makePage();
   const textHeight = (a, g) => {
     const b = toPos(g);
@@ -995,60 +1056,183 @@ async function layout() {
     return out;
   }
 
+  // ---- text without commentary (haftarot): plain running text at full width ----
+  function unitsOf(list) {
+    const o = [];
+    let t = 0;
+    list.forEach((it) => { o.push(t); t += it.type === "v" ? it.words.length : 1; });
+    return {
+      t,
+      toPos: (g) => {
+        if (g >= t) return { i: list.length, w: 0 };
+        let lo = 0, hi = list.length - 1;
+        while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (o[mid] <= g) lo = mid; else hi = mid - 1; }
+        return { i: lo, w: g - o[lo] };
+      },
+      toG: (p) => (p.i >= list.length ? t : o[p.i] + p.w),
+    };
+  }
+  // Open the line spacing of box so the page reaches its bottom (only for a small remainder).
+  function stretchTo(pg, box) {
+    const fits = () => pg.inner.offsetHeight <= contentH + 0.5;
+    const spare = contentH - pg.inner.offsetHeight;
+    const lh = mainPx * S.lineHeight;
+    const lines = Math.round(box.offsetHeight / lh);
+    if (spare < 0.5 || lines < 1 || spare > lh * 3) return;
+    let lo = 0, hi = spare / lines;
+    for (let i = 0; i < 14; i++) {
+      const mid = (lo + hi) / 2;
+      box.style.lineHeight = (lh + mid).toFixed(4) + "px";
+      if (fits()) lo = mid; else hi = mid;
+    }
+    box.style.lineHeight = (lh + lo).toFixed(4) + "px";
+  }
+  // Sets as much plain text (from position a) as fits into box, ending on a full line.
+  function fillPlain(pg, box, list, U, a) {
+    const g0 = U.toG(a);
+    const fits = () => pg.inner.offsetHeight <= contentH + 0.5;
+    const render = (g) => { const b = U.toPos(g); box.innerHTML = renderSegs(segments(a, b, list), b.w > 0); };
+    box.hidden = false;
+    render(U.t);
+    if (fits()) return { end: U.toPos(U.t), done: true };
+    let lo = g0 + 1, hi = U.t - 1, g = g0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      render(mid);
+      if (fits()) { g = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    if (g === g0) { box.innerHTML = ""; box.hidden = true; return { end: a, done: false }; }
+    render(g);
+    const H = box.offsetHeight;
+    render(g + 1);
+    if (box.offsetHeight <= H) {
+      let l = g0 + 1, h = g;
+      while (l < h) { const mid = (l + h) >> 1; render(mid); if (box.offsetHeight < H) l = mid + 1; else h = mid; }
+      if (l - 1 > g0) g = l - 1;
+    }
+    render(g);
+    return { end: U.toPos(g), done: false };
+  }
+
+  // ---- sections: commented text, then (optionally) a haftara, and so on ----
+  const sections = [];
+  allItems.forEach((it) => {
+    const last = sections[sections.length - 1];
+    if (last && last.noComm === !!it.noComm) last.items.push(it);
+    else sections.push({ noComm: !!it.noComm, items: [it] });
+  });
   const pages = [];
-  let pos = { i: 0, w: 0 }, guard = 0;
-  const pending = () => pos.i < items.length || [...ptrs.entries()].some(([c, p]) => !done(c, p));
-  while (pending() && guard++ < 5000) {
-    if (run !== layoutRun) return;
-    let best = null;
-    if (pos.i >= items.length) best = compose(pos, pos, true);
-    else {
-      const g0 = toG(pos);
-      // the most text that could fit on a page at all
-      let hi = Math.min(totalUnits, g0 + 64);
-      while (hi < totalUnits && textHeight(pos, hi) < contentH - headH) hi = Math.min(totalUnits, g0 + (hi - g0) * 2);
-      // the most text for which the commentary of every complete verse still fits in full
-      let lo = g0 + 1, g = 0;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        const r = compose(pos, toPos(mid), false);
-        r.pg.page.remove();
-        if (r.reqFit) { g = mid; lo = mid + 1; } else hi = mid - 1;
-      }
-      // the translation wrapping under/around the text makes this only roughly monotone,
-      // so look a little further past the point found
-      if (g) {
-        for (let x = g + 1, misses = 0; x <= Math.min(totalUnits, g + 60) && misses < 10; x++) {
-          const r = compose(pos, toPos(x), false);
-          r.pg.page.remove();
-          if (r.reqFit) { g = x; misses = 0; } else misses++;
-        }
-      }
-      if (!g || textHeight(pos, g) < minTextH) {
-        // a commentary too long for one page: keep the minimum of text, the rest continues
-        lo = g0 + 1; hi = Math.min(totalUnits, Math.max(lo, hi));
-        let m = hi;
+  let plainStart = { i: 0, w: 0 }; // where the next haftara continues
+  let preHtml = null;             // the end of a haftara, to be set above the next commented text
+
+  async function runComm(sec, nextPlain) {
+    setItems(sec.items);
+    curPre = preHtml;
+    preHtml = null;
+    let pos = { i: 0, w: 0 }, guard = 0;
+    const pending = () => pos.i < items.length || [...ptrs.entries()].some(([c, p]) => !done(c, p));
+    while (pending() && guard++ < 5000) {
+      if (run !== layoutRun) return false;
+      let best = null;
+      if (pos.i >= items.length) best = compose(pos, pos, true);
+      else {
+        const g0 = toG(pos);
+        // the most text that could fit on a page at all
+        let hi = Math.min(totalUnits, g0 + 64);
+        while (hi < totalUnits && textHeight(pos, hi) < contentH - headH) hi = Math.min(totalUnits, g0 + (hi - g0) * 2);
+        // the most text for which the commentary of every complete verse still fits in full
+        let lo = g0 + 1, g = 0;
         while (lo <= hi) {
           const mid = (lo + hi) >> 1;
-          if (textHeight(pos, mid) >= minTextH) { m = mid; hi = mid - 1; } else lo = mid + 1;
+          const r = compose(pos, toPos(mid), false);
+          r.pg.page.remove();
+          if (r.reqFit) { g = mid; lo = mid + 1; } else hi = mid - 1;
         }
-        g = Math.max(g, m);
+        // the translation wrapping under/around the text makes this only roughly monotone,
+        // so look a little further past the point found
+        if (g) {
+          for (let x = g + 1, misses = 0; x <= Math.min(totalUnits, g + 60) && misses < 10; x++) {
+            const r = compose(pos, toPos(x), false);
+            r.pg.page.remove();
+            if (r.reqFit) { g = x; misses = 0; } else misses++;
+          }
+        }
+        if (!g || textHeight(pos, g) < minTextH) {
+          // a commentary too long for one page: keep the minimum of text, the rest continues
+          lo = g0 + 1; hi = Math.min(totalUnits, Math.max(lo, hi));
+          let m = hi;
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            if (textHeight(pos, mid) >= minTextH) { m = mid; hi = mid - 1; } else lo = mid + 1;
+          }
+          g = Math.max(g, m);
+        }
+        best = compose(pos, toPos(g), false);
+        let g2 = fullLineEnd(best, g0, g);
+        // don't leave a chapter heading alone at the bottom of a page
+        const end = toPos(g2);
+        if (end.w === 0 && end.i - 1 > pos.i && items[end.i - 1].type === "h") g2 = off[end.i - 1];
+        if (g2 !== g) { best.pg.page.remove(); best = compose(pos, toPos(g2), false); }
       }
-      best = compose(pos, toPos(g), false);
-      let g2 = fullLineEnd(best, g0, g);
-      // don't leave a chapter heading alone at the bottom of a page
-      const end = toPos(g2);
-      if (end.w === 0 && end.i - 1 > pos.i && items[end.i - 1].type === "h") g2 = off[end.i - 1];
-      if (g2 !== g) { best.pg.page.remove(); best = compose(pos, toPos(g2), false); }
+      mergeTails(best);
+      // the last page of the commented text: the haftara starts under it
+      const last = best.b.i >= items.length && [...best.ptrs.entries()].every(([c, p]) => done(c, p));
+      if (last && nextPlain) {
+        const r = fillPlain(best.pg, best.pg.post, nextPlain.items, nextPlain.U, plainStart);
+        plainStart = r.end;
+        if (!r.done) stretchTo(best.pg, best.pg.post);
+      }
+      justify(best);
+      const first = items[pos.i] || items[items.length - 1];
+      best.pg.chapter = first ? first.chapter : "";
+      pages.push(best.pg);
+      curPre = null;
+      best.ptrs.forEach((p, c) => ptrs.set(c, p));
+      pos = best.b;
+      $("pv-info").textContent = `מעמד… עמוד ${pages.length}`;
+      if (pages.length % 4 === 0) await new Promise((r) => setTimeout(r));
     }
-    justify(best);
-    const first = items[pos.i] || items[items.length - 1];
-    best.pg.chapter = first ? first.chapter : "";
-    pages.push(best.pg);
-    best.ptrs.forEach((p, c) => ptrs.set(c, p));
-    pos = best.b;
-    $("pv-info").textContent = `מעמד… עמוד ${pages.length}`;
-    if (pages.length % 4 === 0) await new Promise((r) => setTimeout(r));
+    return true;
+  }
+
+  async function runPlain(sec, nextComm) {
+    const U = sec.U;
+    let guard = 0;
+    while (U.toG(plainStart) < U.t && guard++ < 5000) {
+      if (run !== layoutRun) return false;
+      curPre = null;
+      const pg = makePage();
+      pg.top.hidden = true;
+      pg.post.style.marginTop = "0";
+      const from = plainStart;
+      const r = fillPlain(pg, pg.post, sec.items, U, plainStart);
+      if (r.end === from && !r.done) { pg.page.remove(); break; }
+      plainStart = r.end;
+      const it = sec.items[Math.min(from.i, sec.items.length - 1)];
+      pg.chapter = it.chapter;
+      if (r.done && nextComm && contentH - pg.inner.offsetHeight > mainPx * S.lineHeight * 3 + minTextH) {
+        // the commented text continues under the end of the haftara on this page
+        preHtml = pg.post.innerHTML;
+        pg.page.remove();
+        break;
+      }
+      if (!r.done || nextComm) stretchTo(pg, pg.post);
+      pages.push(pg);
+      if (pages.length % 4 === 0) await new Promise((res) => setTimeout(res));
+    }
+    return true;
+  }
+
+  for (let si = 0; si < sections.length; si++) {
+    const sec = sections[si], next = sections[si + 1];
+    if (sec.noComm) {
+      sec.U = sec.U || unitsOf(sec.items);
+      if (!(await runPlain(sec, next))) return;
+      plainStart = { i: 0, w: 0 };
+    } else {
+      if (next) next.U = unitsOf(next.items);
+      if (!(await runComm(sec, next))) return;
+    }
   }
   tprobe.page.remove();
 
