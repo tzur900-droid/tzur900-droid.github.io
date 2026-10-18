@@ -515,14 +515,15 @@ function renderCheckTable() {
 }
 
 /* ---------- layout engine (Mikraot Gedolot method) ----------
-   Fonts never change. Each page gets: the text (top) with the side translations
-   beside it, filled to exactly the height of the text; under it every commentary
-   as a full-width block of columns. A page takes as much text as possible (down to
-   single words, so a verse may continue on the next page), as long as each
-   commentary of the last complete verse still STARTS on the page; whatever does not
-   fit continues, in order, at the top of the next page. Until the page has
-   `minLines` lines of text, text is added regardless. Finally the last commentary
-   is set into columns that reach the bottom of the page, so no page has a hole. */
+   Fonts never change. The text runs on word by word (a verse may continue on the
+   next page) and the translation column beside it is filled to exactly the height of
+   the text. Under it every commentary is a full-width block of columns. Each page
+   takes the most text for which the commentary of every verse completed on the page
+   fits on that page in full; the verse that continues on the next page uses the room
+   left, and the rest of its commentary follows it to the next page. Only when one
+   verse's commentary is longer than a page (beyond `minLines` lines of text) does it
+   run on. The text always ends on a full line, and the last commentary is stretched
+   to the bottom, so no page has a hole. */
 let layoutRun = 0;
 
 async function layout() {
@@ -765,7 +766,7 @@ async function layout() {
     if (!segs.length) pg.top.hidden = !sides.some((c) => !done(c, ptrs.get(c)));
     const textH = pg.text.offsetHeight;
     const atEnd = b.i >= items.length;
-    const res = { pg, a, b, textH, atEnd, ok: true, topFits: true, bottomFail: false, ptrs: new Map(), info: new Map() };
+    const res = { pg, a, b, textH, atEnd, reqFit: true, ptrs: new Map(), info: new Map() };
     const fitsPage = () => pg.inner.offsetHeight <= contentH + 0.5;
     const versesHere = segs.filter((s) => s.it.type === "v");
     const complete = versesHere.filter((s) => s.from === 0 && s.to === s.it.words.length).map((s) => s.it.idx);
@@ -790,27 +791,42 @@ async function layout() {
       // how many verses of text on this page still wait for their translation
       res.lag = Math.max(res.lag || 0, complete.filter((v) => !started(c, v, np)).length);
     });
-    res.topFits = fitsPage(); 
 
-    bottoms.forEach((c) => {
-      const sec = pg.secs.get(c);
-      const ptr = ptrs.get(c);
-      const list = listFrom(c, ptr, maxV, Infinity);
-      res.ptrs.set(c, ptr);
-      if (!list.length) return;
-      const firstShown = pg.notes.hidden;
-      sec.hidden = false;
-      pg.notes.hidden = false;
-      const prefix = `<span class="nname">${esc(c.name)}</span> `;
-      const f = fill(sec, prefix, list, fitsPage, force && firstShown);
-      if (!f.m && !f.w) sec.hidden = true;
-      pg.notes.hidden = ![...pg.secs.values()].some((s) => !s.hidden);
-      res.ptrs.set(c, advance(ptr, f, list.length));
-      res.info.set(c, { list, ptr, prefix, full: f.m < list.length });
-      const need = complete.filter((v) => firstIdx.get(c).has(v)).pop();
-      if (need != null && !started(c, need, res.ptrs.get(c))) { res.ok = false; res.bottomFail = true; }
+    // the last verse whose text is complete by the end of this page
+    let lastFull = -1;
+    for (let i = Math.min(b.i - 1, items.length - 1); i >= 0; i--) {
+      if (items[i].type === "v") { lastFull = items[i].idx; break; }
+    }
+    const plans = bottoms.map((c) => ({
+      c, ptr: ptrs.get(c), sec: pg.secs.get(c),
+      prefix: `<span class="nname">${esc(c.name)}</span> `,
+      req: listFrom(c, ptrs.get(c), lastFull, Infinity),
+      all: listFrom(c, ptrs.get(c), maxV, Infinity),
+    }));
+    const showNotes = () => { pg.notes.hidden = !plans.some((p) => !p.sec.hidden); };
+    // 1. does the commentary of every complete verse fit on the page in full?
+    plans.forEach((p) => {
+      res.ptrs.set(p.c, p.ptr);
+      if (!p.req.length) return;
+      p.sec.hidden = false;
+      p.sec.innerHTML = p.prefix + p.req.map((e) => (e.cont ? "" : e.lbl) + e.html).join(" ");
     });
-    if (!fitsPage()) res.ok = false;
+    showNotes();
+    res.reqFit = fitsPage();
+    // 2. set it, then use what room is left for the verse that continues on the next page.
+    //    If even the complete verses' commentary doesn't fit, it continues on the next page.
+    if (!res.reqFit) plans.forEach((p) => { p.sec.hidden = true; p.sec.innerHTML = ""; });
+    let forced = force;
+    plans.forEach((p) => {
+      if (!p.all.length) return;
+      p.sec.hidden = false;
+      showNotes();
+      const f = fill(p.sec, p.prefix, p.all, fitsPage, forced);
+      if (!f.m && !f.w) { p.sec.hidden = true; p.sec.innerHTML = ""; } else forced = false;
+      showNotes();
+      res.ptrs.set(p.c, advance(p.ptr, f, p.all.length));
+      res.info.set(p.c, { list: p.all, ptr: p.ptr, prefix: p.prefix, full: f.m < p.all.length });
+    });
     return res;
   }
 
@@ -847,8 +863,16 @@ async function layout() {
     const inf = res.info.get(c);
     const sec = pg.secs.get(c);
     const spare = contentH - pg.inner.offsetHeight;
-    if (!inf || !inf.full || spare < -0.5) {
-      if (spare > 0) pg.notes.style.marginTop = `calc(${gap} + ${spare.toFixed(2)}px)`;
+    if (spare < 0.5) return;
+    if (!inf || !inf.full) {
+      // the commentary is complete: open its line spacing a little so it reaches the bottom
+      const pad = parseFloat(getComputedStyle(sec).paddingTop) || 0;
+      const cur = parseFloat(getComputedStyle(sec).lineHeight);
+      const rows = Math.round((sec.offsetHeight - pad) / cur);
+      if (rows > 0 && spare / rows < cur * 0.2) {
+        sec.style.lineHeight = ((sec.offsetHeight - pad + spare) / rows).toFixed(3) + "px";
+        for (let i = 0; i < 40 && !fitsPage(); i++) sec.style.lineHeight = (parseFloat(sec.style.lineHeight) - 0.05) + "px";
+      }
       return;
     }
     const pad = parseFloat(getComputedStyle(sec).paddingTop) || 0;
@@ -863,42 +887,40 @@ async function layout() {
     if (f.m < inf.list.length) sec.style.textAlignLast = "justify";
   }
 
-  // If the page's last line of text is less than 80% full and lies inside one verse,
-  // returns the position where that line starts (so the page can end just before it).
-  function lastLineStart(res) {
-    const saved = res.pg.text.innerHTML;
-    const t = findLastLineStart(res);
-    res.pg.text.innerHTML = saved;
-    return t;
-  }
-  function findLastLineStart(res) {
-    const p = res.pg.text.querySelector("p.vline:last-of-type");
-    if (!p || p !== res.pg.text.lastElementChild) return null;
-    p.classList.remove("jlast");
-    const r = document.createRange();
-    r.selectNodeContents(p);
-    const rects = [...r.getClientRects()];
-    const lastTop = Math.max(...rects.map((x) => x.top));
-    const line = rects.filter((x) => Math.abs(x.top - lastTop) < 2);
-    const used = Math.max(...line.map((x) => x.right)) - Math.min(...line.map((x) => x.left));
-    if (used >= p.clientWidth * 0.8) return null;
-    const segs = segments(res.a, res.b);
-    const seg = segs[segs.length - 1];
-    if (!seg || seg.it.type !== "v") return null;
-    const vi = items.indexOf(seg.it);
-    const H = res.textH;
-    const heightTo = (w) => {
-      res.pg.text.innerHTML = renderSegs(segments(res.a, w >= seg.it.words.length ? { i: vi + 1, w: 0 } : { i: vi, w }), false);
-      return res.pg.text.offsetHeight;
-    };
-    if (heightTo(seg.from) >= H) return null; // the whole last line is not from this verse
-    let lo = seg.from, hi = seg.to; // largest w that still ends on the line before
-    while (hi - lo > 1) {
+  // Text positions as one running count of units (a word of a verse, or a whole heading).
+  const off = [];
+  let totalUnits = 0;
+  items.forEach((it) => { off.push(totalUnits); totalUnits += it.type === "v" ? it.words.length : 1; });
+  const toPos = (g) => {
+    if (g >= totalUnits) return { i: items.length, w: 0 };
+    let lo = 0, hi = items.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (off[mid] <= g) lo = mid; else hi = mid - 1; }
+    return { i: lo, w: g - off[lo] };
+  };
+  const toG = (p) => (p.i >= items.length ? totalUnits : off[p.i] + p.w);
+  const tprobe = makePage();
+  const textHeight = (a, g) => {
+    const b = toPos(g);
+    tprobe.text.innerHTML = renderSegs(segments(a, b), b.w > 0);
+    return tprobe.text.offsetHeight;
+  };
+  const headH = tprobe.head ? tprobe.head.offsetHeight + parseFloat(getComputedStyle(tprobe.head).marginBottom) : 0;
+
+  // If the text up to g ends in the middle of a line, move the end back to the end of
+  // the line before, so the text on the page always closes with a full line.
+  function fullLineEnd(a, g0, g) {
+    if (g >= totalUnits) return g;
+    const b = toPos(g);
+    const next = items[b.i];
+    if (b.w === 0 && (next.type === "h" || S.verseNewLine || items[b.i - 1]?.type === "h")) return g;
+    const H = textHeight(a, g);
+    if (textHeight(a, g + 1) > H) return g;
+    let lo = g0 + 1, hi = g;
+    while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (heightTo(mid) < H) lo = mid; else hi = mid;
+      if (textHeight(a, mid) < H) lo = mid + 1; else hi = mid;
     }
-    if (lo === seg.from && seg.from === 0) return segs.length > 1 ? { i: vi, w: 0 } : null;
-    return lo > (vi === res.a.i ? res.a.w : 0) ? { i: vi, w: lo } : null;
+    return lo - 1 > g0 ? lo - 1 : g;
   }
 
   const pages = [];
@@ -907,48 +929,35 @@ async function layout() {
   while (pending() && guard++ < 5000) {
     if (run !== layoutRun) return;
     let best = null;
-    const remaining = items.length - pos.i;
-    if (!remaining) best = compose(pos, pos, true);
-    // Whether the last verse's translation still starts on the page goes up and down as
-    // verses are added, so keep trying until the text itself or the commentaries run out
-    // of room, and keep the largest count that works.
-    for (let k = 1; k <= remaining; k++) {
-      const r = compose(pos, { i: pos.i + k, w: 0 }, false);
-      const short = !best || best.textH < minTextH;
-      if (!best || r.ok || short) {
-        if (best) best.pg.page.remove();
-        best = r;
-      } else r.pg.page.remove();
-      if (!r.topFits || r.bottomFail) break;
-    }
-    // then fill the rest of the page with the beginning of the next verse, word by word
-    if (remaining) {
-      const firstTooBig = best.b.i === pos.i + 1 && !best.topFits;
-      const vi = firstTooBig ? pos.i : best.b.i;
-      const it = items[vi];
-      if (it && it.type === "v" && (best.ok || firstTooBig)) {
-        let lo = vi === pos.i ? pos.w + 1 : 1, hi = it.words.length - 1, got = null;
+    if (pos.i >= items.length) best = compose(pos, pos, true);
+    else {
+      const g0 = toG(pos);
+      // the most text that could fit on a page at all
+      let hi = Math.min(totalUnits, g0 + 64);
+      while (hi < totalUnits && textHeight(pos, hi) < contentH - headH) hi = Math.min(totalUnits, g0 + (hi - g0) * 2);
+      // the most text for which the commentary of every complete verse still fits in full
+      let lo = g0 + 1, g = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const r = compose(pos, toPos(mid), false);
+        r.pg.page.remove();
+        if (r.reqFit) { g = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      if (!g || textHeight(pos, g) < minTextH) {
+        // a commentary too long for one page: keep the minimum of text, the rest continues
+        lo = g0 + 1; hi = Math.min(totalUnits, Math.max(lo, hi));
+        let m = hi;
         while (lo <= hi) {
           const mid = (lo + hi) >> 1;
-          const r = compose(pos, { i: vi, w: mid }, false);
-          if (firstTooBig ? r.topFits : r.ok) { if (got) got.pg.page.remove(); got = r; lo = mid + 1; }
-          else { r.pg.page.remove(); hi = mid - 1; }
+          if (textHeight(pos, mid) >= minTextH) { m = mid; hi = mid - 1; } else lo = mid + 1;
         }
-        if (got) { best.pg.page.remove(); best = got; }
+        g = Math.max(g, m);
       }
-    }
-    // a short last line of text leaves a hole: end the page at the end of the line before it
-    if (!best.atEnd && best.textH > minTextH) {
-      const t = lastLineStart(best);
-      if (t && (t.i > pos.i || (t.i === pos.i && t.w > pos.w))) {
-        best.pg.page.remove();
-        best = compose(pos, t, false);
-      }
-    }
-    // don't leave a chapter heading alone at the bottom of a page
-    if (best.b.w === 0 && best.b.i - pos.i > 1 && items[best.b.i - 1].type === "h") {
-      best.pg.page.remove();
-      best = compose(pos, { i: best.b.i - 1, w: 0 }, false);
+      g = fullLineEnd(pos, g0, g);
+      // don't leave a chapter heading alone at the bottom of a page
+      const end = toPos(g);
+      if (end.w === 0 && end.i - 1 > pos.i && items[end.i - 1].type === "h") g = off[end.i - 1];
+      best = compose(pos, toPos(g), false);
     }
     justify(best);
     const first = items[pos.i] || items[items.length - 1];
@@ -960,6 +969,7 @@ async function layout() {
     $("pv-info").textContent = `מעמד… עמוד ${pages.length}`;
     if (pages.length % 4 === 0) await new Promise((r) => setTimeout(r));
   }
+  tprobe.page.remove();
 
   if (lagPages) {
     warnings.push(`בעמודים ${lagPages} התרגום שבטור הצמוד מפגר יותר משני פסוקים אחרי הטקסט. כדאי להגדיל את רוחב הטור (או לסמן "רוחב אוטומטי") או להקטין את האות שלו.`);
