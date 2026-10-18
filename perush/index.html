@@ -94,8 +94,9 @@
   .phead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 9pt; border-bottom: .6pt solid #000; padding-bottom: 1mm; margin-bottom: 2mm; white-space: nowrap; overflow: hidden; }
   .phead .pt { font-weight: 700; }
   .phead .pc { flex: 1; text-align: center; }
-  .ptop { display: grid; align-items: start; }
-  .ptop > div { min-width: 0; }
+  .ptop { display: flow-root; }
+  .band { clear: both; text-align: justify; border-top: .4pt solid #888; margin-top: .6mm; padding-top: .4mm; }
+  .band b { font-weight: 700; }
   .tcol p, .scol p { margin: 0; }
   .tcol, .scol, .nsec { text-align: justify; overflow-wrap: break-word; }
   .tcol .hrow { text-align: center; font-weight: 700; }
@@ -516,14 +517,17 @@ function renderCheckTable() {
 
 /* ---------- layout engine (Mikraot Gedolot method) ----------
    Fonts never change. The text runs on word by word (a verse may continue on the
-   next page) and the translation column beside it is filled to exactly the height of
-   the text. Under it every commentary is a full-width block of columns. Each page
-   takes the most text for which the commentary of every verse completed on the page
-   fits on that page in full; the verse that continues on the next page uses the room
-   left, and the rest of its commentary follows it to the next page. Only when one
-   verse's commentary is longer than a page (beyond `minLines` lines of text) does it
-   run on. The text always ends on a full line, and the last commentary is stretched
-   to the bottom, so no page has a hole. */
+   next page). The translation sits in a column beside the text and never runs ahead
+   of it: a verse's translation is set on the page where its text is complete. When
+   the translation is shorter than the text, the text runs on under it at full width;
+   when it is longer, it runs on under the text at full width (an L), as text and
+   commentary wrap around each other on a Talmud page. Under that every commentary
+   is a full-width block of columns. Each page takes the most text for which the
+   translation and commentary of every verse completed on the page fit on that page
+   in full; the verse that continues on the next page uses the room left, and the
+   rest of its commentary follows it. Only when one verse's commentary is longer
+   than a page (beyond `minLines` lines of text) does it run on. The text ends on a
+   full line and the commentary is stretched to the bottom, so no page has a hole. */
 let layoutRun = 0;
 
 async function layout() {
@@ -621,9 +625,10 @@ async function layout() {
   });
   probe.remove();
   const sideW = sides.reduce((a, c) => a + c._w, 0);
-  const mainW = Math.max(25, 100 - sideW);
-  if (100 - sideW < 25) warnings.push("סכום רוחב הטורים הצמודים גדול מדי — הטקסט העיקרי קיבל 25%.");
-  const gridCols = cols.map((c) => (c ? c._w : mainW) + "fr").join(" ");
+  if (100 - sideW < 25) {
+    warnings.push("סכום רוחב הטורים הצמודים גדול מדי — הוקטן כך שלטקסט העיקרי יישאר 25%.");
+    sides.forEach((c) => { c._w = c._w * 75 / sideW; });
+  }
 
   function makePage() {
     const page = el("div", "page");
@@ -637,17 +642,24 @@ async function layout() {
       inner.append(head);
     }
     const top = el("div", "ptop");
-    top.style.gridTemplateColumns = gridCols;
-    top.style.columnGap = S.colGap + "mm";
     const text = el("div", "tcol");
     text.style.cssText = fontCss(S.mainFont, S.mainSize, S.lineHeight);
-    const sideCols = new Map();
-    cols.forEach((c) => {
-      if (!c) { top.append(text); return; }
-      const sc = el("div", "scol " + (c.side === "right" ? "sep-left" : "sep-right"));
-      sc.style.cssText = fontCss(c.font, c.size, S.lineHeight);
+    const sideCols = new Map(), bands = new Map();
+    sides.forEach((c) => {
+      const left = c.side !== "right";
+      const sc = el("div", "scol " + (left ? "sep-right" : "sep-left"));
+      sc.style.cssText = fontCss(c.font, c.size, S.lineHeight) +
+        `;float:${left ? "left" : "right"};width:calc(${c._w}% - ${S.colGap / 2}mm);margin-${left ? "right" : "left"}:${S.colGap}mm`;
       top.append(sc);
       sideCols.set(c, sc);
+    });
+    top.append(text);
+    sides.forEach((c) => {
+      const band = el("div", "band");
+      band.style.cssText = fontCss(c.font, c.size, S.lineHeight);
+      band.hidden = true;
+      top.append(band);
+      bands.set(c, band);
     });
     inner.append(top);
     const notes = el("div", "pnotes");
@@ -664,7 +676,7 @@ async function layout() {
     inner.append(notes);
     page.append(inner);
     measure.append(page);
-    return { page, inner, head, top, text, sideCols, notes, secs };
+    return { page, inner, head, top, text, sideCols, bands, notes, secs };
   }
 
   // Put as many entries as fit (fits() is checked after each trial render), splitting the
@@ -763,10 +775,8 @@ async function layout() {
     const pg = makePage();
     const segs = segments(a, b);
     pg.text.innerHTML = renderSegs(segs, b.w > 0);
-    if (!segs.length) pg.top.hidden = !sides.some((c) => !done(c, ptrs.get(c)));
-    const textH = pg.text.offsetHeight;
     const atEnd = b.i >= items.length;
-    const res = { pg, a, b, textH, atEnd, reqFit: true, ptrs: new Map(), info: new Map() };
+    const res = { pg, a, b, textH: 0, atEnd, reqFit: true, ptrs: new Map(), info: new Map() };
     const fitsPage = () => pg.inner.offsetHeight <= contentH + 0.5;
     const versesHere = segs.filter((s) => s.it.type === "v");
     const complete = versesHere.filter((s) => s.from === 0 && s.to === s.it.words.length).map((s) => s.it.idx);
@@ -776,27 +786,66 @@ async function layout() {
       if (items[i].type === "v") { maxV = items[i].idx; break; }
     }
 
-    sides.forEach((c) => {
-      const col = pg.sideCols.get(c);
-      const ptr = ptrs.get(c);
-      const title = S.colTitles ? `<div class="ctitle">${esc(c.name)}</div>` : "";
-      // the column is filled to the height of the text, running ahead into the next
-      // verses' translation if needed so it never ends short
-      const list = listFrom(c, ptr, null, atEnd ? Infinity : 40);
-      const limit = !atEnd && textH ? textH : contentH;
-      const f = fill(col, title, list, () => col.offsetHeight <= limit + 0.5 && fitsPage(), force);
-      const np = advance(ptr, f, list.length);
-      res.ptrs.set(c, np);
-      res.info.set(c, { full: f.m < list.length });
-      // how many verses of text on this page still wait for their translation
-      res.lag = Math.max(res.lag || 0, complete.filter((v) => !started(c, v, np)).length);
-    });
-
     // the last verse whose text is complete by the end of this page
     let lastFull = -1;
     for (let i = Math.min(b.i - 1, items.length - 1); i >= 0; i--) {
       if (items[i].type === "v") { lastFull = items[i].idx; break; }
     }
+    // Translation beside the text, never ahead of it: only verses whose text has appeared.
+    // If it is shorter than the text, the text runs on under it at full width; if it is
+    // longer, it runs on under the text at full width (an L), and only what doesn't fit
+    // on the page at all moves to the next page.
+    const sidePlans = sides.map((c) => {
+      const ptr = ptrs.get(c);
+      const title = S.colTitles ? `<div class="ctitle">${esc(c.name)}</div>` : "";
+      // a verse's translation is set on the page where its text is complete
+      const list = listFrom(c, ptr, atEnd ? maxV : lastFull, Infinity);
+      const col = pg.sideCols.get(c);
+      col.innerHTML = list.length ? title + list.map((e) => (e.cont ? "" : e.lbl) + e.html).join(" ") : "";
+      col.hidden = !list.length;
+      return { c, ptr, title, list, col };
+    });
+    const textH = pg.text.offsetHeight;
+    res.textH = textH;
+    sidePlans.forEach((p) => {
+      const { c, ptr, title, list, col } = p;
+      if (res.info.has(c)) return;
+      res.ptrs.set(c, ptr);
+      if (!list.length) return;
+      const band = pg.bands.get(c);
+      if (col.offsetHeight <= textH + 0.5 && fitsPage()) {
+        res.ptrs.set(c, advance(ptr, { m: list.length, w: 0 }, list.length));
+        // end the column exactly where a line of the text begins, so the text under it
+        // runs at full width with no gap
+        const natural = col.offsetHeight;
+        const base = pg.top.getBoundingClientRect().top;
+        const tops = [...pg.text.querySelectorAll("p, .hrow, .under")].flatMap((n) => {
+          const r = document.createRange();
+          r.selectNodeContents(n);
+          return [...r.getClientRects()].map((x) => x.top - base);
+        }).filter((t) => t >= natural - 0.5).sort((x, y) => x - y);
+        // (no text line starts below it: the column simply ends with the text)
+        col.style.height = (tops.length ? tops[0] - 0.05 : textH).toFixed(2) + "px";
+        res.info.set(c, { mode: "wrap", natural });
+        return;
+      }
+      const f1 = fill(col, title, list, () => col.offsetHeight <= textH + 0.5 && fitsPage(), false);
+      if (!f1.m && !f1.w) { col.innerHTML = ""; col.hidden = true; }
+      const natural = col.offsetHeight;
+      if (!col.hidden) col.style.height = textH.toFixed(2) + "px";
+      const mid = advance(ptr, f1, list.length);
+      const rest = listFrom(c, mid, atEnd ? maxV : lastFull, Infinity);
+      band.hidden = false;
+      const f2 = fill(band, "", rest, fitsPage, force);
+      if (!f2.m && !f2.w) band.hidden = true;
+      res.ptrs.set(c, advance(mid, f2, rest.length));
+      res.info.set(c, { mode: "band", natural });
+      const req = listFrom(c, ptr, lastFull, Infinity);
+      const np = res.ptrs.get(c);
+      if (np.e - ptr.e < req.length) res.sideShort = true;
+    });
+    res.textH = pg.text.offsetHeight;
+
     const plans = bottoms.map((c) => ({
       c, ptr: ptrs.get(c), sec: pg.secs.get(c),
       prefix: `<span class="nname">${esc(c.name)}</span> `,
@@ -812,7 +861,7 @@ async function layout() {
       p.sec.innerHTML = p.prefix + p.req.map((e) => (e.cont ? "" : e.lbl) + e.html).join(" ");
     });
     showNotes();
-    res.reqFit = fitsPage();
+    res.reqFit = fitsPage() && !res.sideShort;
     // 2. set it, then use what room is left for the verse that continues on the next page.
     //    If even the complete verses' commentary doesn't fit, it continues on the next page.
     if (!res.reqFit) plans.forEach((p) => { p.sec.hidden = true; p.sec.innerHTML = ""; });
@@ -846,16 +895,18 @@ async function layout() {
         res.textH = pg.text.offsetHeight;
       }
     }
+    // open the translation's line spacing so it fills its column to the fixed height
     sides.forEach((c) => {
       const col = pg.sideCols.get(c);
-      if (!res.info.get(c) || !res.info.get(c).full || !res.textH || textEnds) return;
+      const inf = res.info.get(c);
+      if (!inf || col.hidden || !col.style.height) return;
+      const target = parseFloat(col.style.height);
       const lh = c.size * PT * S.lineHeight;
-      const lines = Math.round(col.offsetHeight / lh);
-      if (lines > 0 && res.textH > col.offsetHeight) {
-        col.style.lineHeight = (res.textH / lines).toFixed(3) + "px";
-        for (let i = 0; i < 40 && col.offsetHeight > res.textH + 0.5; i++) col.style.lineHeight = (parseFloat(col.style.lineHeight) - 0.05) + "px";
-      }
-      col.style.textAlignLast = "justify";
+      const lines = Math.round(inf.natural / lh);
+      if (lines < 2 || target - inf.natural < 0.3 || target - inf.natural > lh * 1.5) return;
+      if (inf.mode === "band") col.style.textAlignLast = "justify";
+      col.style.lineHeight = (target / lines).toFixed(3) + "px";
+      for (let i = 0; i < 40 && col.scrollHeight > target + 0.5; i++) col.style.lineHeight = (parseFloat(col.style.lineHeight) - 0.05) + "px";
     });
     if (pg.notes.hidden) return;
     const shown = bottoms.filter((c) => !pg.secs.get(c).hidden);
@@ -865,13 +916,23 @@ async function layout() {
     const spare = contentH - pg.inner.offsetHeight;
     if (spare < 0.5) return;
     if (!inf || !inf.full) {
-      // the commentary is complete: open its line spacing a little so it reaches the bottom
-      const pad = parseFloat(getComputedStyle(sec).paddingTop) || 0;
-      const cur = parseFloat(getComputedStyle(sec).lineHeight);
-      const rows = Math.round((sec.offsetHeight - pad) / cur);
-      if (rows > 0 && spare / rows < cur * 0.2) {
-        sec.style.lineHeight = ((sec.offsetHeight - pad + spare) / rows).toFixed(3) + "px";
-        for (let i = 0; i < 40 && !fitsPage(); i++) sec.style.lineHeight = (parseFloat(sec.style.lineHeight) - 0.05) + "px";
+      // the commentaries are complete: open their line spacing a little so they reach the bottom
+      const secs = shown.map((x) => {
+        const el2 = pg.secs.get(x);
+        const pad = parseFloat(getComputedStyle(el2).paddingTop) || 0;
+        const cur = parseFloat(getComputedStyle(el2).lineHeight);
+        return { el2, pad, cur, rows: Math.round((el2.offsetHeight - pad) / cur) };
+      });
+      const rows = secs.reduce((n, x) => n + x.rows, 0);
+      if (rows > 0 && spare / rows < secs[0].cur * 0.25) {
+        const setD = (d) => secs.forEach((x) => { x.el2.style.lineHeight = (x.cur + d).toFixed(4) + "px"; });
+        let lo = 0, hi = spare / rows;
+        for (let i = 0; i < 14; i++) {
+          const mid = (lo + hi) / 2;
+          setD(mid);
+          if (fitsPage()) lo = mid; else hi = mid;
+        }
+        setD(lo);
       }
       return;
     }
@@ -907,24 +968,35 @@ async function layout() {
   const headH = tprobe.head ? tprobe.head.offsetHeight + parseFloat(getComputedStyle(tprobe.head).marginBottom) : 0;
 
   // If the text up to g ends in the middle of a line, move the end back to the end of
-  // the line before, so the text on the page always closes with a full line.
-  function fullLineEnd(a, g0, g) {
+  // the line before, so the text on the page always closes with a full line. Measured on
+  // the composed page itself, with the translation beside the text in place.
+  function fullLineEnd(res, g0, g) {
     if (g >= totalUnits) return g;
     const b = toPos(g);
     const next = items[b.i];
     if (b.w === 0 && (next.type === "h" || S.verseNewLine || items[b.i - 1]?.type === "h")) return g;
-    const H = textHeight(a, g);
-    if (textHeight(a, g + 1) > H) return g;
-    let lo = g0 + 1, hi = g;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (textHeight(a, mid) < H) lo = mid + 1; else hi = mid;
+    const text = res.pg.text, saved = text.innerHTML;
+    const heightTo = (x) => {
+      const e = toPos(x);
+      text.innerHTML = renderSegs(segments(res.a, e), e.w > 0);
+      return text.offsetHeight;
+    };
+    const H = heightTo(g);
+    let out = g;
+    if (heightTo(g + 1) <= H) {
+      let lo = g0 + 1, hi = g;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (heightTo(mid) < H) lo = mid + 1; else hi = mid;
+      }
+      if (lo - 1 > g0) out = lo - 1;
     }
-    return lo - 1 > g0 ? lo - 1 : g;
+    text.innerHTML = saved;
+    return out;
   }
 
   const pages = [];
-  let pos = { i: 0, w: 0 }, guard = 0, lagPages = 0;
+  let pos = { i: 0, w: 0 }, guard = 0;
   const pending = () => pos.i < items.length || [...ptrs.entries()].some(([c, p]) => !done(c, p));
   while (pending() && guard++ < 5000) {
     if (run !== layoutRun) return;
@@ -943,6 +1015,15 @@ async function layout() {
         r.pg.page.remove();
         if (r.reqFit) { g = mid; lo = mid + 1; } else hi = mid - 1;
       }
+      // the translation wrapping under/around the text makes this only roughly monotone,
+      // so look a little further past the point found
+      if (g) {
+        for (let x = g + 1, misses = 0; x <= Math.min(totalUnits, g + 60) && misses < 10; x++) {
+          const r = compose(pos, toPos(x), false);
+          r.pg.page.remove();
+          if (r.reqFit) { g = x; misses = 0; } else misses++;
+        }
+      }
       if (!g || textHeight(pos, g) < minTextH) {
         // a commentary too long for one page: keep the minimum of text, the rest continues
         lo = g0 + 1; hi = Math.min(totalUnits, Math.max(lo, hi));
@@ -953,27 +1034,24 @@ async function layout() {
         }
         g = Math.max(g, m);
       }
-      g = fullLineEnd(pos, g0, g);
-      // don't leave a chapter heading alone at the bottom of a page
-      const end = toPos(g);
-      if (end.w === 0 && end.i - 1 > pos.i && items[end.i - 1].type === "h") g = off[end.i - 1];
       best = compose(pos, toPos(g), false);
+      let g2 = fullLineEnd(best, g0, g);
+      // don't leave a chapter heading alone at the bottom of a page
+      const end = toPos(g2);
+      if (end.w === 0 && end.i - 1 > pos.i && items[end.i - 1].type === "h") g2 = off[end.i - 1];
+      if (g2 !== g) { best.pg.page.remove(); best = compose(pos, toPos(g2), false); }
     }
     justify(best);
     const first = items[pos.i] || items[items.length - 1];
     best.pg.chapter = first ? first.chapter : "";
     pages.push(best.pg);
     best.ptrs.forEach((p, c) => ptrs.set(c, p));
-    if (best.lag > 2) lagPages++;
     pos = best.b;
     $("pv-info").textContent = `מעמד… עמוד ${pages.length}`;
     if (pages.length % 4 === 0) await new Promise((r) => setTimeout(r));
   }
   tprobe.page.remove();
 
-  if (lagPages) {
-    warnings.push(`בעמודים ${lagPages} התרגום שבטור הצמוד מפגר יותר משני פסוקים אחרי הטקסט. כדאי להגדיל את רוחב הטור (או לסמן "רוחב אוטומטי") או להקטין את האות שלו.`);
-  }
   pages.forEach((p, i) => {
     if (!p.head) return;
     p.head.querySelector(".pt").textContent = S.title;
