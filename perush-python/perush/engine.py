@@ -23,7 +23,7 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from .model import PAGE_SIZES, entry_tokens, heb, parse_comm, parse_main
+from .model import entry_tokens, heb, page_mm, parse_comm, parse_main
 from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width, words_of
 
 EPS = 0.01
@@ -106,7 +106,7 @@ class Engine:
         self.progress = progress
         self.warnings = []
         P = project
-        _, wmm, hmm = PAGE_SIZES[P["pageSize"]]
+        wmm, hmm = page_mm(P)
         self.page_w = wmm * PT_PER_MM
         self.page_h = hmm * PT_PER_MM
         self.m = P["margin"] * PT_PER_MM

@@ -9,19 +9,40 @@ import re
 
 PLACES = {"side": "טור צמוד לטקסט", "bottom": "מתחת לטקסט", "under": "אחרי כל פסוק"}
 
+# Page sizes (name, width mm, height mm): the usual sizes for printing seforim, then paper
+# sizes; "custom" takes pageW / pageH from the project.
 PAGE_SIZES = {
+    "S24": ("ספר גדול 24×34 (מקראות גדולות)", 240, 340),
+    "S23": ("ספר 23×32", 230, 320),
     "A4": ("A4 (21×29.7)", 210, 297),
+    "S20": ("ספר 20×28", 200, 280),
     "B5": ("B5 (17.6×25)", 176, 250),
-    "S17": ("ספר 17×24", 170, 240),
+    "S17": ("ספר רגיל 17×24", 170, 240),
+    "S16": ("ספר 16×23", 160, 230),
+    "S15": ("ספר 15×21", 150, 210),
     "A5": ("A5 (14.8×21)", 148, 210),
-    "Letter": ("Letter", 216, 279),
+    "S14": ("ספר קטן 14×20", 140, 200),
+    "S12": ("ספר כיס 12×17", 120, 170),
+    "A6": ("A6 (10.5×14.8)", 105, 148),
+    "Letter": ("Letter (21.6×27.9)", 216, 279),
+    "custom": ("גודל אחר (לפי רוחב וגובה)", 0, 0),
 }
+
+
+def page_mm(project):
+    """The page's width and height in mm."""
+    if project.get("pageSize") == "custom":
+        return float(project.get("pageW") or 170), float(project.get("pageH") or 240)
+    _, w, h = PAGE_SIZES.get(project.get("pageSize"), PAGE_SIZES["A4"])
+    return float(w), float(h)
 
 DEFAULTS = {
     "title": "",
     "main": "",
     "comms": [],
     "pageSize": "A4",
+    "pageW": 170,
+    "pageH": 240,
     "margin": 14,
     "mainFont": "Frank Ruhl Libre",
     "mainSize": 16,

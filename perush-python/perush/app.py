@@ -316,8 +316,20 @@ class MainWindow(QMainWindow):
             "sectionGap": dspin(0, 10, 0.5, " מ\"מ"),
             "minLines": ispin(1, 40),
             "firstPage": ispin(1, 5000),
+            "pageW": dspin(50, 500, 1, " מ\"מ"),
+            "pageH": dspin(50, 700, 1, " מ\"מ"),
         }
         form.addRow("גודל עמוד:", self.page_size)
+        dims = QHBoxLayout()
+        dims.addWidget(QLabel("רוחב:"))
+        dims.addWidget(self.sp["pageW"])
+        dims.addWidget(QLabel("גובה:"))
+        dims.addWidget(self.sp["pageH"])
+        form.addRow(dims)
+        fit = QPushButton("התאמת גופנים ושוליים לגודל העמוד")
+        fit.setToolTip("מקטין או מגדיל את האותיות, השוליים והרווחים ביחס לגודל העמוד (לעומת A4)")
+        fit.clicked.connect(self.fit_to_page)
+        form.addRow(fit)
         form.addRow("שוליים:", self.sp["margin"])
         form.addRow("גופן הטקסט:", self.main_font)
         form.addRow("גודל הטקסט:", self.sp["mainSize"])
@@ -350,7 +362,7 @@ class MainWindow(QMainWindow):
 
         self.title.textChanged.connect(self.changed)
         self.main.textChanged.connect(self.changed)
-        self.page_size.currentIndexChanged.connect(self.changed)
+        self.page_size.currentIndexChanged.connect(self.page_size_changed)
         self.main_font.currentFontChanged.connect(self.changed)
         for s in self.sp.values():
             s.valueChanged.connect(self.changed)
@@ -390,9 +402,14 @@ class MainWindow(QMainWindow):
         self.title.setText(p["title"])
         self.main.setPlainText(p["main"])
         self.page_size.setCurrentIndex(list(model.PAGE_SIZES).index(p["pageSize"]))
+        w, h = model.page_mm(p)
+        self.sp["pageW"].setEnabled(p["pageSize"] == "custom")
+        self.sp["pageH"].setEnabled(p["pageSize"] == "custom")
         self.main_font.setCurrentFont(QFont(p["mainFont"]))
         for k, s in self.sp.items():
             s.setValue(p[k])
+        self.sp["pageW"].setValue(w)
+        self.sp["pageH"].setValue(h)
         for k, c in self.cb.items():
             c.setChecked(bool(p[k]))
         self.tabs.clear()
@@ -454,6 +471,35 @@ class MainWindow(QMainWindow):
             self.changed()
 
     def tab_moved(self, *_):
+        self.changed()
+
+    def page_size_changed(self, *_):
+        """Show the chosen size in the width / height boxes; they are editable for 'custom'."""
+        key = self.page_size.currentData()
+        custom = key == "custom"
+        if not custom and not self.loading:
+            _, w, h = model.PAGE_SIZES[key]
+            self.loading = True
+            self.sp["pageW"].setValue(w)
+            self.sp["pageH"].setValue(h)
+            self.loading = False
+        self.sp["pageW"].setEnabled(custom)
+        self.sp["pageH"].setEnabled(custom)
+        self.changed()
+
+    def fit_to_page(self):
+        """Scale the fonts, margins and gaps by the page width compared with A4, for a book
+        printed smaller (or larger) than the A4 the projects were set up for."""
+        w, _ = model.page_mm(self.project)
+        k = w / 210.0
+        p = self.project
+        p["mainSize"] = round(max(7.0, p["mainSize"] * k) * 2) / 2
+        p["margin"] = round(max(5.0, p["margin"] * k))
+        p["colGap"] = round(max(2.0, p["colGap"] * k) * 2) / 2
+        p["sectionGap"] = round(max(1.0, p["sectionGap"] * k) * 2) / 2
+        for c in p["comms"]:
+            c["size"] = round(max(6.0, c["size"] * k) * 2) / 2
+        self.fill_editor()
         self.changed()
 
     def preset(self, values):
