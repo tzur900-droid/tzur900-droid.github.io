@@ -2,13 +2,15 @@
 import json
 import os
 
+import sys
+
 from PySide6.QtCore import QSettings, QStandardPaths, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
-    QToolBar, QVBoxLayout, QWidget,
+    QMenu, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import model
@@ -204,6 +206,12 @@ class MainWindow(QMainWindow):
         act("שמירה", self.save, QKeySequence.Save)
         act("שמירה בשם…", self.save_as, QKeySequence.SaveAs)
         tb.addSeparator()
+        books = QToolButton()
+        books.setText("ספרים מוכנים ▾")
+        books.setPopupMode(QToolButton.InstantPopup)
+        books.setMenu(self.books_menu())
+        books.setStyleSheet("font-weight:bold;")
+        tb.addWidget(books)
         act("דוגמה", self.load_example)
         act("ייבוא מספריא…", self.import_sefaria)
         act("בדיקת התאמה", self.show_check)
@@ -218,6 +226,30 @@ class MainWindow(QMainWindow):
         self.zoom_box.setCurrentIndex(2)
         self.zoom_box.currentIndexChanged.connect(self.set_zoom)
         tb.addWidget(self.zoom_box)
+
+    def projects_dir(self):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return os.path.join(base, "projects")
+
+    def books_menu(self):
+        """The ready projects that ship in the 'projects' folder: a submenu per book."""
+        menu = QMenu(self)
+        root = self.projects_dir()
+        found = False
+        if os.path.isdir(root):
+            for book in sorted(os.listdir(root)):
+                folder = os.path.join(root, book)
+                files = sorted(f for f in os.listdir(folder) if f.endswith(".json")) if os.path.isdir(folder) else []
+                if not files:
+                    continue
+                sub = menu.addMenu(book)
+                for f in files:
+                    a = sub.addAction(os.path.splitext(f)[0])
+                    a.triggered.connect(lambda _=False, p=os.path.join(folder, f): self.open_path(p))
+                found = True
+        if not found:
+            menu.addAction("לא נמצאה התיקייה projects").setEnabled(False)
+        return menu
 
     def build_editor(self):
         area = QScrollArea()
@@ -542,17 +574,23 @@ class MainWindow(QMainWindow):
     def open_project(self):
         if not self.confirm_discard():
             return
-        start = self.settings.value("lastDir", "")
+        start = self.settings.value("lastDir", "") or self.projects_dir()
         path, _ = QFileDialog.getOpenFileName(self, "פתיחת פרויקט", start, "פרויקט (*.json)")
         if not path:
+            return
+        self.settings.setValue("lastDir", os.path.dirname(path))
+        self.open_path(path, ask=False)
+
+    def open_path(self, path, ask=True):
+        if ask and not self.confirm_discard():
             return
         try:
             self.project = model.load_project(path)
         except (OSError, ValueError) as e:
             QMessageBox.warning(self, APP_NAME, f"לא ניתן לפתוח את הקובץ:\n{e}")
             return
-        self.settings.setValue("lastDir", os.path.dirname(path))
-        self.path = path
+        # a ready project is opened as a copy: saving asks where to keep it
+        self.path = None if os.path.abspath(path).startswith(os.path.abspath(self.projects_dir())) else path
         self.fill_editor()
         self.changed()
         self.dirty = False

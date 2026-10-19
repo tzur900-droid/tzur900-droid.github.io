@@ -329,7 +329,7 @@ class Engine:
                 w = (lo + hi) / 2
                 _, h_main = layout_specs(specs, full_width(self.W * (100 - others - w) / 100))
                 n_side = len(break_lines(sw, self.style[c], self.side_lh[c], full_width(self.W * w / 100)))
-                if n_side * self.side_lh[c] > h_main * 0.97:
+                if n_side * self.side_lh[c] > h_main * 0.89:
                     lo = w
                 else:
                     hi = w
@@ -387,7 +387,9 @@ class Engine:
                 inf = info[c]
                 if not inf["nat"]:
                     continue
-                cap = max(0, int((text_h - inf["th"] + EPS) // self.side_lh[c]))
+                # as many lines as are closest to the height of the text (their spacing is
+                # then opened or closed by at most half a line over the column)
+                cap = max(1, int(round((text_h - inf["th"]) / self.side_lh[c])))
                 if len(inf["nat"]) >= cap:
                     inf["k"], inf["mode"] = cap, "full"
                 else:
@@ -527,7 +529,7 @@ class Engine:
                 target = min(tops) if tops else r["text_h"]
             else:
                 continue
-            if n >= 1 and 0.3 < target - s["h"] and (s["mode"] == "full" or target - s["h"] <= s["slh"] * 1.5):
+            if n >= 1 and (0.3 < target - s["h"] or (s["mode"] == "full" and abs(target - s["h"]) > 0.3)) and (s["mode"] == "full" or target - s["h"] <= s["slh"] * 1.5):
                 for l in s["col"]:
                     l.h = (target - s["th"]) / n
                 s["h"] = target
@@ -738,7 +740,7 @@ class Engine:
                 short = not best["col_full"]
                 if lag > 1 or short:
                     sign = 1 if lag > 1 else -1
-                    for step in (3, 6, 9):
+                    for step in (1.5, 3):
                         for c in self.sides:
                             self.col_w[c] = min(60.0, max(12.0, base[c] + sign * step))
                         cand = self.search_page(pos, pre)
@@ -750,6 +752,10 @@ class Engine:
                             if lag <= 1:
                                 break
                     self.col_w = dict(best.get("col_w", base))
+                if lag > 1:
+                    # still behind: end the text on this page earlier, so that no more than one
+                    # verse waits for its translation
+                    best = self.shorten_for_lag(pos, pre, best)
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
             if last and next_plain:
                 budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM
@@ -822,6 +828,26 @@ class Engine:
                 x += 1
         best, g = self.end_on_full_line(pos, g0, g, best, pre)
         return best
+
+    def shorten_for_lag(self, pos, pre, best):
+        g0, g = self.g_of(pos), self.g_of(best["b"])
+        x = g - 1
+        while x > g0 and g - x <= 250:
+            r = self.compose(pos, self.pos(x), False, pre)
+            closes = lambda q: self.can_close(q, self.contentH - self.total_h(q))
+            if (r["col_full"] or r["at_end"]) and self.page_lag(r) <= 1:
+                if self.text_h_ok(r) and closes(r):
+                    r2, x2 = self.end_on_full_line(pos, g0, x, r, pre)
+                    if self.page_lag(r2) <= 1 and (r2["col_full"] or r2["at_end"]) and closes(r2):
+                        r2["col_w"] = best.get("col_w")
+                        return r2
+                    r["col_w"] = best.get("col_w")
+                    return r
+            x -= 1
+        return best
+
+    def text_h_ok(self, r):
+        return r["text_h"] >= self.min_text_h or r["at_end"]
 
     def page_lag(self, r):
         """How many verses completed on the page still wait for (the end of) their translation."""
