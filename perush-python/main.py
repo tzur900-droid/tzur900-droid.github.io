@@ -3,6 +3,7 @@
     python main.py                       open the window
     python main.py project.json out.pdf  lay out a project straight to PDF (no window)
     python main.py --import OUT_DIR files…  convert Sefaria text files into project files
+        (--comms onkelos,orhachaim chooses the commentaries; default onkelos,rashi,ramban)
 """
 import os
 import sys
@@ -24,8 +25,14 @@ def main():
     load_bundled_fonts(os.path.join(base_dir(), "fonts"))
 
     if len(sys.argv) > 3 and sys.argv[1] == "--import":
-        from perush.sefaria import convert
-        written, report = convert(sys.argv[3:], sys.argv[2])
+        from perush.sefaria import DEFAULT_KINDS, convert
+        rest = sys.argv[3:]
+        kinds = DEFAULT_KINDS
+        if "--comms" in rest:
+            i = rest.index("--comms")
+            kinds = tuple(rest[i + 1].split(","))
+            del rest[i:i + 2]
+        written, report = convert(rest, sys.argv[2], kinds)
         print("\n".join(report + written))
         return 0
 

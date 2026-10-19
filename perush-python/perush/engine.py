@@ -564,9 +564,9 @@ class Engine:
         self.align_columns(r)
         spare = self.contentH - self.total_h(r)
         # no commentary on the page: open the text's line spacing to the bottom
-        if not r["sections"] and not r["post"] and not r["at_end"] and r["text"] and 0 < spare < self.main_lh * 1.5:
+        if not r["sections"] and not r["post"] and not r["at_end"] and r["text"] and spare > 0:
             text = [l for l in r["text"] if l.kind == "p"]
-            if text:
+            if text and (spare < self.main_lh * 1.5 or spare / len(text) <= self.main_lh * 0.1):
                 for l in text:
                     l.h += spare / len(text)
                 self.recompute_top(r)

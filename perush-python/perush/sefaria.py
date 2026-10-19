@@ -138,6 +138,7 @@ def clean(s, keep_bold=False):
     s = html.unescape(s)
     s = re.sub(r"\s+", " ", s).strip()
     s = re.sub(r"\*\*\s*\*\*", " ", s)
+    s = re.sub(r"\*\* ([,.:;])", r"**\1", s)                             # no space before punctuation
     return s
 
 
@@ -175,13 +176,17 @@ def kind_of(lines):
     return "torah"
 
 
-OTZ_NAMES = {"אונקלוס": "onkelos", "רש\"י": "rashi", "רמב\"ן": "ramban"}
+OTZ_NAMES = {"אונקלוס": "onkelos", "רש\"י": "rashi", "רמב\"ן": "ramban", "אור החיים": "orhachaim"}
+NAMES = {"onkelos": "אונקלוס", "rashi": "רש\"י", "ramban": "רמב\"ן", "orhachaim": "אור החיים"}
+# the commentaries a book gets unless asked otherwise
+DEFAULT_KINDS = ("onkelos", "rashi", "ramban")
 
 
 def parse_otzaria_torah(lines):
     """A Torah book from Otzaria ('תורה לפי פרקים (פרשנים)'): under '<h3>{X}</h3>' the
     verse (with te'amim, ketiv/qere as '(ketiv) [qere]'), then each commentator's lines,
-    the first marked '<b style="color: gray;">name</b>'. Onkelos, Rashi and Ramban are kept."""
+    the first marked '<b style="color: gray;">name</b>'. Onkelos, Rashi, Ramban and Or HaChaim
+    are kept."""
     book = clean(lines[0])
     verses, comms = [], {k: {} for k in OTZ_NAMES.values()}
     ch = v = 0
@@ -396,15 +401,16 @@ def build(book, verses, comms, parashot, navi=None):
         "onkelos": {"name": "אונקלוס", "place": "side", "side": "left", "font": "Noto Serif Hebrew", "size": 10.5, "width": 34, "autoW": True, "cols": 2},
         "rashi": {"name": "רש\"י", "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9.5, "width": 30, "autoW": True, "cols": 2},
         "ramban": {"name": "רמב\"ן", "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9, "width": 30, "autoW": True, "cols": 2},
+        "orhachaim": {"name": "אור החיים", "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9.5, "width": 30, "autoW": True, "cols": 2},
     }
-    for kind in ("onkelos", "rashi", "ramban"):
+    for kind in NAMES:
         if kind in comms:
             project["comms"].append(dict(styles[kind], text=comm_lines(comms[kind], verses)))
     return project
 
 
-def convert(paths, out_dir):
-    """Returns (written file paths, report lines)."""
+def convert(paths, out_dir, kinds=DEFAULT_KINDS):
+    """kinds: which translations / commentaries to put in. Returns (written file paths, report lines)."""
     os.makedirs(out_dir, exist_ok=True)
     files = {}
     for p in paths:
@@ -413,15 +419,16 @@ def convert(paths, out_dir):
     navi = {k[5:]: parse_navi(v) for k, v in files.items() if k.startswith("navi:")}
     if "otz_torah" in files:
         book, verses, comms = parse_otzaria_torah(files["otz_torah"])
+        comms = {k: c for k, c in comms.items() if k in kinds}
         return write_book(book, verses, comms, navi, out_dir)
     if "torah" not in files:
         raise ValueError("לא נמצא קובץ של הפסוקים (קובץ שהשורה הראשונה שלו היא שם הספר).")
     book, verses = parse_torah(files["torah"])
     comms = {}
-    if "onkelos" in files:
+    if "onkelos" in files and "onkelos" in kinds:
         comms["onkelos"] = parse_by_verse(files["onkelos"], keep_bold=False)
     for k in ("rashi", "ramban"):
-        if k in files:
+        if k in files and k in kinds:
             comms[k] = parse_by_verse(files[k], keep_bold=True)
     return write_book(book, verses, comms, navi, out_dir)
 
@@ -445,11 +452,10 @@ def write_book(book, verses, comms, navi, out_dir):
         part = verses[a:b]
         dump(build(book, part, comms, [(name, 0, len(part))], navi), f"{book} {k:02d} - פרשת {name}.json")
     dump(build(book, verses, comms, parashot, navi), f"{book} - כל הספר.json")
-    names = {"onkelos": "אונקלוס", "rashi": "רש\"י", "ramban": "רמב\"ן"}
     report = [f"{book}: {len(verses)} פסוקים, {len(parashot)} פרשות."]
     for k, c in comms.items():
         lost = sum(1 for key in c if key not in index)
-        report.append(f"{names[k]}: {sum(len(x) for x in c.values())} קטעים על {len(c)} פסוקים"
+        report.append(f"{NAMES[k]}: {sum(len(x) for x in c.values())} קטעים על {len(c)} פסוקים"
                       + (f" — {lost} לא שויכו לפסוק!" if lost else "."))
     if navi:
         got = [name for name, _, _ in parashot if haftara_lines(name, navi)]
