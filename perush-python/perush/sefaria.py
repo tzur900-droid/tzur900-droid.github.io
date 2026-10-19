@@ -39,6 +39,14 @@ HAFTAROT = {
     "בהר": [("ירמיהו", 32, 6, 32, 27)],
     "בחקתי": [("ירמיהו", 16, 19, 17, 14)],
 }
+# Where the Sephardi custom differs: it ends earlier within the same haftara ("end"),
+# or reads a haftara of its own ("own").
+HAFTAROT_SEFARAD = {
+    "שמיני": ("end", "שמואל ב", 6, 19),
+    "אחרי מות": ("end", "יחזקאל", 22, 16),
+    "קדושים": ("own", [("יחזקאל", 20, 2, 20, 20)]),
+}
+
 NAVI = {"ישעיהו", "ירמיהו", "יחזקאל", "שמואל א", "שמואל ב", "מלכים א", "מלכים ב", "יהושע", "שופטים", "הושע", "יואל",
         "עמוס", "עובדיה", "יונה", "מיכה", "נחום", "חבקוק", "צפניה", "חגי", "זכריה", "מלאכי"}
 
@@ -123,14 +131,9 @@ def parse_navi(lines):
     return out
 
 
-def haftara_lines(name, navi):
-    """The haftara of a parasha as main-text lines ('## הפטרת …', verses, '### פרק' when
-    the chapter changes), or [] when its book isn't loaded."""
-    parts = HAFTAROT.get(name)
-    if not parts or any(b not in navi for b, *_ in parts):
-        return []
+def haftara_part(title, parts, navi, end_mark=None):
     book0, c0 = parts[0][0], parts[0][1]
-    out = [f"## הפטרת {name} ({book0} {heb(c0)})"]
+    out = [f"## {title} ({book0} {heb(c0)})"]
     cur = c0
     for book, c1, v1, c2, v2 in parts:
         verses = sorted(k for k in navi[book] if (c1, v1) <= k <= (c2, v2))
@@ -138,8 +141,26 @@ def haftara_lines(name, navi):
             if ch != cur:
                 out.append(f"### פרק {heb(ch)}")
                 cur = ch
-            out.append(f"[{heb(v)}] {navi[book][(ch, v)]}")
+            text = navi[book][(ch, v)]
+            if end_mark and (book, ch, v) == end_mark:
+                text += " **(כאן מסיימים הספרדים)**"
+            out.append(f"[{heb(v)}] {text}")
     return out
+
+
+def haftara_lines(name, navi):
+    """The haftara of a parasha as main-text lines ('## הפטרת …', verses, '### פרק' when
+    the chapter changes): the Ashkenazi custom, with the Sephardi custom where it differs.
+    [] when a book it needs isn't loaded."""
+    parts = HAFTAROT.get(name)
+    if not parts or any(b not in navi for b, *_ in parts):
+        return []
+    sef = HAFTAROT_SEFARAD.get(name)
+    if sef and sef[0] == "own" and all(b in navi for b, *_ in sef[1]):
+        return (haftara_part(f"הפטרת {name} לאשכנזים", parts, navi)
+                + haftara_part(f"הפטרת {name} לספרדים", sef[1], navi))
+    end_mark = tuple(sef[1:]) if sef and sef[0] == "end" else None
+    return haftara_part(f"הפטרת {name}", parts, navi, end_mark)
 
 
 def parse_torah(lines):
