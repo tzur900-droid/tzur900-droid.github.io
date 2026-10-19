@@ -35,6 +35,7 @@ DEFAULTS = {
     "header": True,
     "names": True,
     "inlineChapters": False,
+    "bookMode": False,
 }
 
 COMM_DEFAULTS = {

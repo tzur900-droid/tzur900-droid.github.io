@@ -390,7 +390,7 @@ def build(book, verses, comms, parashot, navi=None):
         "comms": [],
         "pageSize": "A4", "margin": 14, "mainFont": "Noto Serif Hebrew", "mainSize": 15, "lineHeight": 1.6,
         "colGap": 5, "sectionGap": 2, "minLines": 4, "firstPage": 1,
-        "verseNewLine": False, "numbers": True, "header": True, "names": True, "inlineChapters": True,
+        "verseNewLine": False, "numbers": True, "header": True, "names": True, "inlineChapters": True, "bookMode": True,
     }
     styles = {
         "onkelos": {"name": "אונקלוס", "place": "side", "side": "left", "font": "Noto Serif Hebrew", "size": 10.5, "width": 34, "autoW": True, "cols": 2},

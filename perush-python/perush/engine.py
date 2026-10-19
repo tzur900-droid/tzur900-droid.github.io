@@ -287,6 +287,14 @@ class Engine:
 
     # ------------------------------------------------------------ geometry
 
+    def side_of(self, c):
+        """Which side of the text a translation column stands on. In book form it is
+        always the inner side: the book opens on a left-hand page, whose inner side is
+        the right, and the pages alternate from there."""
+        if self.P.get("bookMode"):
+            return "right" if len(self.pages) % 2 == 0 else "left"
+        return "right" if self.comms[c]["side"] == "right" else "left"
+
     def side_width(self, c):
         return self.W * self.col_w[c] / 100 - self.gap / 2
 
@@ -295,7 +303,7 @@ class Engine:
             right = left = 0.0
             for c in self.sides:
                 if heights.get(c, 0) > y + EPS:
-                    if self.comms[c]["side"] == "right":
+                    if self.side_of(c) == "right":
                         right += self.side_width(c) + self.gap
                     else:
                         left += self.side_width(c) + self.gap
@@ -367,6 +375,7 @@ class Engine:
         # the text on the page ends on a full line unless the section or a paragraph ends here
         cut = b[1] > 0 or (not at_end and not self.is_break(items[b[0]]) and not self.P["verseNewLine"])
         r = {"a": a, "b": b, "at_end": at_end, "pre": pre, "ptrs": dict(self.ptrs), "side": {}, "sections": [],
+             "side_dir": {c: self.side_of(c) for c in self.sides},
              "post": None, "req_fit": True, "side_short": False}
         max_v = last_full = -1
         for i in range(min(b[0] if b[1] > 0 else b[0] - 1, len(items) - 1), -1, -1):
@@ -749,7 +758,7 @@ class Engine:
         pages = []
         first = int(self.P.get("firstPage") or 1)
         for n, (r, chapter, parasha) in enumerate(self.pages):
-            pages.append(self.finalize(r, chapter, parasha, heb(first + n)))
+            pages.append(self.finalize(r, chapter, parasha, heb(first + n), n))
         return pages
 
     def tick(self):
@@ -1023,7 +1032,7 @@ class Engine:
                         yy += l.h
                         l.right, l.width = 0.0, cw
                     lines += s["col"]
-                    if self.comms[c]["side"] == "right":
+                    if r.get("side_dir", {}).get(c, self.comms[c]["side"]) == "right":
                         x = R - off_r
                         off_r += cw + self.gap
                     else:
@@ -1072,7 +1081,7 @@ class Engine:
             y += r["post"]["h"]
         return y
 
-    def finalize(self, r, chapter, parasha, number):
+    def finalize(self, r, chapter, parasha, number, index=0):
         if r.get("col_w"):
             self.col_w = dict(r["col_w"])
         P = self.P
@@ -1084,6 +1093,9 @@ class Engine:
             right = f"{title} · {parasha}" if parasha and title else (parasha or title)
             center = chapter if chapter and chapter != parasha else ""
             hs = self.head_style
+            if P.get("bookMode") and index % 2 == 1:
+                # a right-hand page: the page number goes on its outer side, the right
+                right, number = number, right
             page.head = (right, center, number, hs, y + 9.0 * 1.3 * 0.8)
             ry = y + 9.0 * 1.3 + 1 * PT_PER_MM
             page.rules.append((L, ry, R))

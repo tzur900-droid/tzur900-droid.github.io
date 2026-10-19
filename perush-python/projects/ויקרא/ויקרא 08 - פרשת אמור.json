@@ -49,5 +49,6 @@
  "numbers": true,
  "header": true,
  "names": true,
- "inlineChapters": true
+ "inlineChapters": true,
+ "bookMode": true
 }
