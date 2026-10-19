@@ -219,7 +219,7 @@ class Engine:
         return specs
 
     def is_inline(self, it):
-        return (it["type"] == "h" and self.P.get("inlineChapters") and not it["noComm"]
+        return (it["type"] == "h" and self.P.get("inlineChapters")
                 and re.match(r"^פרק\s+\S+$", it["text"]) is not None)
 
     def is_break(self, it):
@@ -726,6 +726,8 @@ class Engine:
                 self.run_plain(sec["items"], nxt)
                 self.plain_start = (0, 0)
             else:
+                after = sections[si + 2] if si + 2 < len(sections) else None
+                self.comm_after_plain = bool(after and not after["noComm"])
                 self.run_comm(sec["items"], nxt["items"] if nxt else None)
         pages = []
         first = int(self.P.get("firstPage") or 1)
@@ -782,14 +784,27 @@ class Engine:
                 if lines:
                     best["post"] = {"lines": lines, "h": h, "mt": self.sgap + 3 * PT_PER_MM}
                     self.plain_start = end
-                    if not done:
-                        spare = self.contentH - self.total_h(best)
-                        best["post"]["h"] = self.stretch_lines(lines, spare, self.main_lh * 3)
+                    best["post"]["done"] = done
             self.justify(best)
+            if best.get("post") and not best["post"].get("done", True):
+                # the haftara starts under the parasha and continues: fill the page to the bottom
+                spare = self.contentH - self.total_h(best)
+                best["post"]["h"] = self.stretch_lines(best["post"]["lines"], spare, self.main_lh * 3)
             best["col_w"] = dict(self.col_w)
             self.col_w = base
             first = self.items[min(pos[0], len(self.items) - 1)]
-            self.pages.append((best, first["chapter"], first["parasha"]))
+            chapter, parasha = first["chapter"], first["parasha"]
+            if pre and pre.get("chapter") is not None:
+                chapter, parasha = pre["chapter"], pre["parasha"]
+            post = best.get("post")
+            spare = self.contentH - self.total_h(best)
+            if (last and post and post.get("done") and getattr(self, "comm_after_plain", False)
+                    and spare > self.room_for_section()):
+                # the haftara ends on this page too: the next parasha starts under it
+                self.pre = {"r": best, "h": self.total_h(best) - self.head_h, "chapter": chapter, "parasha": parasha}
+                self.ptrs.update(best["ptrs"])
+                break
+            self.pages.append((best, chapter, parasha))
             pre = None
             stuck = best["b"] == pos and all(best["ptrs"].get(c) == p for c, p in self.ptrs.items())
             self.ptrs.update(best["ptrs"])
@@ -934,38 +949,39 @@ class Engine:
             self.plain_start = end
             it = lst[min(frm[0], len(lst) - 1)]
             spare = budget - h
-            if done and next_sec and not next_sec["noComm"] and spare > self.main_lh * 3 + self.min_text_h:
+            if done and next_sec and not next_sec["noComm"] and spare > self.room_for_section():
                 # the commented text continues under the end of the haftara on this page
                 self.pre = {"lines": lines, "h": h, "chapter": it["chapter"], "parasha": it["parasha"]}
                 break
             if not done or next_sec:
-                h = self.stretch_lines(lines, spare, self.main_lh * 3)
+                n_lines = len([l for l in lines if l.kind == "p"])
+                h = self.stretch_lines(lines, spare, max(self.main_lh * 3, n_lines * self.main_lh * 0.3))
             r = {"a": frm, "b": end, "at_end": True, "pre": None, "ptrs": {}, "side": {}, "sections": [],
                  "post": {"lines": lines, "h": h, "mt": 0.0}, "text": [], "text_h": 0.0, "top_h": 0.0}
             self.pages.append((r, it["chapter"], it["parasha"]))
 
     # ------------------------------------------------------------ to absolute coordinates
 
-    def finalize(self, r, chapter, parasha, number):
+    def room_for_section(self):
+        """The least room under a haftara for the next parasha to start on the same page:
+        the gap, its heading and the minimum lines of text."""
+        return self.sgap + 3 * PT_PER_MM + self.main_lh * 1.5 + self.min_text_h
+
+    def place_body(self, r, page, y):
+        """Put a page's content (everything under the running head) on page from y down."""
         if r.get("col_w"):
             self.col_w = dict(r["col_w"])
-        P = self.P
-        L, R, T = self.m, self.page_w - self.m, self.m
-        page = Page(self.page_w, self.page_h)
-        y = T
-        if P["header"]:
-            title = P["title"]
-            right = f"{title} · {parasha}" if parasha and title else (parasha or title)
-            center = chapter if chapter and chapter != parasha else ""
-            hs = self.head_style
-            page.head = (right, center, number, hs, y + 9.0 * 1.3 * 0.8)
-            ry = y + 9.0 * 1.3 + 1 * PT_PER_MM
-            page.rules.append((L, ry, R))
-            y += self.head_h
-        if r.get("pre"):
-            restack(r["pre"]["lines"])
-            page.frames.append(Frame(r["pre"]["lines"], R, y))
-            y += r["pre"]["h"] + self.sgap + 3 * PT_PER_MM
+        L, R = self.m, self.page_w - self.m
+        pre = r.get("pre")
+        if pre and "r" in pre:
+            y = self.place_body(pre["r"], page, y) + self.sgap + 3 * PT_PER_MM
+            if r.get("col_w"):
+                self.col_w = dict(r["col_w"])
+            pre = None
+        if pre:
+            restack(pre["lines"])
+            page.frames.append(Frame(pre["lines"], R, y))
+            y += pre["h"] + self.sgap + 3 * PT_PER_MM
         if r["text"] or r["side"]:
             page.frames.append(Frame(r["text"], R, y))
             off_r = off_l = 0.0
@@ -1033,6 +1049,25 @@ class Engine:
             restack(r["post"]["lines"])
             page.frames.append(Frame(r["post"]["lines"], R, y))
             y += r["post"]["h"]
+        return y
+
+    def finalize(self, r, chapter, parasha, number):
+        if r.get("col_w"):
+            self.col_w = dict(r["col_w"])
+        P = self.P
+        L, R, T = self.m, self.page_w - self.m, self.m
+        page = Page(self.page_w, self.page_h)
+        y = T
+        if P["header"]:
+            title = P["title"]
+            right = f"{title} · {parasha}" if parasha and title else (parasha or title)
+            center = chapter if chapter and chapter != parasha else ""
+            hs = self.head_style
+            page.head = (right, center, number, hs, y + 9.0 * 1.3 * 0.8)
+            ry = y + 9.0 * 1.3 + 1 * PT_PER_MM
+            page.rules.append((L, ry, R))
+            y += self.head_h
+        y = self.place_body(r, page, y)
         page.overfull = y - T > self.contentH + 1
         return page
 

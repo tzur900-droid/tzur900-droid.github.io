@@ -195,7 +195,9 @@ def parse_main(text):
         if not t:
             continue
         if t.startswith("#"):
-            no_comm = t.startswith("##")
+            # '###' is a heading inside the current section (a chapter within a haftara)
+            if not t.startswith("###"):
+                no_comm = t.startswith("##")
             chapter = t.lstrip("#").strip()
             if not no_comm and re.match(r"^פרש(ת|ה)\s", chapter):
                 parasha = chapter

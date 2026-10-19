@@ -26,6 +26,22 @@ PARASHOT = {
               ("כי תבוא", 26, 1), ("נצבים", 29, 9), ("וילך", 31, 1), ("האזינו", 32, 1), ("וזאת הברכה", 33, 1)],
 }
 
+# Haftarot (Ashkenazi custom): parasha -> [(book, chapter, verse, to chapter, to verse)]
+HAFTAROT = {
+    "ויקרא": [("ישעיהו", 43, 21, 44, 23)],
+    "צו": [("ירמיהו", 7, 21, 8, 3), ("ירמיהו", 9, 22, 9, 23)],
+    "שמיני": [("שמואל ב", 6, 1, 7, 17)],
+    "תזריע": [("מלכים ב", 4, 42, 5, 19)],
+    "מצורע": [("מלכים ב", 7, 3, 7, 20)],
+    "אחרי מות": [("יחזקאל", 22, 1, 22, 19)],
+    "קדושים": [("עמוס", 9, 7, 9, 15)],
+    "אמור": [("יחזקאל", 44, 15, 44, 31)],
+    "בהר": [("ירמיהו", 32, 6, 32, 27)],
+    "בחקתי": [("ירמיהו", 16, 19, 17, 14)],
+}
+NAVI = {"ישעיהו", "ירמיהו", "יחזקאל", "שמואל א", "שמואל ב", "מלכים א", "מלכים ב", "יהושע", "שופטים", "הושע", "יואל",
+        "עמוס", "עובדיה", "יונה", "מיכה", "נחום", "חבקוק", "צפניה", "חגי", "זכריה", "מלאכי"}
+
 LETTERS = {"א": 1, "ב": 2, "ג": 3, "ד": 4, "ה": 5, "ו": 6, "ז": 7, "ח": 8, "ט": 9, "י": 10, "כ": 20, "ך": 20,
            "ל": 30, "מ": 40, "ם": 40, "נ": 50, "ן": 50, "ס": 60, "ע": 70, "פ": 80, "ף": 80, "צ": 90, "ץ": 90,
            "ק": 100, "ר": 200, "ש": 300, "ת": 400}
@@ -73,6 +89,8 @@ def read(path):
 
 def kind_of(lines):
     h1 = clean(lines[0]) if lines else ""
+    if h1 in NAVI:
+        return "navi:" + h1
     if "אונקלוס" in h1:
         return "onkelos"
     if "רש" in h1 and "על" in h1:
@@ -80,6 +98,48 @@ def kind_of(lines):
     if "רמב" in h1:
         return "ramban"
     return "torah"
+
+
+def parse_navi(lines):
+    """A book of Nevi'im from Otzaria: '<h2>… פרק-X</h2>', '<h3>{Y}</h3>', then the verse
+    (with te'amim, ketiv/qere as '(ketiv) [qere]') and commentaries, which are skipped."""
+    out = {}
+    ch = 0
+    k = 0
+    while k < len(lines):
+        l = lines[k]
+        m = re.match(r"\s*<h2>.*?פרק[-\s]+(\S+?)\s*</h2>", l)
+        if m:
+            ch = gematria(m.group(1))
+        m = re.match(r"\s*<h3>\{(\S+?)\}</h3>", l)
+        if m and ch:
+            j = k + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines):
+                out[(ch, gematria(m.group(1)))] = clean(lines[j])
+            k = j
+        k += 1
+    return out
+
+
+def haftara_lines(name, navi):
+    """The haftara of a parasha as main-text lines ('## הפטרת …', verses, '### פרק' when
+    the chapter changes), or [] when its book isn't loaded."""
+    parts = HAFTAROT.get(name)
+    if not parts or any(b not in navi for b, *_ in parts):
+        return []
+    book0, c0 = parts[0][0], parts[0][1]
+    out = [f"## הפטרת {name} ({book0} {heb(c0)})"]
+    cur = c0
+    for book, c1, v1, c2, v2 in parts:
+        verses = sorted(k for k in navi[book] if (c1, v1) <= k <= (c2, v2))
+        for ch, v in verses:
+            if ch != cur:
+                out.append(f"### פרק {heb(ch)}")
+                cur = ch
+            out.append(f"[{heb(v)}] {navi[book][(ch, v)]}")
+    return out
 
 
 def parse_torah(lines):
@@ -155,12 +215,16 @@ def comm_lines(entries, verses):
     return "\n".join(lines)
 
 
-def build(book, verses, comms, parashot):
-    """parashot: [(name, first index, end index)] within verses."""
+def build(book, verses, comms, parashot, navi=None):
+    """parashot: [(name, first index, end index)] within verses. Each parasha is followed
+    by its haftara when the books of Nevi'im are given."""
     main = []
     cur_ch = None
     starts = {a: name for name, a, _ in parashot}
+    ends = {b: name for name, _, b in parashot}
     for n, (ch, v, label, text) in enumerate(verses):
+        if n in ends and navi:
+            main.extend(haftara_lines(ends[n], navi))
         if n in starts:
             main.append(f"# פרשת {starts[n]}")
             cur_ch = None
@@ -168,6 +232,8 @@ def build(book, verses, comms, parashot):
             main.append(f"# פרק {heb(ch)}")
             cur_ch = ch
         main.append(f"[{label}] {text}")
+    if len(verses) in ends and navi:
+        main.extend(haftara_lines(ends[len(verses)], navi))
     project = {
         "title": book,
         "main": "\n".join(main),
@@ -194,6 +260,7 @@ def convert(paths, out_dir):
     for p in paths:
         lines = read(p)
         files[kind_of(lines)] = lines
+    navi = {k[5:]: parse_navi(v) for k, v in files.items() if k.startswith("navi:")}
     if "torah" not in files:
         raise ValueError("לא נמצא קובץ של הפסוקים (קובץ שהשורה הראשונה שלו היא שם הספר).")
     book, verses = parse_torah(files["torah"])
@@ -219,12 +286,16 @@ def convert(paths, out_dir):
 
     for k, (name, a, b) in enumerate(parashot, 1):
         part = verses[a:b]
-        dump(build(book, part, comms, [(name, 0, len(part))]), f"{book} {k:02d} - פרשת {name}.json")
-    dump(build(book, verses, comms, parashot), f"{book} - כל הספר.json")
+        dump(build(book, part, comms, [(name, 0, len(part))], navi), f"{book} {k:02d} - פרשת {name}.json")
+    dump(build(book, verses, comms, parashot, navi), f"{book} - כל הספר.json")
     names = {"onkelos": "אונקלוס", "rashi": "רש\"י", "ramban": "רמב\"ן"}
     report = [f"{book}: {len(verses)} פסוקים, {len(parashot)} פרשות."]
     for k, c in comms.items():
         lost = sum(1 for key in c if key not in index)
         report.append(f"{names[k]}: {sum(len(x) for x in c.values())} קטעים על {len(c)} פסוקים"
                       + (f" — {lost} לא שויכו לפסוק!" if lost else "."))
+    if navi:
+        got = [name for name, _, _ in parashot if haftara_lines(name, navi)]
+        missing = [name for name, _, _ in parashot if not haftara_lines(name, navi)]
+        report.append(f"הפטרות: {len(got)} מתוך {len(parashot)} פרשות" + (f" (חסר ספר עבור: {', '.join(missing)})" if missing else "."))
     return written, report

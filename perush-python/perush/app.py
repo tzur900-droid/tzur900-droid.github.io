@@ -644,6 +644,7 @@ class MainWindow(QMainWindow):
         from .sefaria import convert
         QMessageBox.information(self, APP_NAME,
             "בחרו את קובצי הטקסט שהורדתם מספריא (ספר אחד): הפסוקים, ואם יש גם אונקלוס, רש\"י ורמב\"ן.\n"
+            "להפטרות בחרו יחד איתם גם את ספרי הנביאים מאוצריא (ישעיהו, ירמיהו וכו').\n"
             "אחר כך בחרו תיקייה שבה יישמרו הפרויקטים (קובץ לכל פרשה וקובץ לכל הספר).")
         paths, _ = QFileDialog.getOpenFileNames(self, "קובצי ספריא", self.settings.value("lastDir", ""), "טקסט (*.txt)")
         if not paths:
