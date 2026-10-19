@@ -552,6 +552,7 @@ class Engine:
         self.recompute_top(r)
 
     def justify(self, r):
+        self.align_columns(r)
         spare = self.contentH - self.total_h(r)
         # no commentary on the page: open the text's line spacing to the bottom
         if not r["sections"] and not r["post"] and not r["at_end"] and r["text"] and 0 < spare < self.main_lh * 1.5:
@@ -618,6 +619,25 @@ class Engine:
         taken[-1].mb = 0.0
         h = restack(taken)
         return taken, h, end, False
+
+    def spread_page(self, r):
+        spare = self.contentH - self.total_h(r)
+        text = [l for l in r["text"] if l.kind == "p"]
+        post = [l for l in (r.get("post") or {}).get("lines", []) if l.kind == "p"]
+        rows = sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in r["sections"])
+        units = len(text) + len(post) + rows
+        if spare < 0.5 or not units or spare / units > 0.3 * self.main_lh:
+            return
+        d = spare / units
+        for l in text + post:
+            l.h += d
+        for s in r["sections"]:
+            s["nlh"] += d
+            s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
+        self.recompute_top(r)
+        self.align_columns(r)
+        if r.get("post"):
+            r["post"]["h"] = restack(r["post"]["lines"])
 
     def stretch_lines(self, lines, spare, cap):
         n = len([l for l in lines if l.kind == "p"])
@@ -801,6 +821,10 @@ class Engine:
                 self.pre = {"r": best, "h": self.total_h(best) - self.head_h, "chapter": chapter, "parasha": parasha}
                 self.ptrs.update(best["ptrs"])
                 break
+            if last and post and post.get("done") and getattr(self, "comm_after_plain", False):
+                # the next parasha doesn't fit under the haftara: spread the room over the
+                # lines of the whole page (text, commentaries and haftara)
+                self.spread_page(best)
             self.pages.append((best, chapter, parasha))
             pre = None
             stuck = best["b"] == pos and all(best["ptrs"].get(c) == p for c, p in self.ptrs.items())

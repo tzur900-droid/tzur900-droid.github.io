@@ -28,6 +28,32 @@ PARASHOT = {
 
 # Haftarot (Ashkenazi custom): parasha -> [(book, chapter, verse, to chapter, to verse)]
 HAFTAROT = {
+    # בראשית
+    "בראשית": [("ישעיהו", 42, 5, 43, 10)],
+    "נח": [("ישעיהו", 54, 1, 55, 5)],
+    "לך לך": [("ישעיהו", 40, 27, 41, 16)],
+    "וירא": [("מלכים ב", 4, 1, 4, 37)],
+    "חיי שרה": [("מלכים א", 1, 1, 1, 31)],
+    "תולדות": [("מלאכי", 1, 1, 2, 7)],
+    "ויצא": [("הושע", 12, 13, 14, 10)],
+    "וישלח": [("עובדיה", 1, 1, 1, 21)],
+    "וישב": [("עמוס", 2, 6, 3, 8)],
+    "מקץ": [("מלכים א", 3, 15, 4, 1)],
+    "ויגש": [("יחזקאל", 37, 15, 37, 28)],
+    "ויחי": [("מלכים א", 2, 1, 2, 12)],
+    # שמות
+    "שמות": [("ישעיהו", 27, 6, 28, 13), ("ישעיהו", 29, 22, 29, 23)],
+    "וארא": [("יחזקאל", 28, 25, 29, 21)],
+    "בא": [("ירמיהו", 46, 13, 46, 28)],
+    "בשלח": [("שופטים", 4, 4, 5, 31)],
+    "יתרו": [("ישעיהו", 6, 1, 7, 6), ("ישעיהו", 9, 5, 9, 6)],
+    "משפטים": [("ירמיהו", 34, 8, 34, 22), ("ירמיהו", 33, 25, 33, 26)],
+    "תרומה": [("מלכים א", 5, 26, 6, 13)],
+    "תצוה": [("יחזקאל", 43, 10, 43, 27)],
+    "כי תשא": [("מלכים א", 18, 1, 18, 39)],
+    "ויקהל": [("מלכים א", 7, 40, 7, 50)],
+    "פקודי": [("מלכים א", 7, 51, 8, 21)],
+    # ויקרא
     "ויקרא": [("ישעיהו", 43, 21, 44, 23)],
     "צו": [("ירמיהו", 7, 21, 8, 3), ("ירמיהו", 9, 22, 9, 23)],
     "שמיני": [("שמואל ב", 6, 1, 7, 17)],
@@ -38,13 +64,49 @@ HAFTAROT = {
     "אמור": [("יחזקאל", 44, 15, 44, 31)],
     "בהר": [("ירמיהו", 32, 6, 32, 27)],
     "בחקתי": [("ירמיהו", 16, 19, 17, 14)],
+    # במדבר
+    "במדבר": [("הושע", 2, 1, 2, 22)],
+    "נשא": [("שופטים", 13, 2, 13, 25)],
+    "בהעלתך": [("זכריה", 2, 14, 4, 7)],
+    "שלח": [("יהושע", 2, 1, 2, 24)],
+    "קרח": [("שמואל א", 11, 14, 12, 22)],
+    "חקת": [("שופטים", 11, 1, 11, 33)],
+    "בלק": [("מיכה", 5, 6, 6, 8)],
+    "פינחס": [("מלכים א", 18, 46, 19, 21)],
+    "מטות": [("ירמיהו", 1, 1, 2, 3)],
+    "מסעי": [("ירמיהו", 2, 4, 2, 28), ("ירמיהו", 3, 4, 3, 4)],
+    # דברים
+    "דברים": [("ישעיהו", 1, 1, 1, 27)],
+    "ואתחנן": [("ישעיהו", 40, 1, 40, 26)],
+    "עקב": [("ישעיהו", 49, 14, 51, 3)],
+    "ראה": [("ישעיהו", 54, 11, 55, 5)],
+    "שופטים": [("ישעיהו", 51, 12, 52, 12)],
+    "כי תצא": [("ישעיהו", 54, 1, 54, 10)],
+    "כי תבוא": [("ישעיהו", 60, 1, 60, 22)],
+    "נצבים": [("ישעיהו", 61, 10, 63, 9)],
+    "וילך": [("ישעיהו", 55, 6, 56, 8)],
+    "האזינו": [("שמואל ב", 22, 1, 22, 51)],
+    "וזאת הברכה": [("יהושע", 1, 1, 1, 18)],
 }
+
 # Where the Sephardi custom differs: it ends earlier within the same haftara ("end"),
-# or reads a haftara of its own ("own").
+# starts later within it ("start"), or reads a haftara of its own ("own").
 HAFTAROT_SEFARAD = {
+    "בראשית": ("end", "ישעיהו", 42, 21),
+    "נח": ("end", "ישעיהו", 54, 10),
+    "וירא": ("end", "מלכים ב", 4, 23),
+    "ויצא": ("own", [("הושע", 11, 7, 12, 12)]),
+    "שמות": ("own", [("ירמיהו", 1, 1, 2, 3)]),
+    "בשלח": ("start", "שופטים", 5, 1),
+    "יתרו": ("end", "ישעיהו", 6, 13),
+    "כי תשא": ("start", "מלכים א", 18, 20),
+    "ויקהל": ("own", [("מלכים א", 7, 13, 7, 26)]),
+    "פקודי": ("own", [("מלכים א", 7, 40, 7, 50)]),
     "שמיני": ("end", "שמואל ב", 6, 19),
     "אחרי מות": ("end", "יחזקאל", 22, 16),
     "קדושים": ("own", [("יחזקאל", 20, 2, 20, 20)]),
+    "מסעי": ("own", [("ירמיהו", 2, 4, 2, 28), ("ירמיהו", 4, 1, 4, 2)]),
+    "וזאת הברכה": ("end", "יהושע", 1, 9),
 }
 
 NAVI = {"ישעיהו", "ירמיהו", "יחזקאל", "שמואל א", "שמואל ב", "מלכים א", "מלכים ב", "יהושע", "שופטים", "הושע", "יואל",
@@ -95,10 +157,15 @@ def read(path):
         return f.read().replace("\r", "").split("\n")
 
 
+TORAH = {"בראשית", "שמות", "ויקרא", "במדבר", "דברים"}
+
+
 def kind_of(lines):
     h1 = clean(lines[0]) if lines else ""
     if h1 in NAVI:
         return "navi:" + h1
+    if h1 in TORAH and any(re.match(r"\s*<h3>\{", l) for l in lines[:20]):
+        return "otz_torah"
     if "אונקלוס" in h1:
         return "onkelos"
     if "רש" in h1 and "על" in h1:
@@ -106,6 +173,65 @@ def kind_of(lines):
     if "רמב" in h1:
         return "ramban"
     return "torah"
+
+
+OTZ_NAMES = {"אונקלוס": "onkelos", "רש\"י": "rashi", "רמב\"ן": "ramban"}
+
+
+def parse_otzaria_torah(lines):
+    """A Torah book from Otzaria ('תורה לפי פרקים (פרשנים)'): under '<h3>{X}</h3>' the
+    verse (with te'amim, ketiv/qere as '(ketiv) [qere]'), then each commentator's lines,
+    the first marked '<b style="color: gray;">name</b>'. Onkelos, Rashi and Ramban are kept."""
+    book = clean(lines[0])
+    verses, comms = [], {k: {} for k in OTZ_NAMES.values()}
+    ch = v = 0
+    label = ""
+    expect = False
+    cur = None
+    for l in lines[1:]:
+        m = re.match(r"\s*<h2>.*?פרק[-\s]+(\S+?)\s*</h2>", l)
+        if m:
+            ch, cur = gematria(m.group(1)), None
+            continue
+        m = re.match(r"\s*<h3>\{(\S+?)\}</h3>", l)
+        if m:
+            label = m.group(1)
+            v, expect, cur = gematria(label), True, None
+            continue
+        if not l.strip():
+            continue
+        if expect:
+            verses.append((ch, v, label, clean(l)))
+            expect = False
+            continue
+        m = re.match(r'\s*<b style="color: gray;">(.*?)</b>\s*(.*)$', l)
+        if m:
+            cur = OTZ_NAMES.get(clean(m.group(1)))
+            l = m.group(2)
+        if cur:
+            t = clean(l, keep_bold=cur != "onkelos")
+            if t:
+                comms[cur].setdefault((ch, v), []).append(t)
+    # verses Otzaria splits where the commentaries (and the usual numbering) have one
+    for (bk, ch, v1, v2) in MERGE_VERSES:
+        if bk != book:
+            continue
+        keep = [x for x in verses if not (x[0] == ch and v1 < x[1] <= v2)]
+        joined = " ".join(x[3] for x in verses if x[0] == ch and v1 <= x[1] <= v2)
+        out = []
+        for c, v, l, t in keep:
+            if c == ch and v == v1:
+                t = joined
+            elif c == ch and v > v2:
+                v -= v2 - v1
+                l = heb(v)
+            out.append((c, v, l, t))
+        verses = out
+    return book, verses, comms
+
+
+# (book, chapter, first verse, last verse) to join into the first
+MERGE_VERSES = [("דברים", 5, 17, 20)]
 
 
 def parse_navi(lines):
@@ -131,7 +257,7 @@ def parse_navi(lines):
     return out
 
 
-def haftara_part(title, parts, navi, end_mark=None):
+def haftara_part(title, parts, navi, end_mark=None, start_mark=None):
     book0, c0 = parts[0][0], parts[0][1]
     out = [f"## {title} ({book0} {heb(c0)})"]
     cur = c0
@@ -144,6 +270,8 @@ def haftara_part(title, parts, navi, end_mark=None):
             text = navi[book][(ch, v)]
             if end_mark and (book, ch, v) == end_mark:
                 text += " **(כאן מסיימים הספרדים)**"
+            if start_mark and (book, ch, v) == start_mark:
+                text = "**(כאן מתחילים הספרדים)** " + text
             out.append(f"[{heb(v)}] {text}")
     return out
 
@@ -160,7 +288,8 @@ def haftara_lines(name, navi):
         return (haftara_part(f"הפטרת {name} לאשכנזים", parts, navi)
                 + haftara_part(f"הפטרת {name} לספרדים", sef[1], navi))
     end_mark = tuple(sef[1:]) if sef and sef[0] == "end" else None
-    return haftara_part(f"הפטרת {name}", parts, navi, end_mark)
+    start_mark = tuple(sef[1:]) if sef and sef[0] == "start" else None
+    return haftara_part(f"הפטרת {name}", parts, navi, end_mark, start_mark)
 
 
 def parse_torah(lines):
@@ -282,17 +411,24 @@ def convert(paths, out_dir):
         lines = read(p)
         files[kind_of(lines)] = lines
     navi = {k[5:]: parse_navi(v) for k, v in files.items() if k.startswith("navi:")}
+    if "otz_torah" in files:
+        book, verses, comms = parse_otzaria_torah(files["otz_torah"])
+        return write_book(book, verses, comms, navi, out_dir)
     if "torah" not in files:
         raise ValueError("לא נמצא קובץ של הפסוקים (קובץ שהשורה הראשונה שלו היא שם הספר).")
     book, verses = parse_torah(files["torah"])
-    if not verses:
-        raise ValueError("לא נמצאו פסוקים בקובץ הפסוקים.")
     comms = {}
     if "onkelos" in files:
         comms["onkelos"] = parse_by_verse(files["onkelos"], keep_bold=False)
     for k in ("rashi", "ramban"):
         if k in files:
             comms[k] = parse_by_verse(files[k], keep_bold=True)
+    return write_book(book, verses, comms, navi, out_dir)
+
+
+def write_book(book, verses, comms, navi, out_dir):
+    if not verses:
+        raise ValueError("לא נמצאו פסוקים בקובץ הפסוקים.")
     index = {(ch, v): n for n, (ch, v, _, _) in enumerate(verses)}
     table = PARASHOT.get(book, [(book, verses[0][0], verses[0][1])])
     starts = [(name, index[(ch, v)]) for name, ch, v in table if (ch, v) in index] or [(book, 0)]
