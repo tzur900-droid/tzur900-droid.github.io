@@ -2,6 +2,7 @@
 
     python main.py                       open the window
     python main.py project.json out.pdf  lay out a project straight to PDF (no window)
+    python main.py --import OUT_DIR files…  convert Sefaria text files into project files
 """
 import os
 import sys
@@ -21,6 +22,12 @@ def main():
     app.setLayoutDirection(Qt.RightToLeft)
     from perush.textlayout import load_bundled_fonts
     load_bundled_fonts(os.path.join(base_dir(), "fonts"))
+
+    if len(sys.argv) > 3 and sys.argv[1] == "--import":
+        from perush.sefaria import convert
+        written, report = convert(sys.argv[3:], sys.argv[2])
+        print("\n".join(report + written))
+        return 0
 
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     if len(args) == 2:

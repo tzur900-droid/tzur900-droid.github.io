@@ -205,6 +205,7 @@ class MainWindow(QMainWindow):
         act("שמירה בשם…", self.save_as, QKeySequence.SaveAs)
         tb.addSeparator()
         act("דוגמה", self.load_example)
+        act("ייבוא מספריא…", self.import_sefaria)
         act("בדיקת התאמה", self.show_check)
         tb.addSeparator()
         pdf = act("ייצוא PDF…", self.export, "Ctrl+P")
@@ -599,6 +600,33 @@ class MainWindow(QMainWindow):
         self.settings.setValue("lastDir", os.path.dirname(path))
         if QMessageBox.question(self, APP_NAME, f"נשמר: {path}\n\nלפתוח את הקובץ?") == QMessageBox.Yes:
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def import_sefaria(self):
+        from .sefaria import convert
+        QMessageBox.information(self, APP_NAME,
+            "בחרו את קובצי הטקסט שהורדתם מספריא (ספר אחד): הפסוקים, ואם יש גם אונקלוס, רש\"י ורמב\"ן.\n"
+            "אחר כך בחרו תיקייה שבה יישמרו הפרויקטים (קובץ לכל פרשה וקובץ לכל הספר).")
+        paths, _ = QFileDialog.getOpenFileNames(self, "קובצי ספריא", self.settings.value("lastDir", ""), "טקסט (*.txt)")
+        if not paths:
+            return
+        out = QFileDialog.getExistingDirectory(self, "תיקייה לשמירת הפרויקטים", os.path.dirname(paths[0]))
+        if not out:
+            return
+        try:
+            written, report = convert(paths, out)
+        except Exception as e:
+            QMessageBox.warning(self, APP_NAME, f"הייבוא נכשל:\n{e}")
+            return
+        self.settings.setValue("lastDir", out)
+        QMessageBox.information(self, APP_NAME, "\n".join(report) + f"\n\nנשמרו {len(written)} קבצים בתיקייה:\n{out}\n\nהפרשה הראשונה תיפתח עכשיו.")
+        if not self.confirm_discard():
+            return
+        self.project = model.load_project(written[0])
+        self.path = written[0]
+        self.fill_editor()
+        self.changed()
+        self.dirty = False
+        self.update_title()
 
     def show_check(self):
         items, count = model.parse_main(self.project["main"])
