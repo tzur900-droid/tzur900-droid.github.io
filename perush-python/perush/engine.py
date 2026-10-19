@@ -23,7 +23,7 @@ import math
 from dataclasses import dataclass, field
 
 from .model import PAGE_SIZES, entry_tokens, heb, parse_comm, parse_main
-from .textlayout import PT_PER_MM, Line, Style, Word, balance_lines, break_lines, full_width, space, width, words_of
+from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width, words_of
 
 EPS = 0.01
 
@@ -364,61 +364,82 @@ class Engine:
         used = self.head_h + (pre["h"] + self.sgap + 3 * PT_PER_MM if pre else 0.0)
         avail = self.contentH - used
 
-        # translation columns beside the text
+        # Translation columns beside the text. A column runs the full height of the text and
+        # ends with it on the same line; the translation of the last verse may continue at
+        # the top of the column on the next page, but never comes before its verse. Only
+        # when the translation runs out (at the end of a section) does the text continue
+        # under the column.
         specs = self.text_specs(segs, cut)
         heights, info = {}, {}
         for c in self.sides:
             ptr = self.ptrs[c]
-            lst = self.list_from(c, ptr, max_v if at_end else last_full)
+            lst = self.list_from(c, ptr, max_v)
             words = self.entry_words(c, lst)
             lines = break_lines(words, self.style[c], self.side_lh[c], full_width(self.side_width(c)))
             th = self.title_h(c) if lines else 0.0
-            info[c] = {"lst": lst, "words": words, "nat": lines, "k": len(lines), "th": th, "ptr": ptr}
-            heights[c] = th + len(lines) * self.side_lh[c] if lines else 0.0
+            info[c] = {"lst": lst, "words": words, "nat": lines, "th": th, "ptr": ptr}
+            heights[c] = 1e9 if lines and segs else 0.0
         text_lines, text_h = layout_specs(specs, self.width_at(heights))
-        for _ in range(8):
-            changed = False
+        r["col_full"] = True
+        if segs:
+            short = False
             for c in self.sides:
                 inf = info[c]
-                if inf["nat"] and heights[c] > text_h + EPS:
-                    k = max(0, int((text_h - inf["th"] + EPS) // self.side_lh[c]))
-                    if k < inf["k"]:
-                        inf["k"] = k
-                        heights[c] = inf["th"] + k * self.side_lh[c] if k > 0 else 0.0
-                        changed = True
-            if not changed:
-                break
-            text_lines, text_h = layout_specs(specs, self.width_at(heights))
-        top_h = max([text_h] + [heights[c] for c in self.sides])
+                if not inf["nat"]:
+                    continue
+                cap = max(0, int((text_h - inf["th"] + EPS) // self.side_lh[c]))
+                if len(inf["nat"]) >= cap:
+                    inf["k"], inf["mode"] = cap, "full"
+                else:
+                    inf["k"], inf["mode"] = len(inf["nat"]), "wrap"
+                    heights[c] = inf["th"] + len(inf["nat"]) * self.side_lh[c]
+                    short = True
+            if short:
+                r["col_full"] = False
+                text_lines, text_h = layout_specs(specs, self.width_at(heights))
+        top_h = text_h
         for c in self.sides:
             inf = info[c]
             slh = self.side_lh[c]
-            col_lines = inf["nat"][:inf["k"]]
-            n_col = sum(len(l.words) for l in col_lines)
-            band, n_band = [], 0
-            rest = inf["words"][n_col:]
-            if rest:
+            if not inf["nat"]:
+                r["side"][c] = {"col": [], "band": [], "th": 0.0, "mode": "wrap", "slh": slh, "h": 0.0}
+                r["ptrs"][c] = inf["ptr"]
+                continue
+            band, n_band, col_lines = [], 0, []
+            if segs:
+                col_lines = inf["nat"][:inf["k"]]
+                if inf["mode"] == "full" and col_lines and inf["k"] < len(inf["nat"]):
+                    col_lines[-1].last = False
+                mode = inf["mode"]
+                if at_end and inf["k"] < len(inf["nat"]):
+                    # the end of the parasha: the rest of the translation goes under the text
+                    n_c = sum(len(l.words) for l in col_lines)
+                    room = avail - max(top_h, inf["th"] + len(col_lines) * slh) - 1 * PT_PER_MM
+                    max_lines = int((room + EPS) // slh) if room > 0 else 0
+                    band, n_band = self.take(inf["words"][n_c:], self.style[c], slh, self.W, max_lines)
+                    if band:
+                        top_h = max(top_h, inf["th"] + len(col_lines) * slh) + 1 * PT_PER_MM + len(band) * slh
+            else:
+                # no text left on the page: what remains of the translation goes across the page
                 room = avail - top_h - 1 * PT_PER_MM
                 max_lines = int((room + EPS) // slh) if room > 0 else 0
-                if force and max_lines < 1 and not col_lines:
+                if force and max_lines < 1:
                     max_lines = 1
-                band, n_band = self.take(rest, self.style[c], slh, self.W, max_lines)
+                band, n_band = self.take(inf["words"], self.style[c], slh, self.W, max_lines)
                 if band:
                     top_h += 1 * PT_PER_MM + len(band) * slh
-                if col_lines:
-                    col_lines[-1].last = False
-            mode = "wrap" if not band and n_col == len(inf["words"]) else "band"
-            new_ptr = self.advance(inf["ptr"], inf["words"], n_col + n_band, len(inf["lst"]))
-            r["ptrs"][c] = new_ptr
-            req = len(self.list_from(c, inf["ptr"], max_v if at_end else last_full))
-            if new_ptr[0] - inf["ptr"][0] < req:
-                r["side_short"] = True
+                mode = "band"
+            n_col = sum(len(l.words) for l in col_lines)
+            r["ptrs"][c] = self.advance(inf["ptr"], inf["words"], n_col + n_band, len(inf["lst"]))
+            h = (inf["th"] + len(col_lines) * slh) if col_lines else 0.0
+            top_h = max(top_h, h) if mode != "band" and not band else top_h
             r["side"][c] = {"col": col_lines, "band": band, "th": inf["th"] if col_lines else 0.0, "mode": mode,
-                            "slh": slh, "h": (inf["th"] + len(col_lines) * slh) if col_lines else 0.0}
+                            "slh": slh, "h": h}
         r["text"] = text_lines
         r["text_h"] = text_h
         r["top_h"] = top_h
         top_fits = used + top_h <= self.contentH + EPS
+        r["top_fits"] = top_fits
 
         # commentaries under the text
         room = self.contentH - used - top_h - self.sgap
@@ -433,7 +454,7 @@ class Engine:
                 req_h = self.section_h(c, len(break_lines(rw, self.style[c], self.note_lh[c], full_width(self.note_col_w(c)))))
             plans.append((c, ptr, req, alll, req_h))
         req_total = sum(p[4] for p in plans if p[2]) + 1.2 * PT_PER_MM * max(0, sum(1 for p in plans if p[2]) - 1)
-        r["req_fit"] = top_fits and req_total <= room + EPS and not r["side_short"]
+        r["req_fit"] = top_fits and req_total <= room + EPS
         placed_any = False
         for n, (c, ptr, req, alll, req_h) in enumerate(plans):
             r["ptrs"][c] = ptr
@@ -492,67 +513,6 @@ class Engine:
 
     # ------------------------------------------------------------ closing the gaps
 
-    def merge_tails(self, r):
-        """A translation that runs on under the text by a single line stays in its
-        column, and the text's line spacing opens a little so both end together."""
-        for c, s in r["side"].items():
-            if not s["band"] or len(s["band"]) != 1 or not s["col"]:
-                continue
-            text = [l for l in r["text"] if l.kind == "p"]
-            if len(text) < 3:
-                continue
-            words = [w for l in s["col"] for w in l.words] + s["band"][0].words
-            lines = break_lines(words, self.style[c], s["slh"], full_width(self.side_width(c)))
-            col_h = s["th"] + len(lines) * s["slh"]
-            extra = col_h - r["text_h"]
-            if extra < 0 or extra / len(text) > self.main_lh * 0.25:
-                continue
-            saved = (s["col"], s["band"], s["h"], [(l.h) for l in r["text"]])
-            s["col"], s["band"], s["h"] = lines, [], col_h
-            for l in text:
-                l.h += extra / len(text)
-            self.recompute_top(r)
-            if self.total_h(r) > self.contentH + EPS:
-                s["col"], s["band"], s["h"] = saved[0], saved[1], saved[2]
-                for l, h in zip(r["text"], saved[3]):
-                    l.h = h
-                self.recompute_top(r)
-            else:
-                s["mode"] = "merged"
-
-    def balance_columns(self, r):
-        """Spread the translation's words evenly over its lines, so that the column (and
-        what runs on under the text) ends on a full line."""
-        for c, s in r["side"].items():
-            slh = s["slh"]
-            if s["col"]:
-                words = [w for l in s["col"] for w in l.words]
-                lines = balance_lines(words, self.style[c], slh, self.side_width(c))
-                if len(lines) == len(s["col"]):
-                    s["col"] = lines
-            if s["band"]:
-                words = [w for l in s["band"] for w in l.words]
-                k = len(s["band"])
-                col_words = [w for l in s["col"] for w in l.words]
-                # the line under the text is short: bring the last words of the column down
-                # to fill it, as long as it stays the same number of lines
-                moved = 0
-                while col_words[:-1] and len(break_lines([col_words[-1]] + words, self.style[c], slh, full_width(self.W))) == k:
-                    words.insert(0, col_words.pop())
-                    moved += 1
-                if moved and s["col"]:
-                    col = balance_lines(col_words, self.style[c], slh, self.side_width(c))
-                    # the column, now shorter, must still reach the bottom of the text
-                    # with no more than 45% more space between its lines
-                    if (r["text_h"] - s["th"]) / max(1, len(col)) <= slh * 1.45:
-                        s["col"] = col
-                        s["h"] = s["th"] + len(col) * slh
-                    else:
-                        words = words[moved:]
-                lines = balance_lines(words, self.style[c], slh, self.W, 0.5)
-                if len(lines) == k:
-                    s["band"] = lines
-
     def align_columns(self, r):
         # the translation column ends exactly where the text beside it ends (band), or
         # exactly where the next line of the text under it begins (wrap)
@@ -560,24 +520,20 @@ class Engine:
             if not s["col"]:
                 continue
             n = len(s["col"])
-            if s["mode"] == "band":
+            if s["mode"] == "full":
                 target = r["text_h"]
             elif s["mode"] == "wrap":
                 tops = [l.y for l in r["text"] if l.y >= s["h"] - EPS]
                 target = min(tops) if tops else r["text_h"]
             else:
                 continue
-            limit = s["slh"] * 1.5 if s["mode"] != "band" else (target - s["th"]) * 0.32
-            if n >= 2 and 0.3 < target - s["h"] <= max(limit, s["slh"] * 1.5):
+            if n >= 1 and 0.3 < target - s["h"] and (s["mode"] == "full" or target - s["h"] <= s["slh"] * 1.5):
                 for l in s["col"]:
                     l.h = (target - s["th"]) / n
                 s["h"] = target
-            if s["mode"] == "band":
-                s["col"][-1].last = False
         self.recompute_top(r)
 
     def justify(self, r):
-        self.balance_columns(r)
         spare = self.contentH - self.total_h(r)
         # no commentary on the page: open the text's line spacing to the bottom
         if not r["sections"] and not r["post"] and not r["at_end"] and r["text"] and 0 < spare < self.main_lh * 1.5:
@@ -722,8 +678,8 @@ class Engine:
                 nw.w += width(bst, nxt["label"]) + space(self.main)
             if not last.fits_more(nw):
                 return g
-        # a line that is mostly full is simply justified to the full width
-        if last.natural >= last.width * 0.6:
+        # a line that is nearly full is simply justified to the full width
+        if last.natural >= last.width * 0.9:
             return g
         first = next((w.ref for w in last.words if isinstance(w.ref, tuple) and isinstance(w.ref[0], int)), None)
         if first is None:
@@ -773,56 +729,27 @@ class Engine:
         while pending() and guard < 5000:
             guard += 1
             self.tick()
-            if pos[0] >= len(self.items):
-                best = self.compose(pos, pos, True, pre)
-            else:
-                g0 = self.g_of(pos)
-                hi = min(self.total, g0 + 64)
-                while hi < self.total and self.text_height(pos, hi) < self.contentH - self.head_h:
-                    hi = min(self.total, g0 + (hi - g0) * 2)
-                lo, g = g0 + 1, 0
-                while lo <= hi:
-                    mid = (lo + hi) // 2
-                    if self.compose(pos, self.pos(mid), False, pre)["req_fit"]:
-                        g, lo = mid, mid + 1
-                    else:
-                        hi = mid - 1
-                # wrapping the translation makes the fit only roughly monotone: look a little further
-                if g:
-                    x, misses = g + 1, 0
-                    while x <= min(self.total, g + 60) and misses < 10:
-                        if self.compose(pos, self.pos(x), False, pre)["req_fit"]:
-                            g, misses = x, 0
-                        else:
-                            misses += 1
-                        x += 1
-                if not g or self.text_height(pos, g) < self.min_text_h:
-                    # a commentary longer than a page: keep the minimum of text, the rest runs on
-                    lo, hi2 = g0 + 1, min(self.total, max(g0 + 1, hi))
-                    m = hi2
-                    while lo <= hi2:
-                        mid = (lo + hi2) // 2
-                        if self.text_height(pos, mid) >= self.min_text_h:
-                            m, hi2 = mid, mid - 1
-                        else:
-                            lo = mid + 1
-                    g = max(g, m)
-                best = self.compose(pos, self.pos(g), False, pre)
-                g2 = self.full_line_end(best, g0, g)
-                end = self.pos(g2)
-                # don't leave a chapter heading alone at the bottom of a page
-                heading_alone = end[1] == 0 and end[0] - 1 > pos[0] and self.items[end[0] - 1]["type"] == "h"
-                if heading_alone:
-                    g2 = self.off[end[0] - 1]
-                    while g2 > g0 + 1 and self.items[self.pos(g2 - 1)[0]]["type"] == "h":
-                        g2 -= 1
-                if g2 != g:
-                    alt = self.compose(pos, self.pos(g2), False, pre)
-                    # ending a line earlier must not open a hole the page can't close by
-                    # spacing its lines a little
-                    if not best["req_fit"] or self.can_close(alt, self.total_h(best) - self.total_h(alt)):
-                        best = alt
-            self.merge_tails(best)
+            base = dict(self.col_w)
+            best = self.search_page(pos, pre)
+            # keep the translation in step with the text: widen the column a little on a
+            # page where it falls behind, narrow it where it runs out
+            if self.sides and not best["at_end"]:
+                lag = self.page_lag(best)
+                short = not best["col_full"]
+                if lag > 1 or short:
+                    sign = 1 if lag > 1 else -1
+                    for step in (3, 6, 9):
+                        for c in self.sides:
+                            self.col_w[c] = min(60.0, max(12.0, base[c] + sign * step))
+                        cand = self.search_page(pos, pre)
+                        lag2 = self.page_lag(cand)
+                        ok = cand["col_full"] or cand["at_end"]
+                        if ok and (lag2 < lag or (short and sign < 0)):
+                            best, lag, short = cand, lag2, False
+                            best["col_w"] = dict(self.col_w)
+                            if lag <= 1:
+                                break
+                    self.col_w = dict(best.get("col_w", base))
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
             if last and next_plain:
                 budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM
@@ -834,6 +761,8 @@ class Engine:
                         spare = self.contentH - self.total_h(best)
                         best["post"]["h"] = self.stretch_lines(lines, spare, self.main_lh * 3)
             self.justify(best)
+            best["col_w"] = dict(self.col_w)
+            self.col_w = base
             first = self.items[min(pos[0], len(self.items) - 1)]
             self.pages.append((best, first["chapter"], first["parasha"]))
             pre = None
@@ -843,6 +772,108 @@ class Engine:
             if stuck:
                 self.warnings.append("חלק מהטקסט לא נכנס לעמוד (פסוק או פירוש ארוך מעמוד שלם). הקטינו את הגופן.")
                 break
+
+    def search_page(self, pos, pre):
+        """The best page starting at pos, with the current column widths."""
+        if pos[0] >= len(self.items):
+            return self.compose(pos, pos, True, pre)
+        g0 = self.g_of(pos)
+        hi = min(self.total, g0 + 64)
+        while hi < self.total and self.text_height(pos, hi) < self.contentH - self.head_h:
+            hi = min(self.total, g0 + (hi - g0) * 2)
+        lo, g = g0 + 1, 0
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if self.compose(pos, self.pos(mid), False, pre)["req_fit"]:
+                g, lo = mid, mid + 1
+            else:
+                hi = mid - 1
+        # wrapping the translation makes the fit only roughly monotone: look a little further
+        if g:
+            x, misses = g + 1, 0
+            while x <= min(self.total, g + 60) and misses < 10:
+                if self.compose(pos, self.pos(x), False, pre)["req_fit"]:
+                    g, misses = x, 0
+                else:
+                    misses += 1
+                x += 1
+        if not g or self.text_height(pos, g) < self.min_text_h:
+            # a commentary longer than a page: keep the minimum of text, the rest runs on
+            lo, hi2 = g0 + 1, min(self.total, max(g0 + 1, hi))
+            m = hi2
+            while lo <= hi2:
+                mid = (lo + hi2) // 2
+                if self.text_height(pos, mid) >= self.min_text_h:
+                    m, hi2 = mid, mid - 1
+                else:
+                    lo = mid + 1
+            g = max(g, m)
+        best = self.compose(pos, self.pos(g), False, pre)
+        # the translation runs out before the text ends: add text until it fills its column
+        if self.sides and not best["col_full"] and not best["at_end"]:
+            x = g + 1
+            while x <= min(self.total, g + 400):
+                r2 = self.compose(pos, self.pos(x), False, pre)
+                if not r2["top_fits"]:
+                    break
+                if r2["col_full"] or r2["at_end"]:
+                    g, best = x, r2
+                    break
+                x += 1
+        best, g = self.end_on_full_line(pos, g0, g, best, pre)
+        return best
+
+    def page_lag(self, r):
+        """How many verses completed on the page still wait for (the end of) their translation."""
+        b = r["b"]
+        last_text = -1
+        for i in range(min(b[0], len(self.items)) - 1, -1, -1):
+            if self.items[i]["type"] == "v":
+                last_text = self.items[i]["idx"]
+                break
+        lag = 0
+        for c in self.sides:
+            st = self.streams[c]
+            e, w = r["ptrs"].get(c, self.ptrs[c])
+            done_v = st[e - 1]["v"] if e > 0 else -1
+            behind = len({x["v"] for x in st[e:] if x["v"] <= last_text})
+            lag = max(lag, behind)
+        return lag
+
+    def end_on_full_line(self, pos, g0, g, best, pre):
+        """End the text on a full line: run on to the end of the line if the page allows it,
+        otherwise end at the end of the line before."""
+        if best["at_end"] or not best["text"] or best["text"][-1].kind != "p":
+            return best, g
+        g2 = self.full_line_end(best, g0, g)
+        end = self.pos(g2)
+        heading_alone = end[1] == 0 and end[0] - 1 > pos[0] and self.items[end[0] - 1]["type"] == "h"
+        if heading_alone:
+            g2 = self.off[end[0] - 1]
+            while g2 > g0 + 1 and self.items[self.pos(g2 - 1)[0]]["type"] == "h":
+                g2 -= 1
+        if g2 == g:
+            return best, g
+        # try finishing the line instead
+        n_lines = len(best["text"])
+        ext, gx = None, g
+        x = g + 1
+        while x <= min(self.total, g + 40):
+            r2 = self.compose(pos, self.pos(x), False, pre)
+            if not r2["top_fits"] or len(r2["text"]) != n_lines or (self.sides and not r2["col_full"] and not r2["at_end"]):
+                break
+            if self.total_h(r2) > self.contentH + EPS and not r2["sections"]:
+                break
+            ext, gx = r2, x
+            if r2["at_end"]:
+                break
+            x += 1
+        if ext is not None and not heading_alone and self.full_line_end(ext, g0, gx) == gx:
+            return ext, gx
+        alt = self.compose(pos, self.pos(g2), False, pre)
+        if (not self.sides or alt["col_full"]) and (not best["req_fit"] or self.can_close(alt, self.total_h(best) - self.total_h(alt))):
+            return alt, g2
+        return best, g
 
     def run_plain(self, lst, next_sec):
         off, total = self.units(lst)
@@ -871,6 +902,8 @@ class Engine:
     # ------------------------------------------------------------ to absolute coordinates
 
     def finalize(self, r, chapter, parasha, number):
+        if r.get("col_w"):
+            self.col_w = dict(r["col_w"])
         P = self.P
         L, R, T = self.m, self.page_w - self.m, self.m
         page = Page(self.page_w, self.page_h)
