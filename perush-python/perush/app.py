@@ -237,7 +237,8 @@ class MainWindow(QMainWindow):
         root = self.projects_dir()
         found = False
         if os.path.isdir(root):
-            for book in sorted(os.listdir(root)):
+            order = ["בראשית", "שמות", "ויקרא", "במדבר", "דברים"]
+            for book in sorted(os.listdir(root), key=lambda b: (order.index(b) if b in order else 99, b)):
                 folder = os.path.join(root, book)
                 files = sorted(f for f in os.listdir(folder) if f.endswith(".json")) if os.path.isdir(folder) else []
                 if not files:
