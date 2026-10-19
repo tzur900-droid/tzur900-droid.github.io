@@ -34,6 +34,7 @@ DEFAULTS = {
     "numbers": True,
     "header": True,
     "names": True,
+    "inlineChapters": False,
 }
 
 COMM_DEFAULTS = {

@@ -20,6 +20,7 @@ Fonts never change size. On every page:
 Everything is measured in points and laid out line by line, so heights are exact.
 """
 import math
+import re
 from dataclasses import dataclass, field
 
 from .model import PAGE_SIZES, entry_tokens, heb, parse_comm, parse_main
@@ -179,7 +180,16 @@ class Engine:
                 specs.append(Spec(list(para), self.main, self.main_lh))
                 para.clear()
 
+        inline_chapter = False
         for i, it, frm, to in segs:
+            if self.is_inline(it):
+                # the chapter is marked inside the running text: its letter, larger and bold,
+                # and verse 1 follows it without its own letter
+                letter = it["text"].split()[-1]
+                st = self.main.scaled(1.4, bold=True)
+                para.append(Word(letter, st, width(st, letter), ("h", i)))
+                inline_chapter = True
+                continue
             if it["type"] == "h":
                 flush()
                 st = self.main.scaled(1.2, bold=True)
@@ -187,8 +197,9 @@ class Engine:
                 mt = 1 * PT_PER_MM if it["noComm"] else 0.0
                 specs.append(Spec(hw, st, st.size * self.lh_k, "center", mt, 0.6 * PT_PER_MM if it["noComm"] else 0.0, kind="h"))
                 continue
-            if P["numbers"] and frm == 0:
+            if P["numbers"] and frm == 0 and not inline_chapter:
                 para.append(Word(it["label"], bold, width(bold, it["label"]), ("l", i)))
+            inline_chapter = False
             para.extend(words_of(it["words"][frm:to], self.main, lambda k, i=i, frm=frm: (i, frm + k)))
             und = []
             if to == len(it["words"]) and it["idx"] >= 0:
@@ -206,6 +217,14 @@ class Engine:
             specs[-1].cut = True
             specs[-1].force = True
         return specs
+
+    def is_inline(self, it):
+        return (it["type"] == "h" and self.P.get("inlineChapters") and not it["noComm"]
+                and re.match(r"^פרק\s+\S+$", it["text"]) is not None)
+
+    def is_break(self, it):
+        """Whether an item breaks the running text (a heading on its own line)."""
+        return it["type"] == "h" and not self.is_inline(it)
 
     # ------------------------------------------------------------ streams
 
@@ -349,7 +368,7 @@ class Engine:
         segs = self.segments(a, b)
         at_end = b[0] >= len(items)
         # the text on the page ends on a full line unless the section or a paragraph ends here
-        cut = b[1] > 0 or (not at_end and items[b[0]]["type"] != "h" and not self.P["verseNewLine"])
+        cut = b[1] > 0 or (not at_end and not self.is_break(items[b[0]]) and not self.P["verseNewLine"])
         r = {"a": a, "b": b, "at_end": at_end, "pre": pre, "ptrs": dict(self.ptrs), "side": {}, "sections": [],
              "post": None, "req_fit": True, "side_short": False}
         max_v = last_full = -1
@@ -663,7 +682,7 @@ class Engine:
         nxt = self.items[b[0]]
         if b[1] == 0 and (self.P["verseNewLine"] or (b[0] > 0 and self.items[b[0] - 1]["type"] == "h")):
             return g
-        if nxt["type"] == "h":
+        if self.is_break(nxt):
             # the page ends with the end of a chapter: fine if its last line is well filled
             last = r["text"][-1]
             if last.kind != "p" or last.natural >= last.width * 0.6:
@@ -686,7 +705,7 @@ class Engine:
         first = next((w.ref for w in last.words if isinstance(w.ref, tuple) and isinstance(w.ref[0], int)), None)
         if first is None:
             return g
-        if last.words[0].ref and last.words[0].ref[0] == "l":
+        if last.words[0].ref and last.words[0].ref[0] in ("l", "h"):
             first = (last.words[0].ref[1], 0)
         g2 = self.g_of(first)
         return g2 if g2 > g0 else g

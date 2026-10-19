@@ -174,7 +174,7 @@ def build(book, verses, comms, parashot):
         "comms": [],
         "pageSize": "A4", "margin": 14, "mainFont": "Noto Serif Hebrew", "mainSize": 15, "lineHeight": 1.6,
         "colGap": 5, "sectionGap": 2, "minLines": 4, "firstPage": 1,
-        "verseNewLine": False, "numbers": True, "header": True, "names": True,
+        "verseNewLine": False, "numbers": True, "header": True, "names": True, "inlineChapters": True,
     }
     styles = {
         "onkelos": {"name": "אונקלוס", "place": "side", "side": "left", "font": "Noto Serif Hebrew", "size": 10.5, "width": 34, "autoW": True, "cols": 2},

@@ -48,5 +48,6 @@
  "verseNewLine": false,
  "numbers": true,
  "header": true,
- "names": true
+ "names": true,
+ "inlineChapters": true
 }
