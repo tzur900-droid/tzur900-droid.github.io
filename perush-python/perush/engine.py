@@ -23,7 +23,7 @@ import math
 from dataclasses import dataclass, field
 
 from .model import PAGE_SIZES, entry_tokens, heb, parse_comm, parse_main
-from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width, words_of
+from .textlayout import PT_PER_MM, Line, Style, Word, balance_lines, break_lines, full_width, space, width, words_of
 
 EPS = 0.01
 
@@ -79,6 +79,7 @@ def layout_specs(specs, width_at):
             l.kind = sp.kind
         if ls and sp.cut:
             ls[-1].last = False
+            ls[-1].force = getattr(sp, "force", False)
         if ls:
             y = ls[-1].y + ls[-1].h
         y += sp.mb
@@ -203,6 +204,7 @@ class Engine:
         flush()
         if cut_at_end and specs:
             specs[-1].cut = True
+            specs[-1].force = True
         return specs
 
     # ------------------------------------------------------------ streams
@@ -346,7 +348,8 @@ class Engine:
         items = self.items
         segs = self.segments(a, b)
         at_end = b[0] >= len(items)
-        cut = b[1] > 0
+        # the text on the page ends on a full line unless the section or a paragraph ends here
+        cut = b[1] > 0 or (not at_end and items[b[0]]["type"] != "h" and not self.P["verseNewLine"])
         r = {"a": a, "b": b, "at_end": at_end, "pre": pre, "ptrs": dict(self.ptrs), "side": {}, "sections": [],
              "post": None, "req_fit": True, "side_short": False}
         max_v = last_full = -1
@@ -455,6 +458,15 @@ class Engine:
             r["ptrs"][c] = self.advance(ptr, words, ntake, len(alll))
         return r
 
+    def can_close(self, r, hole):
+        """Whether a hole of this height can be spread over the page's lines."""
+        if hole <= self.main_lh * 1.5:
+            return True
+        units = len([l for l in r["text"] if l.kind == "p"])
+        units += sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in r["sections"])
+        lhs = [self.main_lh] + [s["nlh"] for s in r["sections"]]
+        return units > 0 and hole / units <= 0.3 * min(lhs)
+
     def notes_h(self, r):
         if not r["sections"]:
             return 0.0
@@ -508,6 +520,39 @@ class Engine:
             else:
                 s["mode"] = "merged"
 
+    def balance_columns(self, r):
+        """Spread the translation's words evenly over its lines, so that the column (and
+        what runs on under the text) ends on a full line."""
+        for c, s in r["side"].items():
+            slh = s["slh"]
+            if s["col"]:
+                words = [w for l in s["col"] for w in l.words]
+                lines = balance_lines(words, self.style[c], slh, self.side_width(c))
+                if len(lines) == len(s["col"]):
+                    s["col"] = lines
+            if s["band"]:
+                words = [w for l in s["band"] for w in l.words]
+                k = len(s["band"])
+                col_words = [w for l in s["col"] for w in l.words]
+                # the line under the text is short: bring the last words of the column down
+                # to fill it, as long as it stays the same number of lines
+                moved = 0
+                while col_words[:-1] and len(break_lines([col_words[-1]] + words, self.style[c], slh, full_width(self.W))) == k:
+                    words.insert(0, col_words.pop())
+                    moved += 1
+                if moved and s["col"]:
+                    col = balance_lines(col_words, self.style[c], slh, self.side_width(c))
+                    # the column, now shorter, must still reach the bottom of the text
+                    # with no more than 45% more space between its lines
+                    if (r["text_h"] - s["th"]) / max(1, len(col)) <= slh * 1.45:
+                        s["col"] = col
+                        s["h"] = s["th"] + len(col) * slh
+                    else:
+                        words = words[moved:]
+                lines = balance_lines(words, self.style[c], slh, self.W, 0.5)
+                if len(lines) == k:
+                    s["band"] = lines
+
     def align_columns(self, r):
         # the translation column ends exactly where the text beside it ends (band), or
         # exactly where the next line of the text under it begins (wrap)
@@ -522,7 +567,8 @@ class Engine:
                 target = min(tops) if tops else r["text_h"]
             else:
                 continue
-            if n >= 2 and 0.3 < target - s["h"] <= s["slh"] * 1.5:
+            limit = s["slh"] * 1.5 if s["mode"] != "band" else (target - s["th"]) * 0.32
+            if n >= 2 and 0.3 < target - s["h"] <= max(limit, s["slh"] * 1.5):
                 for l in s["col"]:
                     l.h = (target - s["th"]) / n
                 s["h"] = target
@@ -531,6 +577,7 @@ class Engine:
         self.recompute_top(r)
 
     def justify(self, r):
+        self.balance_columns(r)
         spare = self.contentH - self.total_h(r)
         # no commentary on the page: open the text's line spacing to the bottom
         if not r["sections"] and not r["post"] and not r["at_end"] and r["text"] and 0 < spare < self.main_lh * 1.5:
@@ -656,8 +703,13 @@ class Engine:
             return g
         b = self.pos(g)
         nxt = self.items[b[0]]
-        if b[1] == 0 and (nxt["type"] == "h" or self.P["verseNewLine"] or (b[0] > 0 and self.items[b[0] - 1]["type"] == "h")):
+        if b[1] == 0 and (self.P["verseNewLine"] or (b[0] > 0 and self.items[b[0] - 1]["type"] == "h")):
             return g
+        if nxt["type"] == "h":
+            # the page ends with the end of a chapter: fine if its last line is well filled
+            last = r["text"][-1]
+            if last.kind != "p" or last.natural >= last.width * 0.6:
+                return g
         last = r["text"][-1]
         if last.kind != "p":
             return g
@@ -759,12 +811,16 @@ class Engine:
                 g2 = self.full_line_end(best, g0, g)
                 end = self.pos(g2)
                 # don't leave a chapter heading alone at the bottom of a page
-                if end[1] == 0 and end[0] - 1 > pos[0] and self.items[end[0] - 1]["type"] == "h":
+                heading_alone = end[1] == 0 and end[0] - 1 > pos[0] and self.items[end[0] - 1]["type"] == "h"
+                if heading_alone:
                     g2 = self.off[end[0] - 1]
+                    while g2 > g0 + 1 and self.items[self.pos(g2 - 1)[0]]["type"] == "h":
+                        g2 -= 1
                 if g2 != g:
                     alt = self.compose(pos, self.pos(g2), False, pre)
-                    # ending a line earlier must not open a hole at the bottom of the page
-                    if self.total_h(alt) >= self.total_h(best) - self.main_lh * 1.5 or not best["req_fit"]:
+                    # ending a line earlier must not open a hole the page can't close by
+                    # spacing its lines a little
+                    if not best["req_fit"] or self.can_close(alt, self.total_h(best) - self.total_h(alt)):
                         best = alt
             self.merge_tails(best)
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())

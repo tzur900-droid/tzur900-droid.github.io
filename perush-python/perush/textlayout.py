@@ -142,3 +142,29 @@ def break_lines(words, base, lh, width_at, y0=0.0, align="justify"):
 
 def full_width(w):
     return lambda y: (0.0, w)
+
+
+def balance_lines(words, base, lh, w, min_ratio=0.6):
+    """Break words into the same number of lines as greedy breaking at width w would,
+    but spread them evenly, so that every line, the last one too, can be justified to
+    the full width (the spaces open a little instead of leaving a short last line)."""
+    lines = break_lines(words, base, lh, full_width(w))
+    n = len(lines)
+    if n < 2:
+        for l in lines:
+            l.last, l.force = False, True
+        return lines
+    best = lines
+    lo, hi = w * min_ratio, w
+    for _ in range(14):
+        mid = (lo + hi) / 2
+        ls = break_lines(words, base, lh, full_width(mid))
+        if len(ls) == n:
+            best, hi = ls, mid
+        else:
+            lo = mid
+    for l in best:
+        l.width, l.right = w, 0.0
+        l.force = True
+    best[-1].last = False
+    return best

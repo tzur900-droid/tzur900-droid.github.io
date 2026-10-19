@@ -11,7 +11,8 @@ def draw_line(p, line, x_right, top):
         return
     total = sum(w.w for w in ws)
     n = len(ws)
-    justify = (line.align == "justify" and not line.last and n > 1 and total >= line.width * 0.6)
+    fill = 0.3 if getattr(line, "force", False) else 0.6
+    justify = (line.align == "justify" and not line.last and n > 1 and total >= line.width * fill)
     gap = (line.width - total) / (n - 1) if justify else space(line.base)
     x = x_right
     if line.align == "center":
