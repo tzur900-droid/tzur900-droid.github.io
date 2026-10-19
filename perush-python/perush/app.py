@@ -330,7 +330,7 @@ class MainWindow(QMainWindow):
             "numbers": QCheckBox("אותיות פסוקים"),
             "header": QCheckBox("כותרת עליונה ומספר עמוד"),
             "names": QCheckBox("שם המתרגם / המפרש מעל כל טור"),
-            "inlineChapters": QCheckBox("פרק בתוך הטקסט (אות הפרק מודגשת, בלי שורת כותרת)"),
+            "inlineChapters": QCheckBox("פרק בתוך הטקסט (אות הפרק גדולה ומודגשת, בלי שורת כותרת)"),
         }
         for c in self.cb.values():
             form.addRow(c)

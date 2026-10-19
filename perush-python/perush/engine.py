@@ -180,15 +180,13 @@ class Engine:
                 specs.append(Spec(list(para), self.main, self.main_lh))
                 para.clear()
 
-        inline_chapter = False
         for i, it, frm, to in segs:
             if self.is_inline(it):
                 # the chapter is marked inside the running text: its letter, larger and bold,
-                # and verse 1 follows it without its own letter
+                # followed by verse 1 with its own letter
                 letter = it["text"].split()[-1]
                 st = self.main.scaled(1.4, bold=True)
                 para.append(Word(letter, st, width(st, letter), ("h", i)))
-                inline_chapter = True
                 continue
             if it["type"] == "h":
                 flush()
@@ -197,9 +195,8 @@ class Engine:
                 mt = 1 * PT_PER_MM if it["noComm"] else 0.0
                 specs.append(Spec(hw, st, st.size * self.lh_k, "center", mt, 0.6 * PT_PER_MM if it["noComm"] else 0.0, kind="h"))
                 continue
-            if P["numbers"] and frm == 0 and not inline_chapter:
+            if P["numbers"] and frm == 0:
                 para.append(Word(it["label"], bold, width(bold, it["label"]), ("l", i)))
-            inline_chapter = False
             para.extend(words_of(it["words"][frm:to], self.main, lambda k, i=i, frm=frm: (i, frm + k)))
             und = []
             if to == len(it["words"]) and it["idx"] >= 0:
