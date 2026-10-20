@@ -34,9 +34,19 @@ def norm(w):
     return re.sub(r"[^א-ת]", "", NIKUD.sub("", w)).translate(FINALS)
 
 
+def clean_refs(s):
+    """No empty parentheses; a reference to the Gemara gives the amud as . or :"""
+    s = re.sub(r"\(\s*\)", " ", s)
+    s = re.sub(r"\(\(+", "(", s)
+    s = re.sub(r"\)\)+", ")", s)
+    s = re.sub(r"\b([א-ת]{1,3})\s+ע(?:\"|''|״|')([אב])(?=[\s)\],.;:]|$)",
+               lambda m: m.group(1) + ("." if m.group(2) == "א" else ":"), s)
+    return s
+
+
 def tokens(line, bold_tags=True):
-    """An Otzaria line -> [(word, bold)]: <b>/<strong> are bold, other tags go."""
-    s = re.sub(r"<i [^>]*>\s*</i>", "", line)
+    """An Otzaria line -> [[word, bold]]: <b>/<strong> are bold, other tags go."""
+    s = clean_refs(re.sub(r"<i [^>]*>\s*</i>", "", line))
     s = s.replace("&nbsp;", " ").replace("&thinsp;", " ")
     if bold_tags:
         s = re.sub(r"<(b|strong)>", " \x01 ", s)
@@ -135,6 +145,16 @@ def parse_comm(lines):
     return out
 
 
+def mark_labels(paras):
+    """'גמ'' after the Mishna and 'מתני'' after the Gemara, where a new part begins (at the
+    start of a passage or after a full stop), are set in their own font."""
+    for toks in paras:
+        for i, t in enumerate(toks):
+            if norm(t[0]) in ("גמ", "גמרא", "מתני", "מתניתין") and (
+                    i == 0 or re.search(r"[:.]$", toks[i - 1][0])):
+                t[1] = "label"
+
+
 # ---------------------------------------------------------------- quotations
 
 def grams(words, n):
@@ -179,6 +199,47 @@ def loose(w):
 def loose_grams(words, n):
     seq = [w for w in (loose(x) for x in words) if w]
     return {tuple(seq[i:i + n]) for i in range(len(seq) - n + 1)}
+
+
+def mark_found(toks, ref, n=4, min_run=4, excl=None, value=True):
+    """Make bold every run (min_run words or more) of toks found in ref (loose n-grams),
+    leaving out n-grams found in excl."""
+    idx = [i for i, t in enumerate(toks) if loose(t[0])]
+    seq = [loose(toks[i][0]) for i in idx]
+    hit = [False] * len(seq)
+    for k in range(len(seq) - n + 1):
+        g = tuple(seq[k:k + n])
+        if g in ref and not (excl and g in excl):
+            for j in range(k, k + n):
+                hit[j] = True
+    count, k = 0, 0
+    while k < len(seq):
+        if hit[k]:
+            e = k
+            while e < len(seq) and hit[e]:
+                e += 1
+            if e - k >= min_run:
+                for j in range(k, e):
+                    if toks[idx[j]][1] is False:
+                        toks[idx[j]][1] = value
+                        count += 1
+            k = e
+        else:
+            k += 1
+    return count
+
+
+def rashi_words(path):
+    """Rashi's own words (without the dibbur hamatchil, which is the Gemara's)."""
+    out = []
+    for l in read(path):
+        if l.startswith("<h"):
+            continue
+        l = re.sub(r"<b>.*?</b>", " ", l)
+        l = re.sub(r"^[^<]*? - ", " ", l) if " - " in l else l
+        l = re.sub(r"(^|:)\s*[^:]{0,80}? - ", " ", l)
+        out.extend(re.sub(r"<[^>]+>", " ", l).replace("''", '"').split())
+    return out
 
 
 def mark_attributed(toks, ref, is_marker, window=25, n=3, min_run=3, mark_name=True):
@@ -235,10 +296,10 @@ def link_comm(comm, rif):
     for j, p in enumerate(rif):
         for _, d in p["dafs"]:
             by_daf.setdefault(d, []).append(j)
-    texts = [[norm(w) for w, _ in p["tokens"]] for p in rif]
+    texts = [[norm(w) for w, *_ in p["tokens"]] for p in rif]
     last = 0
     for e in comm:
-        dh = [norm(w) for w, b in e["tokens"][:12] if b]
+        dh = [norm(w) for w, b, *_ in e["tokens"][:12] if b is True]
         dh = [w for w in dh if w and w not in ("וכו", "כו", "גמ", "מתני", "וגו", "רן", "פי")][:4]
         cands = [j for j in by_daf.get(e["daf"], []) if j >= last] or by_daf.get(e["daf"], [])
         best = None
@@ -263,8 +324,8 @@ def link_comm(comm, rif):
 def align(rosh, rif, n=3):
     """For every siman of the Rosh, the passage of the Rif with the same material
     (monotonic, by the words they share)."""
-    rg = [grams([w for p in s["paras"] for w, _ in p], n) for s in rosh]
-    fg = [grams([w for w, _ in p["tokens"]], n) for p in rif]
+    rg = [grams([w for p in s["paras"] for w, *_ in p], n) for s in rosh]
+    fg = [grams([w for w, *_ in p["tokens"]], n) for p in rif]
     S, P = len(rg), len(fg)
     if not P:
         return [0] * S
@@ -296,6 +357,56 @@ def align(rosh, rif, n=3):
                 out[i] = j
                 break
     return out
+
+
+def rif_page_marks(rosh, rif, al):
+    """Mark in the Rosh where each page of the Rif begins: the place in the Rosh where the
+    words that open the page are found (near the siman that matches its passage), or else
+    the start of that siman. The label goes on the token (its third element)."""
+    flat = [(i, pi, ti) for i, s in enumerate(rosh) for pi, p in enumerate(s["paras"]) for ti, t in enumerate(p)
+            if loose(t[0])]
+    if not flat:
+        return
+    seq = [loose(rosh[i]["paras"][pi][ti][0]) for i, pi, ti in flat]
+    first_of = {}
+    for k, (i, _, _) in enumerate(flat):
+        first_of.setdefault(i, k)
+    index = {}
+    for k in range(len(seq) - 3):
+        index.setdefault(tuple(seq[k:k + 4]), []).append(k)
+    rflat = [(j, w) for j, p in enumerate(rif) for w in range(len(p["tokens"]))]
+    rpos = {jw: k for k, jw in enumerate(rflat)}
+    rwords = [loose(rif[j]["tokens"][w][0]) for j, w in rflat]
+    last, seen = 0, set()
+    for j, p in enumerate(rif):
+        lo_s = max([i for i in range(len(rosh)) if al[i] <= j] or [0])
+        hi_s = min([i for i in range(len(rosh)) if al[i] > j] or [len(rosh) - 1])
+        lo_s, hi_s = max(0, lo_s - 1), min(len(rosh) - 1, hi_s + 1)
+        for w, daf in p["dafs"]:
+            if daf in seen:
+                continue
+            seen.add(daf)
+            k0 = rpos.get((j, w), 0)
+            rseq = [x for x in rwords[k0:k0 + 80] if x]
+            found = None
+            for q in range(len(rseq) - 3):
+                for pos in index.get(tuple(rseq[q:q + 4]), []):
+                    if pos >= last and lo_s <= flat[pos][0] <= hi_s:
+                        found = pos
+                        break
+                if found is not None:
+                    break
+            if found is None:
+                found = max(last, first_of.get(lo_s + (1 if lo_s < hi_s else 0), last))
+            last = found
+            i, pi, ti = flat[found]
+            t = rosh[i]["paras"][pi][ti]
+            label = f"רי\"ף {daf}"
+            if len(t) > 2:
+                if daf not in t[2].split():
+                    t[2] = t[2] + " " + daf
+            else:
+                t.append(label)
 
 
 # ---------------------------------------------------------------- units of text
@@ -332,8 +443,17 @@ class Book:
 
     # -------------------------------------------------- words
     def words(self, toks, st):
-        b = st.with_bold(True)
-        return [Word(w, b if bold else st, width(b if bold else st, w)) for w, bold in toks]
+        if st.family == self.st_comm.family:
+            b = Style("Frank Ruhl Libre", st.size, True)
+        else:
+            b = st.with_bold(True)
+        lab = Style("David Libre", st.size * 1.08, True)
+        out = []
+        for t in toks:
+            w, bold = t[0], t[1]
+            s_ = lab if bold == "label" else (b if bold else st)
+            out.append(Word(w, s_, width(s_, w), t[2] if len(t) > 2 else None))
+        return out
 
     def marker(self, day, st):
         s = Style(st.family, st.size * 1.25, True)
@@ -641,6 +761,20 @@ class Book:
                     x += 1
                 r = self.compose(a, x, cptr)
                 r["cnext"] = cptr + r["n"]
+            if not r["at_end"] and r["b"] > a:
+                # end the page at the end of a passage (the Rif's colon) when it stays full
+                for k in range(self.unit_at(r["b"] - 1), -1, -1):
+                    e = self.off[k] + len(self.units[k].words)
+                    if e > r["b"]:
+                        continue
+                    if e <= a or r["b"] - e > 70:
+                        break
+                    if self.units[k].kind != "p":
+                        continue
+                    q = self.compose(a, e, cptr)
+                    if q["fits"] and self.full(q):
+                        r = q
+                        break
             if r["mode"] == "short" and not r["at_end"] and self.H - r["total"] > 1.5 * self.lh_rif:
                 # the Rif widened under a short commentary and still leaves a hole: rather a
                 # little less of the Rif, with the commentary filling the page around it
@@ -655,6 +789,13 @@ class Book:
             pages.append(self.finish(r))
             a, cptr = r["b"], r["cnext"]
         return pages
+
+    def full(self, q):
+        if q["mode"] == "long":
+            return True
+        if q["mode"] == "short":
+            return self.H - q["total"] < 1.5 * self.lh_rif
+        return self.H - q["total"] < 2 * self.lh_comm
 
     def end_on_line(self, r):
         """End the Rif on a full line when the page stays full without the last line."""
@@ -719,9 +860,17 @@ class Book:
             page.rules.append((L, T + 9.0 * 1.3 + 1 * PT_PER_MM, R))
             top = T + self.head_h
             if pg["kind"] == "rosh":
+                page.marks = []
+                mst = Style("Frank Ruhl Libre", 7.5, True)
                 for k, col in enumerate(pg["cols"]):
                     if col:
                         page.frames.append(Frame(col, R - k * (pg["colw"] + self.gap), top))
+                    for l in col:
+                        labels = [w.ref for w in l.words if isinstance(w.ref, str)]
+                        if labels:
+                            # in the outer margin beside the line: the right column's on the right
+                            x = R + self.m / 2 if k == 0 else L - self.m / 2
+                            page.marks.append((x, top + l.y + l.h * 0.72, " ".join(labels), mst))
             else:
                 if pg["text"]:
                     page.frames.append(Frame(pg["text"], R, top))
@@ -808,17 +957,30 @@ def load_masechet(root, m):
     rif = parse_rif(read(s["rif"])) if s["rif"] else []
     comm = parse_comm(read(s["comm"])) if s["comm"] else []
     report = []
+    if comm and comm[0]["tokens"] and norm(comm[0]["tokens"][0][0]) == "רנ":
+        # the title at the head of the commentary ("ר"ן מגילה")
+        k = 1 + len(m.split())
+        if [norm(w) for w, *_ in comm[0]["tokens"][1:k]] == [norm(w) for w in m.split()]:
+            comm[0]["tokens"] = comm[0]["tokens"][k:]
+        else:
+            comm[0]["tokens"] = comm[0]["tokens"][1:]
+    if comm:
+        link_comm(comm, rif)
+    mark_labels([t for x in rosh for t in x["paras"]])
+    mark_labels([p["tokens"] for p in rif])
     if rif:
-        ref = loose_grams([w for p in rif for w, _ in p["tokens"]], 3)
-        n = sum(mark_attributed(t, ref, rif_marker) for x in rosh for t in x["paras"])
+        ref = loose_grams([w for p in rif for w, *_ in p["tokens"]], 4)
+        n = sum(mark_found(t, ref, 4, 4) for x in rosh for t in x["paras"])
         report.append(f"ברא\"ש הודגשו {n} מילים מהרי\"ף")
     if comm:
-        rsh = set()
+        rsh, gem = set(), set()
         for p in s["rashi"]:
-            rsh |= loose_grams(re.sub(r"<[^>]+>", " ", " ".join(read(p))).replace("''", '"').split(), 3)
-        n = sum(mark_attributed(e["tokens"], rsh, rashi_marker) for e in comm)
+            rsh |= loose_grams(rashi_words(p), 3)
+        for p in s["gemara"]:
+            gem |= loose_grams(re.sub(r"<[^>]+>", " ", " ".join(read(p))).replace("''", '"').split(), 3)
+        n = sum(mark_found(e["tokens"], rsh, 3, 4, gem) for e in comm)
+        n += sum(mark_attributed(e["tokens"], rsh, rashi_marker) for e in comm)
         report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
-        link_comm(comm, rif)
     return rosh, rif, comm, s["comm_name"], report
 
 
@@ -857,6 +1019,8 @@ def day_starts(rosh, rif, comm, ndays, al):
 def build_masechet(root, m, first_day, ndays, page=(210, 297)):
     rosh, rif, comm, comm_name, report = load_masechet(root, m)
     al = align(rosh, rif) if rif and rosh else [0] * len(rosh)
+    if rif and rosh:
+        rif_page_marks(rosh, rif, al)
     starts = day_starts(rosh, rif, comm, ndays, al)
     rosh_days = {k: first_day + d for d, (k, _) in enumerate(starts)}
     rif_days = {j: first_day + d for d, (_, j) in enumerate(starts)} if rif else {}
@@ -889,8 +1053,7 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297)):
             j = refs[0]
             daf = rif[j]["daf"]
             ks = [i for i in range(len(rosh)) if al[i] <= j]
-            target = siman_page.get(ks[-1]) if ks else None
-            xref.append(f"דף {daf}" + (f" · ברא\"ש עמ' {heb(target + 1)}" if target is not None else ""))
+            xref.append(f"דף {daf}")
         else:
             xref.append(comm_name)
     title_rif = f"רי\"ף ו{comm_name}" if comm_name else "רי\"ף"

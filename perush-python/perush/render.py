@@ -53,6 +53,11 @@ def draw_page(p, page):
     for x1, y, x2 in page.rules:
         p.drawLine(QPointF(x1, y), QPointF(x2, y))
     p.setPen(QColor("black"))
+    for x, y, text, st in getattr(page, "marks", []):
+        # a note in the margin, centred on x
+        from .textlayout import width as _w
+        p.setFont(qfont(st))
+        p.drawText(QPointF(x - _w(st, text) / 2, y), text)
     for fr in page.frames:
         for line in fr.lines:
             draw_line(p, line, fr.x_right - line.right, fr.top + line.y)
