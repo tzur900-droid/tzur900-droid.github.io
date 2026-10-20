@@ -241,16 +241,33 @@ def loose_counts(words, n):
     return out
 
 
-def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, mid=7, near=40, far=200, max_occ=60, found=None):
+def stem(x):
+    """A loose word without a one-letter prefix and a final ה or א, so that באיסקופה and
+    אסקופה, ארבע and ארבעה match."""
+    if len(x) > 3 and x[0] in "בהדלשכ":
+        x = x[1:]
+    if len(x) > 3 and x[-1] in "הא":
+        x = x[:-1]
+    return x
+
+
+def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, mid=7, near=40, far=200, max_occ=60, found=None,
+                 loose_words=False, fill=None):
     """Make bold in toks every stretch (min_run words or more) of the text of ref_toks,
     each word of ref_toks used once. Long shared stretches are taken first; a line that
     appears in toks more than once but in ref_toks once goes with the occurrence that
     stands next to a stretch already taken (near it in both texts), not with a
     stray repetition. A stretch shorter than mid words is taken only within far words (in
     both texts) of one already taken. found (a list), if given, gets each stretch taken as (first and last
-    token in toks, first and last token in ref_toks)."""
+    token in toks, first and last token in ref_toks).
+    With loose_words, words match without a one-letter prefix and a final ה or א (stem).
+    With fill = (a, b), the words between two stretches taken are bold too where at most a
+    words of toks and b of ref_toks (words of the text: an abbreviation is one) are between them (a word or two the quoting text adds or
+    changes inside a quotation)."""
     S, src = lseq(toks)
     R, rsrc = lseq(ref_toks)
+    if loose_words:
+        S, R = [stem(x) for x in S], [stem(x) for x in R]
     index = {}
     for p in range(len(R) - n + 1):
         index.setdefault(tuple(R[p:p + n]), []).append(p)
@@ -319,6 +336,13 @@ def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, mid=7, near=40, far=200
         if len(taken) == before:
             break
         rest = left
+    if fill:
+        order = sorted(taken)
+        for (i1, p1, l1), (i2, p2, l2) in zip(order, order[1:]):
+            gs, gr = i2 - (i1 + l1), p2 - (p1 + l1)
+            if 0 < gs and 0 <= gr and nwords(src, i1 + l1, i2) <= fill[0] and nwords(rsrc, p1 + l1, p2) <= fill[1]:
+                for k in range(i1 + l1, i2):
+                    bold_s[k] = 1
     count = 0
     for k, b in enumerate(bold_s):
         if b and toks[src[k]][1] is False:
@@ -684,6 +708,45 @@ def align_part(score, simanim, lo, hi):
                 out[i] = j
                 break
     return [lo + j for j in out]
+
+
+OWN = {"פי", "פירוש", "ופי", "ופירוש", "פירש", "כלומר", "ונראה", "נראה", "ולי", "ומיהו", "וקשה", "קשה", "והקשה"}
+
+
+def complete_sentences(rosh, rif, al, most=6):
+    """A quotation of the Rif that ends (or begins) a few words short of the end (or
+    the start) of its sentence: the rest of the sentence bold too, where it is at most
+    `most` words and half of them or more are in the Rif's passages of the siman (the
+    Rosh says it a little differently, as the Oz Vehadar Rosh has it)."""
+    count = 0
+    for i, s in enumerate(rosh):
+        lo = max(0, al[i] - 1)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 1
+        bag = {stem(x) for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]}
+        for p in s["paras"]:
+            # sentences: up to a word that ends with . or :
+            start = 0
+            for k in range(len(p) + 1):
+                if k < len(p) and not re.search(r"[.:]$", p[k][0]):
+                    continue
+                sent = list(range(start, min(k + 1, len(p))))
+                start = k + 1
+                bold = [j for j in sent if p[j][1] is True]
+                if not bold:
+                    continue
+                for part in (sent[sent.index(bold[-1]) + 1:], sent[:sent.index(bold[0])]):
+                    words = [j for j in part if p[j][1] is False]
+                    if not part or len(words) != len(part) or len(part) > most:
+                        continue
+                    # the Rosh explaining in his own words
+                    if any(norm(p[j][0]) in OWN for j in part) or any(len(norm(p[j][0])) == 1 for j in part):
+                        continue
+                    stems = [stem(x) for j in part for x in lwords(p[j][0])]
+                    if stems and sum(x in bag for x in stems) * 2 >= len(stems):
+                        for j in part:
+                            p[j][1] = True
+                            count += 1
+    return count
 
 
 def rif_page_marks(rosh, rif, al):
@@ -1390,7 +1453,8 @@ def load_masechet(root, m):
     mark_labels([t for x in rosh for t in x["paras"]])
     mark_labels([p["tokens"] for p in rif])
     if rif:
-        n = mark_aligned([t for x in rosh for p in x["paras"] for t in p], [t for p in rif for t in p["tokens"]])
+        n = mark_aligned([t for x in rosh for p in x["paras"] for t in p], [t for p in rif for t in p["tokens"]],
+                         loose_words=True, fill=(3, 5))
         report.append(f"ברא\"ש הודגשו {n} מילים מהרי\"ף")
     if comm:
         # the commentary's own dibbur hamatchil in plain type (as in the Oz Vehadar Rif);
@@ -1469,6 +1533,7 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297)):
     rosh, rif, comm, comm_name, report = load_masechet(root, m)
     al = align(rosh, rif) if rif and rosh else [0] * len(rosh)
     if rif and rosh:
+        report.append(f"ברא\"ש {complete_sentences(rosh, rif, al)} מילים בהשלמת משפטים")
         rif_page_marks(rosh, rif, al)
     gem = sources(root, m)["gemara"]
     if rosh and gem:
