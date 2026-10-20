@@ -19,6 +19,12 @@ from .render import export_pdf, page_image
 
 APP_NAME = "עימוד פירושים"
 
+
+def _log(msg):
+    main = sys.modules.get("__main__")
+    if hasattr(main, "log"):
+        main.log(msg)
+
 HINT_MAIN = (
     "כל פסוק בשורה נפרדת. <b>#</b> בתחילת שורה = כותרת (<b># פרק א</b>); כותרת שמתחילה ב\"פרשת\" "
     "נכתבת בראש העמודים. <b>##</b> = קטע בלי פירוש, כמו הפטרה (<b>## הפטרת בראשית</b>). "
@@ -184,7 +190,9 @@ class MainWindow(QMainWindow):
 
         self.project = self.load_recovery() or model.example_project()
         self.fill_editor()
-        self.relayout()
+        # lay out once the window is on the screen (a whole book takes a while, and the
+        # window should open at once and show how far it has got)
+        QTimer.singleShot(0, self.relayout)
 
     # ---------------------------------------------------------------- building
 
@@ -566,6 +574,7 @@ class MainWindow(QMainWindow):
         self.running = True
         gen = self.generation
         self.info.setText("מעמד…")
+        _log("מתחיל לעמד")
 
         def progress(n):
             self.info.setText(f"מעמד… עמוד {n + 1}")
@@ -588,7 +597,9 @@ class MainWindow(QMainWindow):
             return
         self.running = False
         self.pages = pages
+        _log(f"עימוד: {len(pages)} עמודים")
         self.show_pages()
+        _log("התצוגה מוכנה")
         sides = [f" · {self.project['comms'][c]['name']}: רוחב {round(eng.col_w[c])}%" for c in eng.sides]
         self.info.setText(f"{len(pages)} עמודים · {eng.count} פסוקים · {len(self.project['comms'])} פירושים{''.join(sides)}")
         if eng.warnings:

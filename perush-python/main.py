@@ -7,6 +7,8 @@
 """
 import os
 import sys
+import time
+import traceback
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
@@ -17,12 +19,48 @@ def base_dir():
     return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 
 
+LOG = None
+T0 = time.time()
+
+
+def log(msg):
+    """A line in perush.log (beside the program, or in the temp folder): what the program
+    did when, so that a problem on another computer can be found."""
+    global LOG
+    if LOG is None:
+        for folder in (base_dir(), os.environ.get("TEMP", ""), os.path.expanduser("~")):
+            try:
+                LOG = open(os.path.join(folder, "perush.log"), "w", encoding="utf-8")
+                break
+            except OSError:
+                continue
+    if LOG:
+        LOG.write(f"{time.time() - T0:7.1f}s  {msg}\n")
+        LOG.flush()
+
+
+def on_error(kind, value, tb):
+    """An error the window would hide: write it down and show it."""
+    text = "".join(traceback.format_exception(kind, value, tb))
+    log("שגיאה:\n" + text)
+    try:
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.critical(None, "עימוד פירושים", "אירעה שגיאה (נשמרה בקובץ perush.log):\n\n" + text[-1500:])
+    except Exception:
+        pass
+
+
 def main():
+    sys.excepthook = on_error
+    log(f"התחלה · Python {sys.version.split()[0]} · {sys.platform} · {base_dir()}")
     app = QApplication(sys.argv)
+    import PySide6
+    log(f"Qt מוכן · PySide6 {PySide6.__version__}")
     app.setApplicationName("perush")
     app.setLayoutDirection(Qt.RightToLeft)
     from perush.textlayout import load_bundled_fonts
     load_bundled_fonts(os.path.join(base_dir(), "fonts"))
+    log("גופנים נטענו")
 
     if len(sys.argv) > 3 and sys.argv[1] == "--import":
         from perush.sefaria import DEFAULT_KINDS, convert
@@ -51,7 +89,9 @@ def main():
 
     from perush.app import MainWindow
     win = MainWindow()
+    log(f"החלון נבנה · פרויקט: {win.project.get('title') or ''} ({len(win.project.get('main', ''))} תווים)")
     win.show()
+    log("החלון מוצג")
     return app.exec()
 
 
