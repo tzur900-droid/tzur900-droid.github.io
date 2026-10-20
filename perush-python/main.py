@@ -42,7 +42,7 @@ def log(msg):
 def on_error(kind, value, tb):
     """An error the window would hide: write it down and show it."""
     text = "".join(traceback.format_exception(kind, value, tb))
-    log("שגיאה:\n" + text)
+    log("ERROR שגיאה:\n" + text)
     try:
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.critical(None, "עימוד פירושים", "אירעה שגיאה (נשמרה בקובץ perush.log):\n\n" + text[-1500:])
@@ -91,9 +91,15 @@ def main():
     win = MainWindow()
     log(f"החלון נבנה · פרויקט: {win.project.get('title') or ''} ({len(win.project.get('main', ''))} תווים)")
     win.show()
-    log("החלון מוצג")
+    log("WINDOW-SHOWN החלון מוצג")
     return app.exec()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except BaseException:
+        on_error(*sys.exc_info())
+        sys.exit(1)
