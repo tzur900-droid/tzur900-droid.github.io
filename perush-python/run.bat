@@ -16,8 +16,12 @@ if not exist ".venv\Scripts\python.exe" (
   if not defined PY goto nopython
   echo מתקין בפעם הראשונה, זה לוקח כמה דקות. לא לסגור את החלון...
   %PY% -m venv .venv || goto nopython
-  ".venv\Scripts\python.exe" -m pip install --upgrade pip
-  ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto fail
+  if exist "wheels\*.whl" (
+    rem the packages that came with the program: no internet needed
+    ".venv\Scripts\python.exe" -m pip install --no-index --find-links wheels -r requirements.txt || goto fail
+  ) else (
+    ".venv\Scripts\python.exe" -m pip install --retries 1 --timeout 20 -r requirements.txt || goto nowheels
+  )
 )
 
 del perush.log >nul 2>nul
@@ -49,8 +53,18 @@ echo ובחלון ההתקנה סמנו "Add python.exe to PATH". אחר כך ה
 pause
 exit /b 1
 
-:fail
+:nowheels
+rmdir /s /q ".venv" >nul 2>nul
 echo.
-echo ההתקנה נכשלה. בדקו שיש חיבור לאינטרנט ונסו שוב.
+echo לא הצלחתי להוריד את הרכיבים מהאינטרנט (כנראה האתר pypi.org חסום בסינון).
+echo הורידו את הקובץ perush-wheels.zip וחלצו אותו לאותה תיקייה שבה נמצאת התוכנה
+echo (כך שתיווצר בה התיקייה wheels), ואז הריצו את run.bat שוב.
+pause
+exit /b 1
+
+:fail
+rmdir /s /q ".venv" >nul 2>nul
+echo.
+echo ההתקנה נכשלה. צלמו את המסך ושלחו אותו.
 pause
 exit /b 1
