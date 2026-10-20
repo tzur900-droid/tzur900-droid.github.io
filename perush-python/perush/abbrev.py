@@ -180,12 +180,15 @@ def expand(word):
         pre, rest = w[:k], w[k:]
         if any(c not in PREFIX for c in pre):
             break
-        if rest in TABLE:
+        bare = rest.replace('"', "").replace("'", "")
+        number = '"' in rest and bare in NUMBERS
+        # after ב, מ or ל a number before anything else: בי"א is "on the eleventh", not
+        # "on some say"
+        if rest in TABLE and not (number and pre and pre[-1] in "במל"):
             words = list(TABLE[rest])
             words[0] = pre + words[0]
             return words
-        bare = rest.replace('"', "").replace("'", "")
-        if '"' in rest and bare in NUMBERS:
+        if number:
             words = NUMBERS[bare].split()
             words[0] = pre + words[0]
             return words

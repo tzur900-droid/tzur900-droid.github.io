@@ -232,11 +232,6 @@ def nwords(src, a, b):
     return len(set(src[a:b]))
 
 
-def loose_grams(words, n):
-    seq = lseq(words)[0]
-    return {tuple(seq[i:i + n]) for i in range(len(seq) - n + 1)}
-
-
 def loose_counts(words, n):
     seq = lseq(words)[0]
     out = {}
@@ -244,39 +239,6 @@ def loose_counts(words, n):
         g = tuple(seq[i:i + n])
         out[g] = out.get(g, 0) + 1
     return out
-
-
-def mark_found(toks, ref, n=4, min_run=4, excl=None, value=True, used=None):
-    """Make bold every run (min_run words or more) of toks found in ref (loose n-grams),
-    leaving out n-grams found in excl. With used (a dict), ref is a count of each n-gram
-    and an n-gram is taken no more times than it is found there: what the Rosh repeats
-    is bold only the first time."""
-    seq, idx = lseq(toks)
-    hit = [False] * len(seq)
-    for k in range(len(seq) - n + 1):
-        g = tuple(seq[k:k + n])
-        if g in ref and not (excl and g in excl):
-            if used is not None:
-                if used.get(g, 0) >= ref[g]:
-                    continue
-                used[g] = used.get(g, 0) + 1
-            for j in range(k, k + n):
-                hit[j] = True
-    count, k = 0, 0
-    while k < len(seq):
-        if hit[k]:
-            e = k
-            while e < len(seq) and hit[e]:
-                e += 1
-            if nwords(idx, k, e) >= min_run:
-                for j in range(k, e):
-                    if toks[idx[j]][1] is False:
-                        toks[idx[j]][1] = value
-                        count += 1
-            k = e
-        else:
-            k += 1
-    return count
 
 
 def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, mid=7, near=40, far=200, max_occ=60, found=None):
@@ -367,48 +329,138 @@ def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, mid=7, near=40, far=200
     return count
 
 
-def rashi_words(path):
-    """Rashi's own words (without the dibbur hamatchil, which is the Gemara's)."""
-    out = []
-    for l in read(path):
-        if l.startswith("<h"):
+def parse_rashi(lines):
+    """Rashi on the Gemara -> [{'amud', 'dh': loose words of the dibbur hamatchil,
+    'words': loose words of the dibbur and the comment}]"""
+    out, amud = [], None
+    for l in lines[1:]:
+        m = re.match(r"\s*<h2>\s*דף\s*(.*?)\s*</h2>", l)
+        if m:
+            amud = gem_daf(m.group(1))
             continue
-        l = re.sub(r"<b>.*?</b>", " ", l)
-        l = re.sub(r"^[^<]*? - ", " ", l) if " - " in l else l
-        l = re.sub(r"(^|:)\s*[^:]{0,80}? - ", " ", l)
-        out.extend(re.sub(r"<[^>]+>", " ", l).replace("''", '"').split())
+        if l.startswith("<h") or amud is None or " - " not in l:
+            continue
+        dh, _, rest = re.sub(r"<[^>]+>", " ", l).partition(" - ")
+        words, src = lseq(rest.replace("''", '"').split())
+        dw, dsrc = lseq(dh.replace("''", '"').split())
+        out.append({"amud": amud, "dh": dw, "dsrc": dsrc, "words": words, "src": src})
     return out
 
 
-def mark_attributed(toks, ref, is_marker, window=25, n=3, min_run=3, value=True):
-    """Near a mention of the quoted author (is_marker(word)), within window words after it,
-    make bold the runs of words found in ref (loose n-grams) even when shorter than
-    elsewhere. Only the quoted words: not the name or the words around them."""
-    seq, idx = lseq(toks)
-    count = 0
+def passage_amudim(rif, gem_lines):
+    """The amud of the Gemara each passage of the Rif is on (by the Gemara it brings; a
+    passage that brings none takes the one before it)."""
+    gtoks, amud = parse_gemara(gem_lines)
+    flat = [j for j, p in enumerate(rif) for _ in p["tokens"]]
+    found = []
+    mark_aligned([[t[0], False] for p in rif for t in p["tokens"]], gtoks, found=found)
+    got = {}
+    for a, b, c, d in found:
+        got.setdefault(flat[a], []).append(amud[c][0])
+    out, last = [], None
+    for j in range(len(rif)):
+        if got.get(j):
+            last = sorted(got[j])[len(got[j]) // 2]
+        out.append(last)
+    return out
+
+
+def mark_rashi(toks, entries, gem, value="rashi", gap=3):
+    """Make bold in a commentary entry what it takes from Rashi (entries: Rashi's comments
+    on the place; gem: loose 3-grams of the Gemara), as the Oz Vehadar Rif does:
+      * its dibbur hamatchil (marked "dh" in toks), where Rashi has a dibbur with the
+        same words;
+      * in what it says, Rashi's own words (not the Gemara's): three or more in the order
+        Rashi has them, a few words between them at most; or two, opening what it says
+        on a dibbur that is Rashi's, where Rashi's comment opens with them;
+      * where it says that Rashi explained ("ופירש"י ז"ל ..."), the sentence it brings."""
+    seq, src = lseq(toks)
+    dh_end = 0
+    while dh_end < len(seq) and toks[src[dh_end]][1] == "dh":
+        dh_end += 1
+    bold = bytearray(len(seq))
+    dh = seq[:dh_end]
+    mine = []      # Rashi's comments on this dibbur
+    for e in entries:
+        # the longest run of words the two dibburim share
+        r, best = e["dh"], (0, 0, 0)
+        for a in range(dh_end):
+            for b in range(len(r)):
+                L = 0
+                while a + L < dh_end and b + L < len(r) and dh[a + L] == r[b + L]:
+                    L += 1
+                if L > best[2]:
+                    best = (a, b, L)
+        a, b, L = best
+        rt = len(set(e["dsrc"][b:b + L])) if L else 0
+        if (L >= 2 and len(set(src[a:a + L])) >= 2 and rt >= 2) or (L == 1 and len(r) == 1 and len(r[0]) >= 4):
+            mine.append(e)
+            for k in range(a, a + L):
+                bold[k] = 1
+    # a short dibbur Rashi has half of: all of it
+    if dh_end and len(set(src[:dh_end])) <= 5 and sum(bold[:dh_end]) * 2 >= dh_end:
+        for k in range(dh_end):
+            bold[k] = 1
+
+    def gemara_word(k):
+        return any(tuple(seq[j:j + 3]) in gem for j in range(max(0, k - 2), k + 1))
+
+    for e in entries:
+        r, rsrc = e["words"], e["src"]
+        at = {}
+        for p, w in enumerate(r):
+            at.setdefault(w, []).append(p)
+        i = dh_end
+        while i < len(seq):
+            best = []
+            for p0 in at.get(seq[i], ()):
+                chain, ci, cp = [(i, p0)], i, p0
+                while True:
+                    nxt = None
+                    for i2 in range(ci + 1, min(len(seq), ci + gap + 1)):
+                        ps = [p for p in at.get(seq[i2], ()) if cp < p <= cp + gap + 1]
+                        if ps:
+                            nxt = (i2, ps[0])
+                            break
+                    if not nxt:
+                        break
+                    chain.append(nxt)
+                    ci, cp = nxt
+                if len(chain) > len(best):
+                    best = chain
+            if not best:
+                i += 1
+                continue
+            i0, i1 = best[0][0], best[-1][0]
+            dense = len(best) / (i1 - i0 + 1) >= 0.6
+            # words of the two texts (an abbreviation is one), leaving out the Gemara's
+            own = [(i, p) for i, p in best if not gemara_word(i)]
+            n = min(len({src[i] for i, _ in own}), len({rsrc[p] for _, p in own}))
+            head = len(best) == 2 and e in mine and i0 == dh_end and best[0][1] == 0
+            if dense and (n >= 3 or head):
+                for k in range(i0, i1 + 1):
+                    bold[k] = 1
+            i = i1 + 1 if dense and len(best) >= 2 else i + 1
+    # "ופירש"י ז"ל ...": to the end of the sentence
     for k in range(len(seq)):
-        if not is_marker(toks[idx[k]][0]) or (k and idx[k - 1] == idx[k]):
+        if not rashi_marker(toks[src[k]][0]) or (k and src[k - 1] == src[k]):
             continue
-        hit = [False] * len(seq)
-        for q in range(k + 1, min(len(seq) - n + 1, k + 1 + window)):
-            if tuple(seq[q:q + n]) in ref:
-                for j in range(q, q + n):
-                    hit[j] = True
-        q = k + 1
-        while q < len(seq):
-            if hit[q]:
-                e = q
-                while e < len(seq) and hit[e]:
-                    e += 1
-                if nwords(idx, q, e) >= min_run:
-                    for j in range(q, e):
-                        t = toks[idx[j]]
-                        if t[1] is False and not is_marker(t[0]) and norm(t[0]) not in ("זל", "זצל"):
-                            t[1] = value
-                            count += 1
-                q = e
-            else:
-                q += 1
+        q = src[k] + 1
+        while q < len(toks) and norm(toks[q][0]) in ("זל", "זצל"):
+            q += 1
+        e = q
+        while e < len(toks) and e - q < 30 and not re.search(r"[.:]$", toks[e][0]):
+            e += 1
+        if e < len(toks) and e - q < 30:
+            for k2, sk in enumerate(src):
+                if q <= sk <= e:
+                    bold[k2] = 1
+    count = 0
+    for k, b in enumerate(bold):
+        t = toks[src[k]]
+        if b and t[1] != value:
+            t[1] = value
+            count += 1
     return count
 
 
@@ -687,7 +739,7 @@ class Book:
         self.vgap = 2.5 * PT_PER_MM
         self.st_rosh = Style("Frank Ruhl Libre", rosh_size)
         self.st_rif = Style("Frank Ruhl Libre", rif_size)
-        self.st_comm = Style("David Libre", comm_size)
+        self.st_comm = Style("Noto Rashi Hebrew", comm_size)
         self.lh_rosh = rosh_size * 1.45
         self.lh_rif = rif_size * 1.34
         self.lh_comm = comm_size * 1.26
@@ -707,7 +759,7 @@ class Book:
         out = []
         for t in toks:
             w, bold = t[0], t[1]
-            s_ = {"label": lab, "open": big, "gem": gem, "rashi": st.with_bold(True), "hadran": b}.get(bold) or (b if bold else st)
+            s_ = {"label": lab, "open": big, "gem": gem, "rashi": st.with_bold(True), "hadran": b, "dh": st}.get(bold) or (b if bold else st)
             out.append(Word(w, s_, width(s_, w), t[2] if len(t) > 2 else None))
         return out
 
@@ -1240,14 +1292,26 @@ def load_masechet(root, m):
         n = mark_aligned([t for x in rosh for p in x["paras"] for t in p], [t for p in rif for t in p["tokens"]])
         report.append(f"ברא\"ש הודגשו {n} מילים מהרי\"ף")
     if comm:
-        rsh, gem = set(), set()
-        for p in s["rashi"]:
-            rsh |= loose_grams(rashi_words(p), 3)
-        for p in s["gemara"]:
-            gem |= loose_grams(re.sub(r"<[^>]+>", " ", " ".join(read(p))).replace("''", '"').split(), 3)
-        n = sum(mark_found(e["tokens"], rsh, 3, 4, gem, value="rashi") for e in comm)
-        n += sum(mark_attributed(e["tokens"], rsh, rashi_marker, value="rashi") for e in comm)
-        report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
+        # the commentary's own dibbur hamatchil in plain type (as in the Oz Vehadar Rif);
+        # bold is what it takes from Rashi on the Gemara of the place
+        for e in comm:
+            for t in e["tokens"]:
+                if t[1] is True:
+                    t[1] = "dh"
+        if s["rashi"] and s["gemara"]:
+            rashi = parse_rashi(read(s["rashi"][0]))
+            gl = read(s["gemara"][0])
+            amudim = passage_amudim(rif, gl)
+            gem = set()
+            for w in [parse_gemara(gl)[0]]:
+                g = lseq(w)[0]
+                gem = {tuple(g[k:k + 3]) for k in range(len(g) - 2)}
+            n = 0
+            for e in comm:
+                a = amudim[e["para"]]
+                near = [x for x in rashi if a is not None and a - 2 <= x["amud"] <= a + 2]
+                n += mark_rashi(e["tokens"], near, gem)
+            report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
     return rosh, rif, comm, s["comm_name"], report
 
 
