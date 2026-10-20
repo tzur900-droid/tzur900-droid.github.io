@@ -591,12 +591,18 @@ class Engine:
         # still a little room: share it out between the lines of the text and of the commentaries
         spare = self.contentH - self.total_h(r)
         text = [l for l in r["text"] if l.kind == "p"]
+        # the end of a haftara above the text shares in it too
+        pre = r["pre"] if r["pre"] and "lines" in r["pre"] else None
+        if pre:
+            text += [l for l in pre["lines"] if l.kind == "p"]
         rows = sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in secs)
         units = len(text) + rows
         if spare > 0.5 and units and spare / units <= 0.35 * min([self.main_lh] + [s["nlh"] for s in secs]):
             d = spare / units
             for l in text:
                 l.h += d
+            if pre:
+                pre["h"] = restack(pre["lines"])
             for s in secs:
                 s["nlh"] += d
                 s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
@@ -891,7 +897,25 @@ class Engine:
                     break
                 x += 1
         best, g = self.end_on_full_line(pos, g0, g, best, pre)
+        hole = self.contentH - self.total_h(best)
+        if not best["at_end"] and best["sections"] and not self.can_close(best, hole):
+            best = self.fill_hole(pos, g0, g, pre) or best
         return best
+
+    def fill_hole(self, pos, g0, g, pre):
+        """The commentary of the next verse is too long for the room left under the text,
+        which would leave a hole: run the text on to a full line and let the commentaries
+        fill the page and continue on the next one."""
+        for x in range(g + 1, min(self.total, g + 80) + 1):
+            r = self.compose(pos, self.pos(x), False, pre)
+            if not r["top_fits"]:
+                break
+            if r["at_end"] or (self.sides and not r["col_full"]) or self.full_line_end(r, g0, x) != x:
+                continue
+            spare = self.contentH - self.total_h(r)
+            if -EPS <= spare and self.can_close(r, spare):
+                return r
+        return None
 
     def shorten_for_lag(self, pos, pre, best):
         g0, g = self.g_of(pos), self.g_of(best["b"])
