@@ -83,21 +83,40 @@ def gem_daf(label):
     return n * 2 + side
 
 
+SIMAN_HEAD = re.compile(r"^(?:הלכה|סימן|סעיף)?\s*([א-ת]{1,4})['\"׳״]?$")
+
+
 def parse_rosh(lines):
-    """-> [{'perek': name, 'num': siman letter, 'paras': [tokens]}]"""
-    simanim, perek = [], ""
+    """-> [{'perek': name, 'num': siman letter, 'paras': [tokens]}]. The headings differ
+    from masechet to masechet (פרק / הלכה, a section of halachot and bare numbers, הלכה
+    with no perek, ...): a heading that is a number (with הלכה, סימן or סעיף before it or
+    not) begins a siman, any other heading is the name of the perek (or section) that
+    follows; text before the first number of a section is a siman of its own."""
+    simanim, perek, fresh = [], "", True
     for l in lines[1:]:
-        m = re.match(r"\s*<h2>(.*?)</h2>", l)
+        m = re.match(r"\s*<h(\d)>(.*?)</h\1>", l)
         if m:
-            perek = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+            head = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+            if not head:
+                continue
+            n = SIMAN_HEAD.match(head)
+            if n and m.group(1) != "1":
+                simanim.append({"perek": perek, "num": n.group(1), "paras": []})
+                fresh = False
+            elif m.group(1) != "1":
+                perek, fresh = head, True
             continue
-        m = re.match(r"\s*<h3>(?:הלכה|סימן)\s*(\S+)\s*</h3>", l)
-        if m:
-            simanim.append({"perek": perek, "num": m.group(1), "paras": []})
-            continue
-        if l.startswith("<h") or not simanim:
+        if l.startswith("<h") or not l.strip():
             continue
         t = tokens(l)
+        if not t:
+            continue
+        if fresh or not simanim:
+            if not simanim and not perek:
+                continue      # the name of the book, before any heading
+            simanim.append({"perek": perek, "num": heb(sum(1 for x in simanim if x["perek"] == perek) + 1),
+                            "paras": []})
+            fresh = False
         if t and re.match(r"^\(\S{1,3}\)$", t[0][0]):
             t = t[1:]
         if t and not simanim[-1]["paras"] and t[0][0] == simanim[-1]["num"]:
@@ -113,7 +132,7 @@ def parse_rosh(lines):
             simanim[-1]["paras"].append(t)
         if h is not None:
             simanim[-1]["paras"].append(hadran)
-    return simanim
+    return [x for x in simanim if x["paras"]]
 
 
 def parse_rif(lines):
@@ -951,7 +970,8 @@ class Book:
                 units.append(self.marker(day_at[i], self.st_rosh))
             if s["perek"] != perek:
                 perek = s["perek"]
-                units.append(self.heading(perek, self.st_rosh))
+                if perek:
+                    units.append(self.heading(perek, self.st_rosh))
             for k, p in enumerate(s["paras"]):
                 if p and p[0][1] == "hadran":
                     units.append(self.heading(" ".join(w for w, *_ in p), self.st_rosh, 1.1))
