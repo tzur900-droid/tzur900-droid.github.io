@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass
 
 from .engine import Frame, Page
+from .abbrev import expand
 from .model import heb
 from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width
 
@@ -196,13 +197,32 @@ def loose(w):
     return re.sub("[וי]", "", norm(w)).replace("מ", "נ") if norm(w) else ""
 
 
+def lwords(w):
+    """A word for finding quotations, abbreviations written out: [loose words]."""
+    ex = expand(w)
+    if ex:
+        return [x for x in (loose(e) for e in ex) if x]
+    x = loose(w)
+    return [x] if x else []
+
+
+def lseq(toks):
+    """-> (loose words, index of the token each comes from)"""
+    seq, src = [], []
+    for i, t in enumerate(toks):
+        for x in lwords(t[0] if isinstance(t, list) else t):
+            seq.append(x)
+            src.append(i)
+    return seq, src
+
+
 def loose_grams(words, n):
-    seq = [w for w in (loose(x) for x in words) if w]
+    seq = lseq(words)[0]
     return {tuple(seq[i:i + n]) for i in range(len(seq) - n + 1)}
 
 
 def loose_counts(words, n):
-    seq = [w for w in (loose(x) for x in words) if w]
+    seq = lseq(words)[0]
     out = {}
     for i in range(len(seq) - n + 1):
         g = tuple(seq[i:i + n])
@@ -215,8 +235,7 @@ def mark_found(toks, ref, n=4, min_run=4, excl=None, value=True, used=None):
     leaving out n-grams found in excl. With used (a dict), ref is a count of each n-gram
     and an n-gram is taken no more times than it is found there: what the Rosh repeats
     is bold only the first time."""
-    idx = [i for i, t in enumerate(toks) if loose(t[0])]
-    seq = [loose(toks[i][0]) for i in idx]
+    seq, idx = lseq(toks)
     hit = [False] * len(seq)
     for k in range(len(seq) - n + 1):
         g = tuple(seq[k:k + n])
@@ -257,39 +276,35 @@ def rashi_words(path):
     return out
 
 
-def mark_attributed(toks, ref, is_marker, window=25, n=3, min_run=3, mark_name=True, value=True):
-    """Make bold what follows a mention of the quoted author (is_marker(word)): the runs,
-    within window words after the mention, that are found in ref (loose n-grams)."""
-    idx = [i for i, t in enumerate(toks) if loose(t[0])]
-    seq = [loose(toks[i][0]) for i in idx]
+def mark_attributed(toks, ref, is_marker, window=25, n=3, min_run=3, value=True):
+    """Near a mention of the quoted author (is_marker(word)), within window words after it,
+    make bold the runs of words found in ref (loose n-grams) even when shorter than
+    elsewhere. Only the quoted words: not the name or the words around them."""
+    seq, idx = lseq(toks)
     count = 0
-    for k, i in enumerate(idx):
-        if not is_marker(toks[i][0]):
+    for k in range(len(seq)):
+        if not is_marker(toks[idx[k]][0]) or (k and idx[k - 1] == idx[k]):
             continue
-        if mark_name:
-            if toks[i][1] is False:
-                toks[i][1] = value
-            # "ז"ל" after the name goes with it
-            if k + 1 < len(idx) and norm(toks[idx[k + 1]][0]) in ("זל", "זצל") and toks[idx[k + 1]][1] is False:
-                toks[idx[k + 1]][1] = value
-        # the quotation: from the name to the last run found in ref
-        end, q = None, k + 1
-        while q < min(len(seq) - n + 1, k + 1 + window):
-            e = q
-            while e < len(seq) - n + 1 and tuple(seq[e:e + n]) in ref:
-                e += 1
-            if e - q + n - 1 >= min_run and e > q:
-                if end is not None and q - end > 6:
-                    break
-                end = e + n - 1
+        hit = [False] * len(seq)
+        for q in range(k + 1, min(len(seq) - n + 1, k + 1 + window)):
+            if tuple(seq[q:q + n]) in ref:
+                for j in range(q, q + n):
+                    hit[j] = True
+        q = k + 1
+        while q < len(seq):
+            if hit[q]:
+                e = q
+                while e < len(seq) and hit[e]:
+                    e += 1
+                if e - q >= min_run:
+                    for j in range(q, e):
+                        t = toks[idx[j]]
+                        if t[1] is False and not is_marker(t[0]) and norm(t[0]) not in ("זל", "זצל"):
+                            t[1] = value
+                            count += 1
                 q = e
             else:
                 q += 1
-        if end is not None:
-            for j in range(k + 1, min(end, len(seq))):
-                if toks[idx[j]][1] is False:
-                    count += 1
-                    toks[idx[j]][1] = value
     return count
 
 
@@ -451,8 +466,8 @@ class Book:
         self.st_rif = Style("Frank Ruhl Libre", rif_size)
         self.st_comm = Style("David Libre", comm_size)
         self.lh_rosh = rosh_size * 1.45
-        self.lh_rif = rif_size * 1.5
-        self.lh_comm = comm_size * 1.42
+        self.lh_rif = rif_size * 1.34
+        self.lh_comm = comm_size * 1.26
         self.head_style = Style("Frank Ruhl Libre", 9)
         self.cw = self.W * 0.25            # a commentary column beside the Rif
         self.wide = (self.W - self.gap) / 2  # a commentary column under it
