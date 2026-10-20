@@ -1666,10 +1666,15 @@ def day_starts(rosh, rif, comm, ndays, al):
     for d in range(1, ndays):
         target = total * d / ndays
         best = None
-        for k in range(starts[-1][0] + 1, len(rosh)):
+        # leave a siman for each day that comes after this one
+        for k in range(starts[-1][0] + 1, len(rosh) - (ndays - 1 - d)):
             j = al[k] if rif else 0
             if rif and (j in used or j == al[k - 1]):
-                continue
+                # the Rif's passage of the siman is taken: the next one that is not (the
+                # day then begins in the Rif a passage later)
+                j = next((x for x in range(al[k] + 1, len(rif)) if x not in used), None)
+                if j is None:
+                    continue
             w = cum_r[k] + cum_f[k]
             if best is None or abs(w - target) < abs(best[0] - target):
                 best = (w, k, j)
