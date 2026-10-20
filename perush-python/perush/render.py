@@ -14,6 +14,8 @@ def draw_line(p, line, x_right, top):
     fill = 0.3 if getattr(line, "force", False) else 0.6
     justify = (line.align == "justify" and not line.last and n > 1 and total >= line.width * fill)
     gap = (line.width - total) / (n - 1) if justify else space(line.base)
+    if n > 1 and total + gap * (n - 1) > line.width:
+        gap = (line.width - total) / (n - 1)     # a line set with tighter spaces
     x = x_right
     if line.align == "center":
         x = x_right - (line.width - (total + gap * (n - 1))) / 2

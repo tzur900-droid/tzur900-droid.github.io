@@ -266,10 +266,10 @@ class Engine:
     def done(self, c, ptr):
         return ptr[0] >= self.sec_end.get(c, len(self.streams[c]))
 
-    def take(self, words, base, lh, w, max_lines):
+    def take(self, words, base, lh, w, max_lines, tight=1.0):
         """The first max_lines lines of words at width w (a new entry is not started
         with fewer than three of its words). Returns (lines, number of words taken)."""
-        lines = break_lines(words, base, lh, full_width(w))
+        lines = break_lines(words, base, lh, full_width(w), tight=tight)
         if len(lines) <= max_lines:
             return lines, len(words)
         lines = lines[:max(0, max_lines)]
@@ -279,7 +279,7 @@ class Engine:
         while k >= 0 and words[k].ref[0] != "L":
             k -= 1
         if k >= 0 and 0 < n - k - 1 < 3:
-            lines = break_lines(words[:k], base, lh, full_width(w))
+            lines = break_lines(words[:k], base, lh, full_width(w), tight=tight)
             n = k
         if lines:
             lines[-1].last = False
@@ -366,7 +366,7 @@ class Engine:
 
     # ------------------------------------------------------------ one page
 
-    def compose(self, a, b, force=False, pre=None, comm_only=False):
+    def compose(self, a, b, force=False, pre=None, comm_only=False, tight=1.0):
         """Lay out the page that holds the text from a to b. pre: lines of a haftara's
         end set above it. comm_only: a page of the commentaries under the text only."""
         items = self.items
@@ -487,7 +487,7 @@ class Engine:
             r["ptrs"][c] = ptr
             if not alll:
                 continue
-            later = sum(p[4] + 1.2 * PT_PER_MM for p in plans[n + 1:] if p[2]) if r["req_fit"] else 0.0
+            later = sum(self.reserve(p, r["req_fit"]) for p in plans[n + 1:])
             budget = room - later - (1.2 * PT_PER_MM if placed_any else 0.0)
             nlh = self.note_lh[c]
             rows = int((budget - self.note_pad() - self.note_title_h(c) + EPS) // nlh)
@@ -496,7 +496,7 @@ class Engine:
             if rows < 1:
                 continue
             words = self.entry_words(c, alll)
-            lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"])
+            lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"], tight)
             if not lines:
                 continue
             h = self.section_h(c, len(lines))
@@ -504,7 +504,36 @@ class Engine:
             room -= h + (1.2 * PT_PER_MM if placed_any else 0.0)
             placed_any = True
             r["ptrs"][c] = self.advance(ptr, words, ntake, len(alll))
+        r["max_v"] = max_v
+        r["min_v"] = next((it["idx"] for _, it, _, _ in segs if it["type"] == "v"), None)
+        # every commentary of a verse whose text is on the page begins on the page
+        r["start_ok"] = True
+        for c, ptr, req, alll, req_h in plans:
+            e, w = r["ptrs"][c]
+            for v in {x["v"] for x in alll}:
+                idx = self.first_idx[c].get(v)
+                if idx is not None and not (e > idx or (e == idx and w > 0)):
+                    r["start_ok"] = False
+        r["req_fit"] = r["req_fit"] and r["start_ok"]
+        if not r["req_fit"] and tight == 1.0 and segs and not force:
+            # a little less room between the words of the commentaries (over all their lines)
+            r2 = self.compose(a, b, force, pre, comm_only, 0.88)
+            if r2["req_fit"]:
+                return r2
         return r
+
+    def reserve(self, p, req_fit):
+        """Room kept for a commentary placed after another: all of what the page owes it,
+        and the first lines of what it begins on the page."""
+        c, ptr, req, alll, req_h = p
+        if not alll:
+            return 0.0
+        start = self.section_h(c, self.comms[c]["cols"])
+        if req_fit and req:
+            h = req_h + (self.note_lh[c] if len(alll) > len(req) else 0.0)
+        else:
+            h = start
+        return h + 1.2 * PT_PER_MM
 
     def can_close(self, r, hole):
         """Whether a hole of this height can be spread over the page's lines."""
@@ -566,7 +595,7 @@ class Engine:
         # no commentary on the page: open the text's line spacing to the bottom
         if not r["sections"] and not r["post"] and (not r["at_end"] or r.get("more")) and r["text"] and spare > 0:
             text = [l for l in r["text"] if l.kind == "p"]
-            if text and (spare < self.main_lh * 1.5 or spare / len(text) <= self.main_lh * 0.1):
+            if text and (spare < self.main_lh * 1.5 or spare / len(text) <= self.main_lh * 0.16):
                 for l in text:
                     l.h += spare / len(text)
                 self.recompute_top(r)
@@ -798,7 +827,7 @@ class Engine:
                             self.col_w[c] = min(60.0, max(12.0, base[c] + sign * step))
                         cand = self.search_page(pos, pre)
                         lag2 = self.page_lag(cand)
-                        ok = cand["col_full"] or cand["at_end"]
+                        ok = (cand["col_full"] or cand["at_end"]) and (cand["start_ok"] or not best["start_ok"])
                         if ok and (lag2 < lag or (short and sign < 0)):
                             best, lag, short = cand, lag2, False
                             best["col_w"] = dict(self.col_w)
@@ -876,35 +905,55 @@ class Engine:
                 else:
                     misses += 1
                 x += 1
-        if not g or self.text_height(pos, g) < self.min_text_h:
+        if g:
+            cur = self.compose(pos, self.pos(g), False, pre)
+            if not cur["at_end"] and not self.can_close(cur, self.contentH - self.total_h(cur)):
+                # the commentary of the next verse doesn't fit in full and the page would
+                # have a hole: the text runs on, every commentary of its verses begins on
+                # the page and what doesn't fit continues on the next one
+                fill = self.start_fill(pos, g0, g, pre)
+                if fill is not None:
+                    g = fill
+                elif self.text_height(pos, g) < self.min_text_h:
+                    g = 0
+        if not g:
             # the commentaries of the verses already set fill more than a page: a page of
             # commentary only, so they don't fall further behind their verses
+            only = None
             if self.backlog(pos):
-                r = self.compose(pos, pos, False, pre, comm_only=True)
-                if r["sections"] and self.can_close(r, self.contentH - self.total_h(r)):
-                    return r
-            # a commentary longer than a page: keep the minimum of text, the rest runs on
-            lo, hi2 = g0 + 1, min(self.total, max(g0 + 1, hi))
-            m = hi2
-            while lo <= hi2:
-                mid = (lo + hi2) // 2
-                if self.text_height(pos, mid) >= self.min_text_h:
-                    m, hi2 = mid, mid - 1
-                else:
-                    lo = mid + 1
-            g = max(g, m)
+                only = self.compose(pos, pos, False, pre, comm_only=True)
+                if only["sections"] and self.can_close(only, self.contentH - self.total_h(only)):
+                    return only
+            # a commentary longer than a page: the text runs to the end of its verse (so that
+            # no later verse waits for its commentary), the commentaries begin under it
+            k = pos[0]
+            while k < len(self.items) - 1 and self.items[k]["type"] == "h":
+                k += 1
+            g = min(self.total, self.g_of((k + 1, 0)) if k + 1 < len(self.items) else self.total)
+            g = max(g, g0 + 1)
+            cand = self.compose(pos, self.pos(g), False, pre)
+            if only is not None and only["sections"] and not cand["start_ok"]:
+                return only
         best = self.compose(pos, self.pos(g), False, pre)
         # the translation runs out before the text ends: add text until it fills its column
         if self.sides and not best["col_full"] and not best["at_end"]:
             x = g + 1
             while x <= min(self.total, g + 400):
                 r2 = self.compose(pos, self.pos(x), False, pre)
-                if not r2["top_fits"]:
+                if not r2["top_fits"] or not r2["start_ok"]:
                     break
                 if r2["col_full"] or r2["at_end"]:
                     g, best = x, r2
                     break
                 x += 1
+            if not best["col_full"]:
+                # it can't run on (a commentary would not begin on the page): a little less
+                # text, so that the translation ends with it, if the page stays full
+                for x in range(g - 1, max(g0, g - 80), -1):
+                    r2 = self.compose(pos, self.pos(x), False, pre)
+                    if r2["col_full"] and r2["start_ok"] and self.can_close(r2, self.contentH - self.total_h(r2)):
+                        g, best = x, r2
+                        break
         best, g = self.end_on_full_line(pos, g0, g, best, pre)
         hole = self.contentH - self.total_h(best)
         if not best["at_end"] and best["sections"] and not self.can_close(best, hole):
@@ -919,7 +968,7 @@ class Engine:
             r = self.compose(pos, self.pos(x), False, pre)
             if not r["top_fits"]:
                 break
-            if r["at_end"] or (self.sides and not r["col_full"]) or self.full_line_end(r, g0, x) != x:
+            if r["at_end"] or not r["start_ok"] or (self.sides and not r["col_full"]) or self.full_line_end(r, g0, x) != x:
                 continue
             spare = self.contentH - self.total_h(r)
             if -EPS <= spare and self.can_close(r, spare):
@@ -934,6 +983,22 @@ class Engine:
                 last = self.items[i]["idx"]
                 break
         return last >= 0 and any(self.list_from(c, self.ptrs[c], last) for c in self.bottoms)
+
+    def start_fill(self, pos, g0, g, pre):
+        """The least text after g with which every commentary of the page's verses begins
+        on it and the page is full, preferring an end on a full line."""
+        first = None
+        for x in range(g + 1, min(self.total, g + 80) + 1):
+            q = self.compose(pos, self.pos(x), False, pre)
+            if not q["top_fits"] or not q["start_ok"]:
+                break
+            if not self.can_close(q, self.contentH - self.total_h(q)):
+                continue
+            if first is None:
+                first = x
+            if self.full_line_end(q, g0, x) == x:
+                return x
+        return first
 
     def shorten_for_lag(self, pos, pre, best):
         g0, g = self.g_of(pos), self.g_of(best["b"])
@@ -992,7 +1057,8 @@ class Engine:
         x = g + 1
         while x <= min(self.total, g + 40):
             r2 = self.compose(pos, self.pos(x), False, pre)
-            if not r2["top_fits"] or len(r2["text"]) != n_lines or (self.sides and not r2["col_full"] and not r2["at_end"]):
+            if not r2["top_fits"] or not r2["start_ok"] or len(r2["text"]) != n_lines or (
+                    self.sides and not r2["col_full"] and not r2["at_end"]):
                 break
             if self.total_h(r2) > self.contentH + EPS and not r2["sections"]:
                 break

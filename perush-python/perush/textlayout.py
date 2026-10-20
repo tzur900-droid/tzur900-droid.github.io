@@ -119,11 +119,12 @@ class Line:
         return self.natural + space(self.base) + word.w <= self.width + 0.01
 
 
-def break_lines(words, base, lh, width_at, y0=0.0, align="justify"):
+def break_lines(words, base, lh, width_at, y0=0.0, align="justify", tight=1.0):
     """Greedy line breaking. width_at(y) -> (right offset, width) lets lines beside a
-    column be narrower than the lines under it."""
+    column be narrower than the lines under it. tight < 1 lets the spaces between the
+    words shrink a little."""
     lines = []
-    sp = space(base)
+    sp = space(base) * tight
     i, n, y = 0, len(words), y0
     while i < n:
         right, w = width_at(y)
