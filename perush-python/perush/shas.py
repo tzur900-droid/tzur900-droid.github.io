@@ -201,15 +201,30 @@ def loose_grams(words, n):
     return {tuple(seq[i:i + n]) for i in range(len(seq) - n + 1)}
 
 
-def mark_found(toks, ref, n=4, min_run=4, excl=None, value=True):
+def loose_counts(words, n):
+    seq = [w for w in (loose(x) for x in words) if w]
+    out = {}
+    for i in range(len(seq) - n + 1):
+        g = tuple(seq[i:i + n])
+        out[g] = out.get(g, 0) + 1
+    return out
+
+
+def mark_found(toks, ref, n=4, min_run=4, excl=None, value=True, used=None):
     """Make bold every run (min_run words or more) of toks found in ref (loose n-grams),
-    leaving out n-grams found in excl."""
+    leaving out n-grams found in excl. With used (a dict), ref is a count of each n-gram
+    and an n-gram is taken no more times than it is found there: what the Rosh repeats
+    is bold only the first time."""
     idx = [i for i, t in enumerate(toks) if loose(t[0])]
     seq = [loose(toks[i][0]) for i in idx]
     hit = [False] * len(seq)
     for k in range(len(seq) - n + 1):
         g = tuple(seq[k:k + n])
         if g in ref and not (excl and g in excl):
+            if used is not None:
+                if used.get(g, 0) >= ref[g]:
+                    continue
+                used[g] = used.get(g, 0) + 1
             for j in range(k, k + n):
                 hit[j] = True
     count, k = 0, 0
@@ -242,7 +257,7 @@ def rashi_words(path):
     return out
 
 
-def mark_attributed(toks, ref, is_marker, window=25, n=3, min_run=3, mark_name=True):
+def mark_attributed(toks, ref, is_marker, window=25, n=3, min_run=3, mark_name=True, value=True):
     """Make bold what follows a mention of the quoted author (is_marker(word)): the runs,
     within window words after the mention, that are found in ref (loose n-grams)."""
     idx = [i for i, t in enumerate(toks) if loose(t[0])]
@@ -252,10 +267,11 @@ def mark_attributed(toks, ref, is_marker, window=25, n=3, min_run=3, mark_name=T
         if not is_marker(toks[i][0]):
             continue
         if mark_name:
-            toks[i][1] = True
+            if toks[i][1] is False:
+                toks[i][1] = value
             # "ז"ל" after the name goes with it
-            if k + 1 < len(idx) and norm(toks[idx[k + 1]][0]) in ("זל", "זצל"):
-                toks[idx[k + 1]][1] = True
+            if k + 1 < len(idx) and norm(toks[idx[k + 1]][0]) in ("זל", "זצל") and toks[idx[k + 1]][1] is False:
+                toks[idx[k + 1]][1] = value
         # the quotation: from the name to the last run found in ref
         end, q = None, k + 1
         while q < min(len(seq) - n + 1, k + 1 + window):
@@ -271,9 +287,9 @@ def mark_attributed(toks, ref, is_marker, window=25, n=3, min_run=3, mark_name=T
                 q += 1
         if end is not None:
             for j in range(k + 1, min(end, len(seq))):
-                if not toks[idx[j]][1]:
+                if toks[idx[j]][1] is False:
                     count += 1
-                toks[idx[j]][1] = True
+                    toks[idx[j]][1] = value
     return count
 
 
@@ -420,8 +436,8 @@ class Unit:
 
 
 class Book:
-    def __init__(self, name, rosh, rif, comm, comm_name, page=(210, 297), margin=14, rosh_size=12, rif_size=12.5,
-                 comm_size=9.3):
+    def __init__(self, name, rosh, rif, comm, comm_name, page=(210, 297), margin=14, rosh_size=12, rif_size=11.5,
+                 comm_size=10):
         self.name = name
         self.rosh, self.rif, self.comm, self.comm_name = rosh, rif, comm, comm_name
         self.pw, self.ph = page[0] * PT_PER_MM, page[1] * PT_PER_MM
@@ -433,7 +449,7 @@ class Book:
         self.vgap = 2.5 * PT_PER_MM
         self.st_rosh = Style("Frank Ruhl Libre", rosh_size)
         self.st_rif = Style("Frank Ruhl Libre", rif_size)
-        self.st_comm = Style("Noto Rashi Hebrew", comm_size)
+        self.st_comm = Style("David Libre", comm_size)
         self.lh_rosh = rosh_size * 1.45
         self.lh_rif = rif_size * 1.5
         self.lh_comm = comm_size * 1.42
@@ -451,7 +467,7 @@ class Book:
         out = []
         for t in toks:
             w, bold = t[0], t[1]
-            s_ = lab if bold == "label" else (b if bold else st)
+            s_ = lab if bold == "label" else (st.with_bold(True) if bold == "rashi" else (b if bold else st))
             out.append(Word(w, s_, width(s_, w), t[2] if len(t) > 2 else None))
         return out
 
@@ -907,7 +923,8 @@ def sources(root, m):
     rish = os.path.join(root, "אוצריא", "תלמוד בבלי", "ראשונים")
     comm, comm_name = None, ""
     for fname, nm in ((f"רן על {m}.txt", 'ר"ן'), (f"נימוקי יוסף על {m}.txt", "נימוקי יוסף"),
-                      (f"רבינו יונה על {m}.txt", "רבינו יונה")):
+                      (f"רבינו יונה על {m}.txt", "רבינו יונה"),
+                      (f"רבינו יהונתן מלוניל על {m}.txt", "רבינו יהונתן")):
         p = find_file(os.path.join(rish, "ריף", "מפרשים"), fname)
         if p:
             comm, comm_name = p, nm
@@ -969,8 +986,9 @@ def load_masechet(root, m):
     mark_labels([t for x in rosh for t in x["paras"]])
     mark_labels([p["tokens"] for p in rif])
     if rif:
-        ref = loose_grams([w for p in rif for w, *_ in p["tokens"]], 4)
-        n = sum(mark_found(t, ref, 4, 4) for x in rosh for t in x["paras"])
+        ref = loose_counts([w for p in rif for w, *_ in p["tokens"]], 4)
+        used = {}
+        n = sum(mark_found(t, ref, 4, 4, used=used) for x in rosh for t in x["paras"])
         report.append(f"ברא\"ש הודגשו {n} מילים מהרי\"ף")
     if comm:
         rsh, gem = set(), set()
@@ -978,8 +996,8 @@ def load_masechet(root, m):
             rsh |= loose_grams(rashi_words(p), 3)
         for p in s["gemara"]:
             gem |= loose_grams(re.sub(r"<[^>]+>", " ", " ".join(read(p))).replace("''", '"').split(), 3)
-        n = sum(mark_found(e["tokens"], rsh, 3, 4, gem) for e in comm)
-        n += sum(mark_attributed(e["tokens"], rsh, rashi_marker) for e in comm)
+        n = sum(mark_found(e["tokens"], rsh, 3, 4, gem, value="rashi") for e in comm)
+        n += sum(mark_attributed(e["tokens"], rsh, rashi_marker, value="rashi") for e in comm)
         report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
     return rosh, rif, comm, s["comm_name"], report
 
