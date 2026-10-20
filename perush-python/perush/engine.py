@@ -21,6 +21,7 @@ Everything is measured in points and laid out line by line, so heights are exact
 """
 import math
 import re
+import time
 from dataclasses import dataclass, field
 
 from .model import entry_tokens, heb, page_mm, parse_comm, parse_main
@@ -156,6 +157,9 @@ class Engine:
         self.sec_end = {}
         self.items = [it for it in self.all_items if not it["noComm"]]
         self.col_w = {}
+        self.memo = {}
+        self.ew_cache = {}
+        self.last_breath = 0.0
         self._auto_widths()
 
     # ------------------------------------------------------------ text of the page
@@ -232,21 +236,28 @@ class Engine:
             if max_v is not None and e["v"] > max_v:
                 break
             if j == ptr[0] and ptr[1]:
-                out.append(dict(e, start=ptr[1], cont=True))
+                out.append(dict(e, start=ptr[1], cont=True, j=j))
             else:
-                out.append(dict(e, start=0, cont=False))
+                out.append(dict(e, start=0, cont=False, j=j))
         return out
 
     def entry_words(self, c, lst):
-        base = self.style[c]
-        bold = base.with_bold(True)
+        """The words of the entries in lst: each entry's label (bold), then its words. A
+        word's ref is (entry index, word index), the label's ('L', entry index)."""
         words = []
-        for j, e in enumerate(lst):
-            if not e["cont"]:
-                words.append(Word(e["label"], bold, width(bold, e["label"]), ("L", j)))
-            for k, (t, b) in enumerate(e["tokens"][e["start"]:]):
-                st = bold if b else base
-                words.append(Word(t, st, width(st, t), (j, e["start"] + k)))
+        for e in lst:
+            key = (c, e["j"])
+            ws = self.ew_cache.get(key)
+            if ws is None:
+                base = self.style[c]
+                bold = base.with_bold(True)
+                j = e["j"]
+                ws = [Word(e["label"], bold, width(bold, e["label"]), ("L", j))]
+                for k, (t, b) in enumerate(e["tokens"]):
+                    st = bold if b else base
+                    ws.append(Word(t, st, width(st, t), (j, k)))
+                self.ew_cache[key] = ws
+            words.extend(ws[1 + e["start"]:] if e["cont"] else ws)
         return words
 
     def advance(self, ptr, words, n_taken, n_entries):
@@ -254,8 +265,8 @@ class Engine:
             return (ptr[0] + n_entries, 0)
         ref = words[n_taken].ref
         if ref[0] == "L":
-            return (ptr[0] + ref[1], 0)
-        return (ptr[0] + ref[0], ref[1])
+            return (ref[1], 0)
+        return (ref[0], ref[1])
 
     def started(self, c, v, ptr):
         idx = self.first_idx[c].get(v)
@@ -368,7 +379,27 @@ class Engine:
 
     def compose(self, a, b, force=False, pre=None, comm_only=False, tight=1.0):
         """Lay out the page that holds the text from a to b. pre: lines of a haftara's
-        end set above it. comm_only: a page of the commentaries under the text only."""
+        end set above it. comm_only: a page of the commentaries under the text only.
+        The same page is tried many times while a page is chosen: it is laid out once."""
+        key = (a, b, force, id(pre), comm_only, tight, tuple(sorted(self.ptrs.items())),
+               tuple(sorted(self.col_w.items())), len(self.pages) % 2)
+        hit = self.memo.get(key)
+        if hit is not None:
+            return hit
+        self.breathe()
+        r = self._compose(a, b, force, pre, comm_only, tight)
+        self.memo[key] = r
+        return r
+
+    def breathe(self):
+        """Let the window answer now and then during a long layout."""
+        if self.progress:
+            now = time.monotonic()
+            if now - self.last_breath > 0.1:
+                self.last_breath = now
+                self.progress(len(self.pages))
+
+    def _compose(self, a, b, force=False, pre=None, comm_only=False, tight=1.0):
         items = self.items
         segs = self.segments(a, b)
         at_end = b[0] >= len(items)
@@ -517,7 +548,7 @@ class Engine:
         r["req_fit"] = r["req_fit"] and r["start_ok"]
         if not r["req_fit"] and tight == 1.0 and segs and not force:
             # a little less room between the words of the commentaries (over all their lines)
-            r2 = self.compose(a, b, force, pre, comm_only, 0.88)
+            r2 = self._compose(a, b, force, pre, comm_only, 0.88)
             if r2["req_fit"]:
                 return r2
         return r
@@ -797,6 +828,7 @@ class Engine:
         return pages
 
     def tick(self):
+        self.memo.clear()   # a new page: what was tried for the last one is no use
         if self.progress:
             self.progress(len(self.pages))
 

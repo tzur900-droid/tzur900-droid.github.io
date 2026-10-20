@@ -554,7 +554,14 @@ class MainWindow(QMainWindow):
                 item.widget().deleteLater()
         ratio = self.devicePixelRatioF()
         px_per_pt = self.zoom * 96 / 72 * ratio
-        for page in self.pages:
+        gen = self.generation
+        self.draw_id = draw = getattr(self, "draw_id", 0) + 1
+        for n, page in enumerate(self.pages):
+            if n and n % 4 == 0:
+                # a long book: let the window answer while its pages are drawn
+                QApplication.processEvents()
+                if self.generation != gen or self.draw_id != draw:
+                    return
             img = page_image(page, px_per_pt)
             pm = QPixmap.fromImage(img)
             pm.setDevicePixelRatio(ratio)
