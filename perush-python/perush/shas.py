@@ -341,9 +341,11 @@ def parse_rashi(lines):
         if l.startswith("<h") or amud is None or " - " not in l:
             continue
         dh, _, rest = re.sub(r"<[^>]+>", " ", l).partition(" - ")
-        words, src = lseq(rest.replace("''", '"').split())
-        dw, dsrc = lseq(dh.replace("''", '"').split())
-        out.append({"amud": amud, "dh": dw, "dsrc": dsrc, "words": words, "src": src})
+        dh, rest = dh.replace("''", '"').split(), rest.replace("''", '"').split()
+        words, src = lseq(rest)
+        dw, dsrc = lseq(dh)
+        out.append({"id": len(out), "amud": amud, "dh": dw, "dsrc": dsrc, "words": words, "src": src,
+                    "dh_text": dh, "text": rest})
     return out
 
 
@@ -356,16 +358,23 @@ def passage_amudim(rif, gem_lines):
     mark_aligned([[t[0], False] for p in rif for t in p["tokens"]], gtoks, found=found)
     got = {}
     for a, b, c, d in found:
-        got.setdefault(flat[a], []).append(amud[c][0])
+        got.setdefault(flat[a], []).extend([amud[c][0]] * (b - a + 1))
     out, last = [], None
     for j in range(len(rif)):
-        if got.get(j):
+        # a passage that brings the Gemara of another masechet meets ours only by chance
+        if len(got.get(j, ())) >= 10:
             last = sorted(got[j])[len(got[j]) // 2]
         out.append(last)
-    return out
+    # the middle of the passage and the two on each side of it, so that a passage that
+    # brings the Gemara of another place does not move it
+    smooth = []
+    for j in range(len(out)):
+        near = sorted(x for x in out[max(0, j - 2):j + 3] if x is not None)
+        smooth.append(near[len(near) // 2] if near else None)
+    return smooth
 
 
-def mark_rashi(toks, entries, gem, value="rashi", gap=3):
+def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None):
     """Make bold in a commentary entry what it takes from Rashi (entries: Rashi's comments
     on the place; gem: loose 3-grams of the Gemara), as the Oz Vehadar Rif does:
       * its dibbur hamatchil (marked "dh" in toks), where Rashi has a dibbur with the
@@ -373,7 +382,10 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3):
       * in what it says, Rashi's own words (not the Gemara's): three or more in the order
         Rashi has them, a few words between them at most; or two, opening what it says
         on a dibbur that is Rashi's, where Rashi's comment opens with them;
-      * where it says that Rashi explained ("ופירש"י ז"ל ..."), the sentence it brings."""
+      * where it says that Rashi explained ("ופירש"י ז"ל ..."), the sentence it brings.
+    trace (a list), if given, gets why each stretch is bold: (kind, first and last token,
+    the Rashi comment's id, the indices of its words that are the same; for "dh" of its
+    dibbur, for "words" of the comment)."""
     seq, src = lseq(toks)
     dh_end = 0
     while dh_end < len(seq) and toks[src[dh_end]][1] == "dh":
@@ -397,6 +409,8 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3):
             mine.append(e)
             for k in range(a, a + L):
                 bold[k] = 1
+            if trace is not None:
+                trace.append(("dh", src[a], src[a + L - 1], e["id"], sorted(set(e["dsrc"][b:b + L]))))
     # a short dibbur Rashi has half of: all of it
     if dh_end and len(set(src[:dh_end])) <= 5 and sum(bold[:dh_end]) * 2 >= dh_end:
         for k in range(dh_end):
@@ -440,6 +454,8 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3):
             if dense and (n >= 3 or head):
                 for k in range(i0, i1 + 1):
                     bold[k] = 1
+                if trace is not None:
+                    trace.append(("words", src[i0], src[i1], e["id"], sorted({rsrc[p] for _, p in best})))
             i = i1 + 1 if dense and len(best) >= 2 else i + 1
     # "ופירש"י ז"ל ...": to the end of the sentence
     for k in range(len(seq)):
@@ -455,11 +471,88 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3):
             for k2, sk in enumerate(src):
                 if q <= sk <= e:
                     bold[k2] = 1
+            if trace is not None:
+                trace.append(("said", q, e, None, []))
     count = 0
     for k, b in enumerate(bold):
         t = toks[src[k]]
         if b and t[1] != value:
             t[1] = value
+            count += 1
+    return count
+
+
+SKIP_DH = ("גמ", "גמרא", "מתני", "מתניתין", "וכו", "כו", "פי", "וגו")
+
+
+def dh_words(e):
+    """The loose words of a commentary entry's dibbur hamatchil, without גמ', וכו' and the
+    like."""
+    return [w for w in lseq(e["tokens"][:e.get("dh_len", 0)])[0] if w not in {loose(x) for x in SKIP_DH}]
+
+
+def comm_gemara_marks(comm, amudim, gtoks, gamud):
+    """Where the commentary comes to a new amud of the Gemara, the amud before the entry
+    (e['gem'], set as [דף ב:]): the amud where its dibbur hamatchil is found in the Gemara,
+    near the amud of the Rif's passage."""
+    seq, src = lseq(gtoks)
+    index = {}
+    for k in range(len(seq) - 1):
+        index.setdefault(tuple(seq[k:k + 2]), []).append(k)
+    last, count = None, 0
+    for e in comm:
+        a = amudim[e["para"]]
+        dh = dh_words(e)
+        if a is None or len(dh) < 2:
+            continue
+        found = []
+        for k in index.get(tuple(dh[:2]), ()):
+            if seq[k:k + min(len(dh), 4)] == dh[:4]:
+                n, label = gamud[src[k]]
+                if a - 1 <= n <= a + 3:
+                    found.append((n, label))
+        # forward from the last mark, or far back where the Rif goes on to a perek that
+        # comes earlier in the Gemara
+        back = last is not None and a < last - 6
+        ahead = [x for x in found if last is None or x[0] >= last or (back and x[0] < last - 6)]
+        if not ahead:
+            continue
+        n, label = min(ahead, key=lambda x: abs(x[0] - a))
+        if last is None or n > last or (back and n < last - 6):
+            e["gem"] = label
+            last = n
+            count += 1
+    return count
+
+
+def mishna_openers(comm, rif):
+    """The first word of a commentary entry that opens a Mishna (its dibbur hamatchil is
+    the Mishna's first words) large, in square letters (e['open'])."""
+    starts = {}
+    for j, p in enumerate(rif):
+        # the passage's words without the references in parentheses ("(דף ב.)")
+        toks, inside = [], False
+        for t in p["tokens"]:
+            if t[0].startswith("("):
+                inside = True
+            if not inside:
+                toks.append(t)
+            if t[0].endswith(")"):
+                inside = False
+        seq, src = lseq(toks)
+        for k in range(len(seq)):
+            t = toks[src[k]]
+            if (k == 0 and j == 0) or (t[1] == "label" and norm(t[0]) in ("מתני", "מתניתין")
+                                       and (k == 0 or src[k - 1] != src[k])):
+                at = k + (0 if j == 0 and k == 0 else 1)
+                starts.setdefault(j, []).append(tuple(seq[at:at + 2]))
+    count = 0
+    for e in comm:
+        dh = dh_words(e)
+        if len(dh) < 2:
+            continue
+        if any(tuple(dh[:2]) in starts.get(j, ()) for j in (e["para"] - 1, e["para"], e["para"] + 1)):
+            e["open"] = True
             count += 1
     return count
 
@@ -756,10 +849,11 @@ class Book:
         lab = Style("David Libre", st.size * 1.08, True)
         big = Style(st.family, st.size * 1.3, True)
         gem = Style(st.family, st.size * 0.75)
+        copen = Style("Frank Ruhl Libre", st.size * 1.4, True)
         out = []
         for t in toks:
             w, bold = t[0], t[1]
-            s_ = {"label": lab, "open": big, "gem": gem, "rashi": st.with_bold(True), "hadran": b, "dh": st}.get(bold) or (b if bold else st)
+            s_ = {"label": lab, "open": big, "gem": gem, "rashi": st.with_bold(True), "hadran": b, "dh": st, "copen": copen}.get(bold) or (b if bold else st)
             out.append(Word(w, s_, width(s_, w), t[2] if len(t) > 2 else None))
         return out
 
@@ -864,7 +958,14 @@ class Book:
         # the commentary as one run of words, entry after entry
         self.cwords, self.c_end_of_para = [], {}
         for e in self.comm:
-            ws = self.words(e["tokens"], self.st_comm)
+            toks = e["tokens"]
+            if e.get("open"):
+                # the word that opens a Mishna, large in square letters
+                k = next((i for i, t in enumerate(toks) if norm(t[0]) not in SKIP_DH), 0)
+                toks = toks[:k] + [[toks[k][0], "copen"]] + toks[k + 1:]
+            if e.get("gem"):
+                toks = [[f"[דף {e['gem']}]", "gem"]] + toks
+            ws = self.words(toks, self.st_comm)
             self.cwords.extend(ws)
             self.c_end_of_para[e["para"]] = len(self.cwords)
 
@@ -1295,23 +1396,27 @@ def load_masechet(root, m):
         # the commentary's own dibbur hamatchil in plain type (as in the Oz Vehadar Rif);
         # bold is what it takes from Rashi on the Gemara of the place
         for e in comm:
+            e["dh_len"] = 0
             for t in e["tokens"]:
                 if t[1] is True:
                     t[1] = "dh"
+                    e["dh_len"] += 1
         if s["rashi"] and s["gemara"]:
             rashi = parse_rashi(read(s["rashi"][0]))
             gl = read(s["gemara"][0])
             amudim = passage_amudim(rif, gl)
-            gem = set()
-            for w in [parse_gemara(gl)[0]]:
-                g = lseq(w)[0]
-                gem = {tuple(g[k:k + 3]) for k in range(len(g) - 2)}
+            gtoks, gamud = parse_gemara(gl)
+            g = lseq(gtoks)[0]
+            gem = {tuple(g[k:k + 3]) for k in range(len(g) - 2)}
             n = 0
             for e in comm:
                 a = amudim[e["para"]]
                 near = [x for x in rashi if a is not None and a - 2 <= x["amud"] <= a + 2]
-                n += mark_rashi(e["tokens"], near, gem)
+                e["why"] = []
+                n += mark_rashi(e["tokens"], near, gem, trace=e["why"])
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
+            report.append(f"ב{s['comm_name']} {comm_gemara_marks(comm, amudim, gtoks, gamud)} סימני דפי הגמרא")
+        report.append(f"ב{s['comm_name']} {mishna_openers(comm, rif)} פתיחות של משנה")
     return rosh, rif, comm, s["comm_name"], report
 
 
