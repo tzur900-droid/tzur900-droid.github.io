@@ -366,9 +366,9 @@ class Engine:
 
     # ------------------------------------------------------------ one page
 
-    def compose(self, a, b, force=False, pre=None):
+    def compose(self, a, b, force=False, pre=None, comm_only=False):
         """Lay out the page that holds the text from a to b. pre: lines of a haftara's
-        end set above it."""
+        end set above it. comm_only: a page of the commentaries under the text only."""
         items = self.items
         segs = self.segments(a, b)
         at_end = b[0] >= len(items)
@@ -428,7 +428,7 @@ class Engine:
         for c in self.sides:
             inf = info[c]
             slh = self.side_lh[c]
-            if not inf["nat"]:
+            if not inf["nat"] or comm_only:
                 r["side"][c] = {"col": [], "band": [], "th": 0.0, "mode": "wrap", "slh": slh, "h": 0.0}
                 r["ptrs"][c] = inf["ptr"]
                 continue
@@ -564,7 +564,7 @@ class Engine:
         self.align_columns(r)
         spare = self.contentH - self.total_h(r)
         # no commentary on the page: open the text's line spacing to the bottom
-        if not r["sections"] and not r["post"] and not r["at_end"] and r["text"] and spare > 0:
+        if not r["sections"] and not r["post"] and (not r["at_end"] or r.get("more")) and r["text"] and spare > 0:
             text = [l for l in r["text"] if l.kind == "p"]
             if text and (spare < self.main_lh * 1.5 or spare / len(text) <= self.main_lh * 0.1):
                 for l in text:
@@ -817,6 +817,9 @@ class Engine:
                     best["post"] = {"lines": lines, "h": h, "mt": self.sgap + 3 * PT_PER_MM}
                     self.plain_start = end
                     best["post"]["done"] = done
+            # something follows on the next page (a haftara, the next parasha): no reason to
+            # leave room at the bottom of this one
+            best["more"] = not last or bool(next_plain)
             self.justify(best)
             if best.get("post") and not best["post"].get("done", True):
                 # the haftara starts under the parasha and continues: fill the page to the bottom
@@ -874,6 +877,12 @@ class Engine:
                     misses += 1
                 x += 1
         if not g or self.text_height(pos, g) < self.min_text_h:
+            # the commentaries of the verses already set fill more than a page: a page of
+            # commentary only, so they don't fall further behind their verses
+            if self.backlog(pos):
+                r = self.compose(pos, pos, False, pre, comm_only=True)
+                if r["sections"] and self.can_close(r, self.contentH - self.total_h(r)):
+                    return r
             # a commentary longer than a page: keep the minimum of text, the rest runs on
             lo, hi2 = g0 + 1, min(self.total, max(g0 + 1, hi))
             m = hi2
@@ -916,6 +925,15 @@ class Engine:
             if -EPS <= spare and self.can_close(r, spare):
                 return r
         return None
+
+    def backlog(self, pos):
+        """Whether commentary is still owed to verses that end before pos."""
+        last = -1
+        for i in range(min(pos[0], len(self.items)) - 1, -1, -1):
+            if self.items[i]["type"] == "v":
+                last = self.items[i]["idx"]
+                break
+        return last >= 0 and any(self.list_from(c, self.ptrs[c], last) for c in self.bottoms)
 
     def shorten_for_lag(self, pos, pre, best):
         g0, g = self.g_of(pos), self.g_of(best["b"])
