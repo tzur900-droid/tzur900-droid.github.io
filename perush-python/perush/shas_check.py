@@ -2,13 +2,15 @@
 before it is laid out: what is surely wrong is corrected, what may be wrong is reported.
 
 Each finding: {'kind', 'where', 'text', 'fixed'}; kinds:
-  far       a quotation of the Rif matched to a passage far from the siman's (a chance
-            meeting of words); short ones lose their bold, long ones are reported
+  far       a short quotation of the Rif (under LONG words) matched to a passage far from
+            the siman's: a chance meeting of words, it loses its bold (a long one is the
+            Rosh bringing what the Rif has elsewhere, and stays)
   lone      a word or two bold alone, with no quotation around them; they lose it
-  missed    a stretch of six words or more that is in the siman's passages of the Rif and
-            is not bold (the Rosh brings it a second time, or it is worded differently)
-  link      a comment of the Ran whose dibbur hamatchil is in the Rif, but not in the
-            passage it was put with
+  missed    a stretch of six words or more that is in the siman's passages of the Rif, is
+            not bold, and is not a stretch the Rosh brings again (bold elsewhere in the
+            siman): it is made bold
+  link      a comment of the Ran whose dibbur hamatchil is on its own page of the Rif,
+            but more than two passages from the one it was put with
   no_rashi  a comment of the Ran on a passage that brings no Gemara of the masechet, so
             Rashi was not looked at for it
   ran_lone  one word of the Ran bold alone as Rashi's; it loses it
@@ -61,8 +63,7 @@ def check_rosh(rosh, rif, al, found):
                 if flat[k][1] is True:
                     flat[k][1] = False
             out.append({"kind": "far", "where": where, "text": text(flat, a, b + 1), "fixed": True})
-        else:
-            out.append({"kind": "far", "where": where, "text": text(flat, a, b + 1), "fixed": False})
+
     # a word or two bold alone
     k = 0
     while k < len(flat):
@@ -88,6 +89,14 @@ def check_rosh(rosh, rif, al, found):
         for p in rif[max(0, lo):hi + 1]:
             r = [stem(x) for x in lseq(p["tokens"])[0]]
             bag |= {tuple(r[q:q + 3]) for q in range(len(r) - 2)}
+        # what is already bold in the siman: a stretch the Rosh brings again is plain by
+        # the rule (bold as often as the Rif has it), not a mistake
+        bold = set()
+        for p in s["paras"]:
+            seq, src = lseq(p)
+            seq = [stem(x) for x in seq]
+            bold |= {tuple(seq[q:q + 3]) for q in range(len(seq) - 2)
+                     if all(p[src[x]][1] is True for x in range(q, q + 3))}
         for p in s["paras"]:
             seq, src = lseq(p)
             seq = [stem(x) for x in seq]
@@ -102,9 +111,14 @@ def check_rosh(rosh, rif, al, found):
                     while e < len(seq) and hit[e] and p[src[e]][1] is False:
                         e += 1
                     toks = sorted(set(src[q:e]))
-                    if len(toks) >= MISSED:
+                    grams = [tuple(seq[x:x + 3]) for x in range(q, e - 2)]
+                    again = grams and sum(g in bold for g in grams) * 2 >= len(grams)
+                    if len(toks) >= MISSED and not again:
+                        for x in range(toks[0], toks[-1] + 1):
+                            if p[x][1] is False:
+                                p[x][1] = True
                         out.append({"kind": "missed", "where": f"סימן {s['num']} ({s['perek']})",
-                                    "text": text(p, toks[0], toks[-1] + 1), "fixed": False})
+                                    "text": text(p, toks[0], toks[-1] + 1), "fixed": True})
                     q = e
                 else:
                     q += 1
@@ -122,11 +136,13 @@ def check_ran(rif, comm):
             def has(j):
                 s = every[j]
                 return any(s[q:q + 3] == dh for q in range(len(s) - 2))
-            near = [j for j in (e["para"] - 1, e["para"], e["para"] + 1) if 0 <= j < len(rif)]
-            # a comment on Gemara the Rif does not bring is no mistake; one whose words are
-            # in the Rif, but in another passage, is
+            near = [j for j in range(e["para"] - 2, e["para"] + 3) if 0 <= j < len(rif)]
+            # a comment on Gemara the Rif does not bring is no mistake, nor one a passage or
+            # two from its own (the Ran's order), nor words found on another page of the Rif
+            # by chance; one whose words are on its own page of the Rif, further off, is
             if not any(has(j) for j in near):
-                elsewhere = [j for j in range(len(rif)) if has(j)]
+                elsewhere = [j for j in range(len(rif)) if has(j) and
+                             any(d == e["daf"] for _, d in rif[j]["dafs"])]
                 if elsewhere:
                     out.append({"kind": "link", "where": where, "text": text(e["tokens"], 0, 12), "fixed": False})
         if e.get("why") is None:

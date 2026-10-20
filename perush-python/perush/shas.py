@@ -624,35 +624,77 @@ def rashi_marker(w):
 # ---------------------------------------------------------------- linking
 
 def link_comm(comm, rif):
-    """Attach each commentary entry to the passage of the Rif it explains: within the
-    entry's page of the Rif, the passage where its dibbur hamatchil is found."""
+    """Attach each commentary entry to the passage of the Rif it explains: the passages on
+    the entry's page of the Rif where its dibbur hamatchil is found are its candidates, and
+    of all the ways to choose one for each entry that keep the order of the Rif, the one
+    that agrees with the most (and the longest) dibburim is taken; an entry with none in
+    that choice goes with the passage of the entry before it."""
     by_daf = {}
     for j, p in enumerate(rif):
         for _, d in p["dafs"]:
             by_daf.setdefault(d, []).append(j)
-    texts = [[norm(w) for w, *_ in p["tokens"]] for p in rif]
-    last = 0
+    texts = [lseq(p["tokens"])[0] for p in rif]
+    skip = {loose(w) for w in ("וכו", "כו", "גמ", "מתני", "וגו", "רן", "פי")}
+    cands = []
     for e in comm:
-        dh = [norm(w) for w, b, *_ in e["tokens"][:12] if b is True]
-        dh = [w for w in dh if w and w not in ("וכו", "כו", "גמ", "מתני", "וגו", "רן", "פי")][:4]
-        cands = [j for j in by_daf.get(e["daf"], []) if j >= last] or by_daf.get(e["daf"], [])
-        best = None
-        for k in (len(dh), 3, 2, 1):
-            if k > len(dh) or k == 0:
-                continue
-            pat = dh[:k]
-            for j in cands:
-                t = texts[j]
-                if any(t[i:i + k] == pat for i in range(len(t) - k + 1)):
-                    best = j
+        dh = [w for w in lseq([t for t in e["tokens"][:12] if t[1] is True])[0] if w not in skip][:4]
+        got = {}
+        for j in by_daf.get(e["daf"], []):
+            t = texts[j]
+            for k in range(len(dh), 0, -1):
+                if any(t[i:i + k] == dh[:k] for i in range(len(t) - k + 1)):
+                    got[j] = k * k        # a longer agreement counts for more
                     break
-            if best is not None:
-                break
-        if best is None:
-            best = cands[0] if cands else last
-        best = max(best, last)
-        e["para"] = best
-        last = best
+        cands.append(got)
+    # the heaviest chain (passages never going back), a tree of the best chain ending at a
+    # passage or before it
+    P = len(rif) + 1
+    tree = [(0, -1, -1)] * (P + 1)
+
+    def query(j):
+        best, q = (0, -1, -1), j + 1
+        while q > 0:
+            if tree[q][0] > best[0]:
+                best = tree[q]
+            q -= q & -q
+        return best
+
+    def update(j, v):
+        q = j + 1
+        while q <= P:
+            if v[0] > tree[q][0]:
+                tree[q] = v
+            q += q & -q
+
+    back = {}
+    end = (0, -1, -1)
+    for k, got in enumerate(cands):
+        vals = [(j, w, query(j)) for j, w in got.items()]
+        for j, w, prev in vals:
+            v = prev[0] + w
+            back[(k, j)] = (prev[1], prev[2])
+            update(j, (v, k, j))
+            if v > end[0]:
+                end = (v, k, j)
+    chosen = {}
+    k, j = end[1], end[2]
+    while k >= 0:
+        chosen[k] = j
+        k, j = back[(k, j)]
+    last = 0
+    for k, e in enumerate(comm):
+        if k in chosen:
+            last = chosen[k]
+        elif not cands[k]:
+            # its dibbur is not in the Rif (a comment on the Gemara): when its page of the
+            # Rif is further on, with the first passage of that page (not past the next
+            # entry that was placed)
+            later = [chosen[q] for q in chosen if q > k]
+            nxt = min(later) if later else len(rif) - 1
+            pages = [j for j in by_daf.get(e["daf"], []) if last < j <= nxt]
+            if pages and last not in by_daf.get(e["daf"], []):
+                last = pages[0]
+        e["para"] = last
 
 
 def align(rosh, rif, n=3):
@@ -686,21 +728,43 @@ def align(rosh, rif, n=3):
     order = sorted(range(len(blocks)), key=lambda k: centre(blocks[k]))
     if order == sorted(order):
         return align_part(score, list(range(S)), 0, P)
-    # the Rif cut into a stretch for each perek, in the Rif's order, where the perakim
-    # on the two sides of the cut keep the most of what they share
-    cuts, lo = [], 0
-    for a, b in zip(order, order[1:]):
-        A, B = blocks[a], blocks[b]
-        best, arg = -1, lo
-        for c in range(lo + 1, P):
-            v = sum(max(score[i][lo:c]) for i in A) + sum(max(score[i][c:]) for i in B)
-            if v > best:
-                best, arg = v, c
-        cuts.append(arg)
-        lo = arg
+    # the Rif cut into a stretch for each perek, in the Rif's order: the cuts that keep the
+    # most of what each perek shares with its own stretch (best over all the cuts together)
+    K = len(order)
+    NEG = float("-inf")
+    best = [[NEG] * (P + 1) for _ in range(K + 1)]
+    back = [[0] * (P + 1) for _ in range(K + 1)]
+    best[0][0] = 0.0
+    for k in range(1, K + 1):
+        sims = blocks[order[k - 1]]
+        for c0 in range(P + 1):
+            if best[k - 1][c0] == NEG:
+                continue
+            run = [0] * len(sims)
+            got = best[k - 1][c0]
+            # an empty stretch (a perek the Rif has not), then longer and longer ones
+            if got > best[k][c0]:
+                best[k][c0], back[k][c0] = got, c0
+            for c in range(c0 + 1, P + 1):
+                for q, i in enumerate(sims):
+                    if score[i][c - 1] > run[q]:
+                        run[q] = score[i][c - 1]
+                v = got + sum(run)
+                if v > best[k][c]:
+                    best[k][c], back[k][c] = v, c0
+    cuts, c = [], P
+    for k in range(K, 0, -1):
+        c = back[k][c]
+        cuts.append(c)
+    cuts = cuts[::-1][1:]
     out = [0] * S
     edges = [0] + cuts + [P]
     for k, b in enumerate(order):
+        if edges[k + 1] <= edges[k]:
+            # a perek the Rif has not: with the passage where its place would be
+            for i in blocks[b]:
+                out[i] = min(edges[k], P - 1)
+            continue
         part = align_part(score, blocks[b], edges[k], edges[k + 1])
         for i, j in zip(blocks[b], part):
             out[i] = j
@@ -1108,12 +1172,13 @@ class Book:
             y = out[-1].y + out[-1].h
         return out, y
 
-    def take_cols(self, words, width_at, H):
-        """Fill the right column and then the left one; width_at(y) -> (right, width)."""
+    def take_cols(self, words, width_at, H, y0=0.0):
+        """Fill the right column and then the left one, from y0 down; width_at(y) ->
+        (right, width)."""
         cols, i, n = [], 0, len(words)
         sp = space(self.st_comm)
         for _ in range(2):
-            col, y = [], 0.0
+            col, y = [], y0
             while i < n and y + self.lh_comm <= H + EPS:
                 right, w = width_at(y)
                 cur, nat, j = [words[i]], words[i].w, i + 1
@@ -1318,9 +1383,35 @@ class Book:
                         break
                     x -= 3
             r = self.end_on_line(r)
+            r = self.fill_below(r)
             pages.append(self.finish(r))
             a, cptr = r["b"], r["cnext"]
         return pages
+
+    def fill_below(self, r):
+        """A page where the Rif widened under a short commentary and ended (at the end of a
+        passage) with room left at the bottom: the commentary that comes next goes on
+        under the Rif in its two columns, as on a page of the Gemara."""
+        if r["mode"] != "short" or r["at_end"] or not r["text"]:
+            return r
+        y0 = r["th"] + self.vgap
+        rows = int((self.H - y0 + EPS) // self.lh_comm)
+        more = self.cwords[r["cnext"]:r["avail"]]
+        if rows < 2 or not more:
+            return r
+        cs, k = self.take_cols(more, full_width(self.wide), y0 + rows * self.lh_comm, y0)
+        if k == 0:
+            return r
+        hc = r.get("hc", 0.0)
+        for c, extra in zip(r["cols"], cs):
+            # what was beside the Rif keeps its place; the rest goes under it
+            for l in c:
+                l.keep = True
+            c.extend(extra)
+        r["cnext"] += k
+        r["below"] = y0
+        r["hc"] = hc
+        return r
 
     def full(self, q):
         if q["mode"] == "long":
@@ -1364,6 +1455,13 @@ class Book:
         if r["mode"] == "long":
             for c in r["cols"]:
                 stretch(c, self.H, self.lh_comm * 1.5)
+        elif r["mode"] == "short" and "below" in r:
+            for c in r["cols"]:
+                top = [l for l in c if getattr(l, "keep", False)]
+                under = [l for l in c if not getattr(l, "keep", False)]
+                stretch(top, r.get("hc", 0.0), self.lh_comm * 1.5)
+                stretch(under, self.H, self.lh_comm * 1.5)
+            stretch(r["text"], r["below"] - self.vgap, self.lh_rif * 0.25 * max(1, len(r["text"])))
         elif r["mode"] == "short":
             hc = r.get("hc", 0.0)
             for c in r["cols"]:
