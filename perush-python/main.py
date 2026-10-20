@@ -4,6 +4,8 @@
     python main.py project.json out.pdf  lay out a project straight to PDF (no window)
     python main.py --import OUT_DIR files…  convert Sefaria text files into project files
         (--comms onkelos,orhachaim chooses the commentaries; default onkelos,rashi,ramban)
+    python main.py --shas LIBRARY OUT_DIR [--jobs 4] [--only שבת,מגילה]
+        the Rosh and the Rif of the whole Shas from the Otzaria library folder (B5, checked)
 """
 import os
 import sys
@@ -34,6 +36,15 @@ def main():
             del rest[i:i + 2]
         written, report = convert(rest, sys.argv[2], kinds)
         print("\n".join(report + written))
+        return 0
+
+    if len(sys.argv) > 3 and sys.argv[1] == "--shas":
+        from perush.shas_book import build_shas
+        rest = sys.argv[4:]
+        jobs = int(rest[rest.index("--jobs") + 1]) if "--jobs" in rest else max(1, (os.cpu_count() or 2) - 1)
+        only = rest[rest.index("--only") + 1].split(",") if "--only" in rest else None
+        files, _ = build_shas(sys.argv[2], sys.argv[3], os.path.join(base_dir(), "fonts"), jobs=jobs, only=only)
+        print("\n".join(f"{n}: {k} עמודים" for n, _, k in files))
         return 0
 
     args = [a for a in sys.argv[1:] if not a.startswith("-")]

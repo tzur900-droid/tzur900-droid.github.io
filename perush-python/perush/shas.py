@@ -241,6 +241,13 @@ def loose_counts(words, n):
     return out
 
 
+# words that change what is said: a quotation with one of them that the source has not
+# is not the source's wording (the Rif says צריך, the Rosh לא צריך)
+MEANING = {norm(w) for w in """לא ולא דלא שלא אין ואין דאין שאין אינו ואינו אינה אינן ליכא וליכא לית ולית לאו ולאו
+    אי ואי אסור ואסור מותר ומותר שרי ושרי חייב וחייב פטור ופטור כשר וכשר פסול ופסול טמא וטמא טהור וטהור
+    אבל ואבל אלא בלא ובלא חוץ""".split()}
+
+
 def stem(x):
     """A loose word without a one-letter prefix and a final ה or א, so that באיסקופה and
     אסקופה, ארבע and ארבעה match."""
@@ -341,6 +348,10 @@ def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, mid=7, near=40, far=200
         for (i1, p1, l1), (i2, p2, l2) in zip(order, order[1:]):
             gs, gr = i2 - (i1 + l1), p2 - (p1 + l1)
             if 0 < gs and 0 <= gr and nwords(src, i1 + l1, i2) <= fill[0] and nwords(rsrc, p1 + l1, p2) <= fill[1]:
+                # not across a word that changes the meaning, which the source has not there
+                theirs = {norm(ref_toks[k][0]) for k in set(rsrc[p1 + l1:p2])}
+                if any(norm(toks[k][0]) in MEANING and norm(toks[k][0]) not in theirs for k in set(src[i1 + l1:i2])):
+                    continue
                 for k in range(i1 + l1, i2):
                     bold_s[k] = 1
     count = 0
@@ -738,8 +749,9 @@ def complete_sentences(rosh, rif, al, most=6):
                     words = [j for j in part if p[j][1] is False]
                     if not part or len(words) != len(part) or len(part) > most:
                         continue
-                    # the Rosh explaining in his own words
-                    if any(norm(p[j][0]) in OWN for j in part) or any(len(norm(p[j][0])) == 1 for j in part):
+                    # the Rosh explaining in his own words, or saying something else
+                    if any(norm(p[j][0]) in OWN or norm(p[j][0]) in MEANING for j in part) or \
+                            any(len(norm(p[j][0])) == 1 for j in part):
                         continue
                     stems = [stem(x) for j in part for x in lwords(p[j][0])]
                     if stems and sum(x in bag for x in stems) * 2 >= len(stems):
@@ -883,13 +895,14 @@ class Unit:
 
 class Book:
     def __init__(self, name, rosh, rif, comm, comm_name, page=(210, 297), margin=14, rosh_size=12, rif_size=11.5,
-                 comm_size=10):
+                 comm_size=10, head_size=9):
         self.name = name
         self.rosh, self.rif, self.comm, self.comm_name = rosh, rif, comm, comm_name
         self.pw, self.ph = page[0] * PT_PER_MM, page[1] * PT_PER_MM
         self.m = margin * PT_PER_MM
         self.W = self.pw - 2 * self.m
-        self.head_h = 9 * 1.3 + 5 * PT_PER_MM
+        self.hs = head_size
+        self.head_h = head_size * 1.3 + 5 * PT_PER_MM
         self.H = self.ph - 2 * self.m - self.head_h
         self.gap = 5 * PT_PER_MM
         self.vgap = 2.5 * PT_PER_MM
@@ -899,8 +912,9 @@ class Book:
         self.lh_rosh = rosh_size * 1.45
         self.lh_rif = rif_size * 1.34
         self.lh_comm = comm_size * 1.26
-        self.head_style = Style("Frank Ruhl Libre", 9)
+        self.head_style = Style("Frank Ruhl Libre", head_size)
         self.cw = self.W * 0.25            # a commentary column beside the Rif
+        self.ktop = 4                      # lines of the commentary above the Rif
         self.wide = (self.W - self.gap) / 2  # a commentary column under it
 
     # -------------------------------------------------- words
@@ -1050,9 +1064,9 @@ class Book:
                 hi = mid - 1
         return lo
 
-    def text_lines(self, a, b, width_at):
-        """Lines of the Rif words a..b laid out with width_at(y)."""
-        out, y = [], 0.0
+    def text_lines(self, a, b, width_at, y0=0.0):
+        """Lines of the Rif words a..b laid out with width_at(y), from y0 down."""
+        out, y = [], y0
         u0, u1 = self.unit_at(a), self.unit_at(max(a, b - 1))
         for k in range(u0, u1 + 1):
             u = self.units[k]
@@ -1093,7 +1107,31 @@ class Book:
             cols.append(col)
         return cols, i
 
+    def around(self, T, end):
+        """The commentary's width at y: across its half of the page in the top block (above
+        T) and under the Rif (from end), beside the Rif between them."""
+        return lambda y: (0.0, self.wide) if y < T - EPS or y >= end - EPS else (0.0, self.cw)
+
+    def beside(self, cws, limit):
+        """The commentary cws as short as it goes: in the top block, then beside the Rif,
+        no lower than limit. -> (cols, height, top block height) or None."""
+        top = self.ktop * self.lh_comm
+        for rows in range(0, int(self.H // self.lh_comm) + 1):
+            h = rows * self.lh_comm
+            if h > min(limit, self.H) + EPS:
+                return None
+            T = min(h, top)
+            cs, k = self.take_cols(cws, self.around(T, self.H + 1), h)
+            if k >= len(cws):
+                return cs, h, T
+        return None
+
     def compose(self, a, b, cptr, comm_only=False):
+        """A page of the Rif from word a to b with the commentary from cptr. As on a page of
+        the Gemara: the commentary's first lines (ktop) across its two columns at the top,
+        the Rif under them in the middle with the commentary on its two sides, and the
+        commentary under the Rif when it is longer; when it is shorter, the Rif widens
+        under it."""
         Wt = self.W - 2 * (self.cw + self.gap)
         narrow = lambda y: (self.cw + self.gap, Wt)
         r = {"a": a, "b": b, "cptr": cptr, "at_end": b >= self.total}
@@ -1115,43 +1153,36 @@ class Book:
             avail = req = len(self.cwords)
         avail, req = max(avail, cptr), max(req, cptr)
         cws = self.cwords[cptr:avail]
+        T = self.ktop * self.lh_comm if cws else 0.0
+        t0 = T + self.vgap / 2 if T else 0.0
         if comm_only or b <= a:
             text, th = [], 0.0
         else:
-            text, th = self.text_lines(a, b, narrow)
-        lim = th + self.vgap if th else 0.0
-        wide_r = lambda y: (0.0, self.cw if y < lim else self.wide)
-        cols, n = self.take_cols(cws, wide_r, self.H)
+            text, th = self.text_lines(a, b, narrow, t0)
+        r["t0"] = t0
+        lim = th + self.vgap if text else T
+        cols, n = self.take_cols(cws, self.around(T, lim), self.H)
         mode = "long"
         total = self.H
         if n >= len(cws):
             hcol = max((len(c) for c in cols), default=0) * self.lh_comm
-            # the commentary is shorter: can it stay beside the Rif?
-            lo_rows = 0
-            hi_rows = int(self.H // self.lh_comm)
-            fits_beside = None
-            for rows in range(0, hi_rows + 1):
-                h = rows * self.lh_comm
-                if th and h > th + EPS:
-                    break
-                cs, k = self.take_cols(cws, lambda y: (0.0, self.cw), h)
-                if k >= len(cws):
-                    fits_beside = (cs, h)
-                    break
-            if fits_beside is not None and text:
-                cols, hc = fits_beside
+            # the commentary is shorter: can it stay above and beside the Rif?
+            fit = self.beside(cws, th if text else 0.0) if text else None
+            if fit is not None:
+                cols, hc, T2 = fit
                 mode = "short"
-                lim2 = hc + self.vgap if hc else 0.0
-                wa = (lambda y: (self.cw + self.gap, Wt) if y < lim2 else (0.0, self.W)) if hc else full_width(self.W)
-                text, th = self.text_lines(a, b, wa)
+                t02 = T2 + self.vgap / 2 if T2 else 0.0
+                lim2 = hc + self.vgap if hc > T2 else 0.0
+                wa = lambda y: (self.cw + self.gap, Wt) if y < lim2 else (0.0, self.W)
+                text, th = self.text_lines(a, b, wa, t02)
                 total = th
-                r["hc"] = hc
+                r["hc"], r["t0"] = hc, t02
             else:
                 # under the Rif, as far down as it goes: balance the two columns
                 best = (cols, hcol)
                 for rows in range(1, int(self.H // self.lh_comm) + 1):
                     h = rows * self.lh_comm
-                    cs, k = self.take_cols(cws, wide_r, h)
+                    cs, k = self.take_cols(cws, self.around(T, lim), h)
                     if k >= len(cws):
                         best = (cs, h)
                         break
@@ -1160,13 +1191,13 @@ class Book:
                 mode = "under"
         if mode == "long" and text and (th > self.H + EPS or cptr + n < req):
             # the Rif doesn't fit narrow (or the commentary owed doesn't fit around it): keep
-            # the commentary owed beside the Rif and let the Rif widen under it; the
-            # commentary of the passage that goes on follows it to the next page
+            # the commentary owed above and beside the Rif and let the Rif widen under it;
+            # the commentary of the passage that goes on follows it to the next page
             alt = self.short_layout(a, b, self.cwords[cptr:req], th)
             if alt is not None:
-                cols, hc, text, th2 = alt
+                cols, hc, text, th2, t02 = alt
                 r.update(text=text, th=th2, cols=cols, n=req - cptr, mode="short", total=th2, req=req, avail=avail,
-                         hc=hc)
+                         hc=hc, t0=t02)
                 r["cnext"] = req
                 r["fits"] = th2 <= self.H + EPS
                 return r
@@ -1177,20 +1208,18 @@ class Book:
         return r
 
     def short_layout(self, a, b, cws, th):
-        """The commentary cws in two columns beside the Rif, as short as they go, and the
-        Rif widening under them. -> (cols, hc, text lines, text height) or None."""
+        """The commentary cws above and beside the Rif, as short as it goes, and the Rif
+        widening under it. -> (cols, hc, text lines, text bottom, text top) or None."""
         Wt = self.W - 2 * (self.cw + self.gap)
-        for rows in range(0, int(self.H // self.lh_comm) + 1):
-            h = rows * self.lh_comm
-            if h > min(th, self.H) + EPS:
-                return None
-            cs, k = self.take_cols(cws, lambda y: (0.0, self.cw), h)
-            if k >= len(cws):
-                lim = h + self.vgap if h else 0.0
-                wa = (lambda y: (self.cw + self.gap, Wt) if y < lim else (0.0, self.W)) if h else full_width(self.W)
-                text, t = self.text_lines(a, b, wa)
-                return cs, h, text, t
-        return None
+        fit = self.beside(cws, th)
+        if fit is None:
+            return None
+        cs, h, T = fit
+        t0 = T + self.vgap / 2 if T else 0.0
+        lim = h + self.vgap if h > T else 0.0
+        wa = lambda y: (self.cw + self.gap, Wt) if y < lim else (0.0, self.W)
+        text, t = self.text_lines(a, b, wa, t0)
+        return cs, h, text, t, t0
 
     def backlog(self, a, cptr):
         if a <= 0:
@@ -1231,7 +1260,7 @@ class Book:
                         miss += 1
                     x += 1
             r = self.compose(a, g, cptr) if g else None
-            if r is None or r["th"] < min_text and not r["at_end"]:
+            if r is None or r["th"] - r.get("t0", 0.0) < min_text and not r["at_end"]:
                 if self.backlog(a, cptr):
                     r2 = self.compose(a, a, cptr, comm_only=True)
                     if r2["n"]:
@@ -1264,7 +1293,7 @@ class Book:
                 x = r["b"] - 1
                 while x > a + 1:
                     q = self.compose(a, x, cptr)
-                    if q["fits"] and q["mode"] == "long" and q["th"] >= min_text:
+                    if q["fits"] and q["mode"] == "long" and q["th"] - q.get("t0", 0.0) >= min_text:
                         r = q
                         break
                     x -= 3
@@ -1302,7 +1331,7 @@ class Book:
             if not lines:
                 return
             h = sum(l.h for l in lines)
-            spare = target - h
+            spare = target - (lines[0].y + h)      # the lines may begin lower (the Rif under the top block)
             if 0 < spare <= cap:
                 for l in lines:
                     l.h += spare / len(lines)
@@ -1334,13 +1363,17 @@ class Book:
         for n, pg in enumerate(allp):
             page = Page(self.pw, self.ph)
             L, R, T = self.m, self.pw - self.m, self.m
-            right = f"{self.name} · {title_rosh if pg['kind'] == 'rosh' else title_rif}"
+            right = f"{self.name} · {title_rosh if pg and pg['kind'] == 'rosh' else title_rif}"
             center = xref[n]
             num = heb(first + n)
             if n % 2 == 1:
                 right, num = num, right
-            page.head = (right, center, num, self.head_style, T + 9.0 * 1.3 * 0.8)
-            page.rules.append((L, T + 9.0 * 1.3 + 1 * PT_PER_MM, R))
+            if pg is None:
+                # a blank page, so that the Rif begins on a left-hand page
+                out.append(page)
+                continue
+            page.head = (right, center, num, self.head_style, T + self.hs * 1.3 * 0.8)
+            page.rules.append((L, T + self.hs * 1.3 + 1 * PT_PER_MM, R))
             top = T + self.head_h
             if pg["kind"] == "rosh":
                 page.marks = []
@@ -1435,7 +1468,7 @@ def day_plan(root):
     return days, first
 
 
-def load_masechet(root, m):
+def load_masechet(root, m, found=None):
     s = sources(root, m)
     rosh = parse_rosh(read(s["rosh"])) if s["rosh"] else []
     rif = parse_rif(read(s["rif"])) if s["rif"] else []
@@ -1454,7 +1487,7 @@ def load_masechet(root, m):
     mark_labels([p["tokens"] for p in rif])
     if rif:
         n = mark_aligned([t for x in rosh for p in x["paras"] for t in p], [t for p in rif for t in p["tokens"]],
-                         loose_words=True, fill=(3, 5))
+                         loose_words=True, fill=(3, 5), found=found)
         report.append(f"ברא\"ש הודגשו {n} מילים מהרי\"ף")
     if comm:
         # the commentary's own dibbur hamatchil in plain type (as in the Oz Vehadar Rif);
@@ -1476,7 +1509,7 @@ def load_masechet(root, m):
             for e in comm:
                 a = amudim[e["para"]]
                 near = [x for x in rashi if a is not None and a - 2 <= x["amud"] <= a + 2]
-                e["why"] = []
+                e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
                 n += mark_rashi(e["tokens"], near, gem, trace=e["why"])
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
             report.append(f"ב{s['comm_name']} {comm_gemara_marks(comm, amudim, gtoks, gamud)} סימני דפי הגמרא")
@@ -1529,8 +1562,42 @@ def day_starts(rosh, rif, comm, ndays, al):
     return starts
 
 
-def build_masechet(root, m, first_day, ndays, page=(210, 297)):
-    rosh, rif, comm, comm_name, report = load_masechet(root, m)
+def check_layout(book, rosh_pages, rif_pages):
+    """What is wrong in the layout of a masechet: text beyond the bottom of the page, a
+    page left with a hole at the bottom (not the last), a page of the Rif without the Rif
+    (commentary only), a column of the Rosh left empty. -> [{'kind', 'page', 'detail'}]
+    (page: 1-based, in the masechet's numbering)."""
+    out, H = [], book.H
+    for n, pg in enumerate(rosh_pages):
+        for k, col in enumerate(pg["cols"]):
+            bottom = max((l.y + l.h for l in col), default=0.0)
+            if bottom > H + 0.5:
+                out.append({"kind": "overflow", "page": n + 1, "detail": f"טור {k + 1} של הרא\"ש יוצא מהעמוד"})
+            if not col and n < len(rosh_pages) - 1:
+                out.append({"kind": "empty", "page": n + 1, "detail": f"טור {k + 1} של הרא\"ש ריק"})
+            elif n < len(rosh_pages) - 1 and H - bottom > 3 * book.lh_rosh:
+                out.append({"kind": "hole", "page": n + 1, "detail": f"חלל בתחתית טור {k + 1} של הרא\"ש"})
+    off = len(rosh_pages) + (1 if rif_pages and len(rosh_pages) % 2 == 1 else 0)
+    for n, pg in enumerate(rif_pages):
+        last = n == len(rif_pages) - 1
+        lines = list(pg["text"]) + [l for c in pg["cols"] for l in c]
+        bottom = max((l.y + l.h for l in lines), default=0.0)
+        if bottom > H + 0.5:
+            out.append({"kind": "overflow", "page": off + n + 1, "detail": "טקסט יוצא מתחתית העמוד"})
+        if not last and H - bottom > 3 * book.lh_comm:
+            out.append({"kind": "hole", "page": off + n + 1, "detail": "חלל בתחתית העמוד"})
+        if not pg["text"]:
+            out.append({"kind": "comm_only", "page": off + n + 1, "detail": "עמוד של מפרש בלבד"})
+    return out
+
+
+def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=None):
+    """The book of masechet m: (pages, report, info). sizes: the Book's sizes (margin,
+    rosh_size, ...). fix(rosh, rif, comm, al, found), if given, checks the bold before the
+    layout and corrects it, and returns what it found. Pages: the Rosh, then (from a
+    left-hand page, after a blank one when needed) the Rif."""
+    found = []
+    rosh, rif, comm, comm_name, report = load_masechet(root, m, found)
     al = align(rosh, rif) if rif and rosh else [0] * len(rosh)
     if rif and rosh:
         report.append(f"ברא\"ש {complete_sentences(rosh, rif, al)} מילים בהשלמת משפטים")
@@ -1538,12 +1605,15 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297)):
     gem = sources(root, m)["gemara"]
     if rosh and gem:
         report.append(f"ברא\"ש {gemara_marks(rosh, read(gem[0]))} סימני דפי הגמרא")
+    issues = fix(rosh, rif, comm, al, found) if fix else []
     starts = day_starts(rosh, rif, comm, ndays, al)
     rosh_days = {k: first_day + d for d, (k, _) in enumerate(starts)}
     rif_days = {j: first_day + d for d, (_, j) in enumerate(starts)} if rif else {}
-    book = Book(m, rosh, rif, comm, comm_name, page)
+    book = Book(m, rosh, rif, comm, comm_name, page, **(sizes or {}))
     rosh_pages = book.layout_rosh(book.rosh_units(rosh_days)) if rosh else []
     rif_pages = book.layout_rif(book.rif_units(rif_days)) if rif else []
+    # the Rif from a left-hand page (an odd one): a blank page after the Rosh when it ends on one
+    pad = [None] if rif_pages and len(rosh_pages) % 2 == 1 else []
     # where each siman and each passage begins (book page index)
     siman_page, para_page = {}, {}
     for n, pg in enumerate(rosh_pages):
@@ -1552,7 +1622,7 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297)):
                 u = l.unit
                 if u.kind == "p" and u.first and u.ref not in siman_page:
                     siman_page[u.ref] = n
-    off = len(rosh_pages)
+    off = len(rosh_pages) + len(pad)
     for n, pg in enumerate(rif_pages):
         for l in pg["text"]:
             if l.unit.kind == "p" and l.unit.ref not in para_page:
@@ -1573,16 +1643,19 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297)):
         daf = (f"דף {first}" + (f"–{amud}" if amud != first else "")) if first else ""
         xref.append(" · ".join(x for x in (perek, daf) if x) +
                     (f" · ברי\"ף עמ' {heb(target + 1)}" if target is not None else ""))
+    xref += [""] * len(pad)
     for n, pg in enumerate(rif_pages):
         refs = [l.unit.ref for l in pg["text"] if l.unit.kind == "p"]
         if refs:
             j = refs[0]
             daf = rif[j]["daf"]
-            ks = [i for i in range(len(rosh)) if al[i] <= j]
             xref.append(f"דף {daf}")
         else:
             xref.append(comm_name)
     title_rif = f"רי\"ף ו{comm_name}" if comm_name else "רי\"ף"
-    pages = book.render(rosh_pages, rif_pages, xref, "פסקי הרא\"ש", title_rif)
+    pages = book.render(rosh_pages, pad + rif_pages, xref, "פסקי הרא\"ש", title_rif)
     report.append(f"{m}: {len(rosh_pages)} עמודי רא\"ש, {len(rif_pages)} עמודי רי\"ף, ימים {heb(first_day)}–{heb(first_day + len(starts) - 1)}")
-    return pages, report
+    info = {"name": m, "comm_name": comm_name, "rosh_pages": len(rosh_pages), "rif_pages": len(rif_pages),
+            "first_day": first_day, "last_day": first_day + len(starts) - 1, "issues": issues,
+            "layout": check_layout(book, rosh_pages, rif_pages)}
+    return pages, report, info
