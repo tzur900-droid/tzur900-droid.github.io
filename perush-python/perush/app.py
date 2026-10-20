@@ -226,6 +226,56 @@ class MainWindow(QMainWindow):
         self.zoom_box.setCurrentIndex(2)
         self.zoom_box.currentIndexChanged.connect(self.set_zoom)
         tb.addWidget(self.zoom_box)
+        tb.addSeparator()
+        act("עדכון תוכנה", self.update_program)
+
+    def update_program(self):
+        """Download the latest version from the site and install it over this one."""
+        from . import updater
+        if updater.frozen():
+            QMessageBox.information(self, APP_NAME, "בגרסת ה־exe מעדכנים כך: מורידים מהאתר את perush-python.zip "
+                                    "ובונים שוב עם build_exe.bat.")
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            remote = updater.remote_version()
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, APP_NAME, f"לא הצלחתי לבדוק אם יש עדכון (צריך חיבור לאינטרנט).\n{e}")
+            return
+        QApplication.restoreOverrideCursor()
+        if not updater.newer(remote):
+            QMessageBox.information(self, APP_NAME, f"יש לך כבר את הגרסה האחרונה ({updater.VERSION}).")
+            return
+        if QMessageBox.question(self, APP_NAME, f"יש גרסה חדשה ({remote}; אצלך {updater.VERSION}).\n"
+                                "לעדכן עכשיו? התוכנה תיסגר ותיפתח מחדש (העבודה שלך נשמרת).") != QMessageBox.Yes:
+            return
+        self.info.setText("מוריד את העדכון…")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            data = updater.fetch(updater.ZIP_NAME, 120)
+
+            def progress(k, n):
+                self.info.setText(f"מעדכן… {k} מתוך {n} קבצים")
+                QApplication.processEvents()
+
+            written, failed, req_changed = updater.install(data, progress)
+            if req_changed:
+                self.info.setText("מתקין רכיבים חדשים…")
+                QApplication.processEvents()
+                updater.update_packages()
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, APP_NAME, f"העדכון נכשל:\n{e}")
+            return
+        QApplication.restoreOverrideCursor()
+        note = f"\n(לא עודכנו {len(failed)} קבצים שהיו פתוחים, למשל גופנים — הם יתעדכנו בפעם הבאה.)" if failed else ""
+        QMessageBox.information(self, APP_NAME, f"העדכון הותקן ({written} קבצים).{note}\nהתוכנה תיפתח עכשיו מחדש.")
+        self.save_recovery()
+        updater.restart()
+        self.dirty = False
+        QApplication.quit()
 
     def projects_dir(self):
         base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
