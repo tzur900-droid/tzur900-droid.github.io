@@ -14,6 +14,7 @@ commentary on both sides of it, and a daily division of the whole Shas into 354 
     from Rashi is bold (beside the dibbur hamatchil, which is always bold).
   * Every page says in its head where the same place is in the other half of the book.
 """
+import bisect
 import html
 import os
 import re
@@ -101,8 +102,17 @@ def parse_rosh(lines):
             t = t[1:]
         if t and not simanim[-1]["paras"] and t[0][0] == simanim[-1]["num"]:
             t = t[1:]
+        # "הדרן עלך ..." at the end of a perek: a line of its own (the source has it
+        # run on, sometimes after a stray 0)
+        h = next((k for k, x in enumerate(t) if x[0].lstrip("0") == "הדרן"), None)
+        if h is not None:
+            t[h][0] = t[h][0].lstrip("0")
+            hadran = [[w, "hadran"] for w, *_ in t[h:]]
+            t = t[:h]
         if t:
             simanim[-1]["paras"].append(t)
+        if h is not None:
+            simanim[-1]["paras"].append(hadran)
     return simanim
 
 
@@ -216,6 +226,12 @@ def lseq(toks):
     return seq, src
 
 
+def nwords(src, a, b):
+    """How many words of the text the loose words a..b-1 come from (an abbreviation
+    written out is one word)."""
+    return len(set(src[a:b]))
+
+
 def loose_grams(words, n):
     seq = lseq(words)[0]
     return {tuple(seq[i:i + n]) for i in range(len(seq) - n + 1)}
@@ -252,7 +268,7 @@ def mark_found(toks, ref, n=4, min_run=4, excl=None, value=True, used=None):
             e = k
             while e < len(seq) and hit[e]:
                 e += 1
-            if e - k >= min_run:
+            if nwords(idx, k, e) >= min_run:
                 for j in range(k, e):
                     if toks[idx[j]][1] is False:
                         toks[idx[j]][1] = value
@@ -263,14 +279,16 @@ def mark_found(toks, ref, n=4, min_run=4, excl=None, value=True, used=None):
     return count
 
 
-def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, near=40, max_occ=60):
+def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, mid=7, near=40, far=200, max_occ=60, found=None):
     """Make bold in toks every stretch (min_run words or more) of the text of ref_toks,
     each word of ref_toks used once. Long shared stretches are taken first; a line that
     appears in toks more than once but in ref_toks once goes with the occurrence that
     stands next to a stretch already taken (near it in both texts), not with a
-    stray repetition."""
+    stray repetition. A stretch shorter than mid words is taken only within far words (in
+    both texts) of one already taken. found (a list), if given, gets each stretch taken as (first and last
+    token in toks, first and last token in ref_toks)."""
     S, src = lseq(toks)
-    R = lseq(ref_toks)[0]
+    R, rsrc = lseq(ref_toks)
     index = {}
     for p in range(len(R) - n + 1):
         index.setdefault(tuple(R[p:p + n]), []).append(p)
@@ -297,7 +315,7 @@ def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, near=40, max_occ=60):
             e = k
             while e < L and not used_r[p + e] and not bold_s[i + e]:
                 e += 1
-            if e - k >= min_run:
+            if nwords(src, i + k, i + e) >= min_run and nwords(rsrc, p + k, p + e) >= min_run:
                 for j in range(k, e):
                     used_r[p + j] = bold_s[i + j] = 1
                 taken.append((i + k, p + k, e - k))
@@ -315,15 +333,37 @@ def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, near=40, max_occ=60):
                 return 1
         return 0
 
+    def close(L, i, p):
+        a = bisect.bisect_left(taken_p, (p - far,))
+        for tp, ti in taken_p[a:]:
+            if tp > p + L + far:
+                break
+            if abs(ti - i) < 2 * far:
+                return True
+        return False
+
+    # a shorter stretch (a name, a few words) is taken only near a place in both texts
+    # where the two already go together; otherwise it is a chance meeting of words
     rest = [x for x in runs if x[0] < big]
     rest.sort(key=lambda x: (beside(*x), x[0]), reverse=True)
-    for L, i, p in rest:
-        take(L, i, p)
+    while rest:
+        left, before = [], len(taken)
+        taken_p = sorted((tp, ti) for ti, tp, _ in taken)
+        for L, i, p in rest:
+            if nwords(src, i, i + L) >= mid or close(L, i, p):
+                take(L, i, p)
+            else:
+                left.append((L, i, p))
+        if len(taken) == before:
+            break
+        rest = left
     count = 0
     for k, b in enumerate(bold_s):
         if b and toks[src[k]][1] is False:
             toks[src[k]][1] = True
             count += 1
+    if found is not None:
+        found.extend((src[i], src[i + L - 1], rsrc[p], rsrc[p + L - 1]) for i, p, L in taken)
     return count
 
 
@@ -360,7 +400,7 @@ def mark_attributed(toks, ref, is_marker, window=25, n=3, min_run=3, value=True)
                 e = q
                 while e < len(seq) and hit[e]:
                     e += 1
-                if e - q >= min_run:
+                if nwords(idx, q, e) >= min_run:
                     for j in range(q, e):
                         t = toks[idx[j]]
                         if t[1] is False and not is_marker(t[0]) and norm(t[0]) not in ("זל", "זצל"):
@@ -418,13 +458,60 @@ def link_comm(comm, rif):
 
 def align(rosh, rif, n=3):
     """For every siman of the Rosh, the passage of the Rif with the same material
-    (monotonic, by the words they share)."""
+    (monotonic, by the words they share). Where the Rif has the perakim in another
+    order than the Rosh (Megilla: the Rif follows the order of the Mishna), each perek
+    of the Rosh is aligned with its own stretch of the Rif."""
     rg = [grams([w for p in s["paras"] for w, *_ in p], n) for s in rosh]
     fg = [grams([w for w, *_ in p["tokens"]], n) for p in rif]
     S, P = len(rg), len(fg)
     if not P:
         return [0] * S
     score = [[len(a & b) for b in fg] for a in rg]
+    blocks = []
+    for i, s in enumerate(rosh):
+        if blocks and rosh[blocks[-1][0]]["perek"] == s["perek"]:
+            blocks[-1].append(i)
+        else:
+            blocks.append([i])
+
+    def centre(b):
+        # the middle of the perek in the Rif, by where each siman shares the most
+        pts = sorted((max(range(P), key=score[i].__getitem__), max(score[i])) for i in b)
+        half, acc = sum(w for _, w in pts) / 2, 0
+        for j, w in pts:
+            acc += w
+            if acc >= half:
+                return j
+        return 0
+
+    order = sorted(range(len(blocks)), key=lambda k: centre(blocks[k]))
+    if order == sorted(order):
+        return align_part(score, list(range(S)), 0, P)
+    # the Rif cut into a stretch for each perek, in the Rif's order, where the perakim
+    # on the two sides of the cut keep the most of what they share
+    cuts, lo = [], 0
+    for a, b in zip(order, order[1:]):
+        A, B = blocks[a], blocks[b]
+        best, arg = -1, lo
+        for c in range(lo + 1, P):
+            v = sum(max(score[i][lo:c]) for i in A) + sum(max(score[i][c:]) for i in B)
+            if v > best:
+                best, arg = v, c
+        cuts.append(arg)
+        lo = arg
+    out = [0] * S
+    edges = [0] + cuts + [P]
+    for k, b in enumerate(order):
+        part = align_part(score, blocks[b], edges[k], edges[k + 1])
+        for i, j in zip(blocks[b], part):
+            out[i] = j
+    return out
+
+
+def align_part(score, simanim, lo, hi):
+    """align() for the simanim given against the passages lo..hi-1."""
+    S, P = len(simanim), max(1, hi - lo)
+    sc = [[score[i][lo + j] if lo + j < len(score[i]) else 0 for j in range(P)] for i in simanim]
     dp = [[0.0] * P for _ in range(S)]
     back = [[0] * P for _ in range(S)]
     for i in range(S):
@@ -435,7 +522,7 @@ def align(rosh, rif, n=3):
                 if dp[i - 1][j] > best:
                     best, arg = dp[i - 1][j], j
                 prev = best
-            dp[i][j] = score[i][j] + prev
+            dp[i][j] = sc[i][j] + prev
             back[i][j] = arg
     j = max(range(P), key=lambda x: dp[S - 1][x])
     out = [0] * S
@@ -445,13 +532,13 @@ def align(rosh, rif, n=3):
     # where the siman's material begins in the Rif: the first passage after the previous
     # siman's that shares a good part of what the best one does
     for i in range(S):
-        lo = out[i - 1] + 1 if i else 0
-        best = score[i][out[i]]
-        for j in range(min(lo, out[i]), out[i]):
-            if best and score[i][j] >= 0.3 * best and score[i][j] >= 3:
+        first = out[i - 1] + 1 if i else 0
+        best = sc[i][out[i]]
+        for j in range(min(first, out[i]), out[i]):
+            if best and sc[i][j] >= 0.3 * best and sc[i][j] >= 3:
                 out[i] = j
                 break
-    return out
+    return [lo + j for j in out]
 
 
 def rif_page_marks(rosh, rif, al):
@@ -504,6 +591,78 @@ def rif_page_marks(rosh, rif, al):
                 t.append(label)
 
 
+GEM_MARK = re.compile(r"^\[דף [א-ת]+[.:]\]$")
+
+
+def parse_gemara(lines):
+    """The Gemara of the masechet -> (tokens, the amud of each: a sortable number, label)."""
+    toks, amud = [], []
+    cur = None
+    for l in lines[1:]:
+        m = re.match(r"\s*<h2>\s*דף\s*(.*?)\s*</h2>", l)
+        if m:
+            cur = (gem_daf(m.group(1)), m.group(1))
+            continue
+        if l.startswith("<h") or cur is None or cur[0] is None:
+            continue
+        for t in tokens(l, bold_tags=False):
+            toks.append(t)
+            amud.append(cur)
+    return toks, amud
+
+
+def gemara_marks(rosh, gem_lines):
+    """Where the Rosh comes to a new amud of the Gemara, a mark in the line: [דף ב:]. The
+    place is where the Gemara he brings first comes from that amud, following the main
+    line of the Gemara through the siman (the order of the amudim, by the longest chain
+    of quotations that goes forward), not a passing quotation from elsewhere."""
+    gtoks, amud = parse_gemara(gem_lines)
+    if not gtoks:
+        return 0
+    flat = [(i, pi, ti) for i, s in enumerate(rosh) for pi, p in enumerate(s["paras"]) for ti in range(len(p))]
+    found = []
+    mark_aligned([[rosh[i]["paras"][pi][ti][0], False] for i, pi, ti in flat], gtoks, found=found)
+    found = sorted(x for x in found if rosh[flat[x[0]][0]]["paras"][flat[x[0]][1]][flat[x[0]][2]][1] != "hadran")
+    # the heaviest chain of quotations whose amudim never go back (a tree of the best
+    # chain ending at each amud or before it)
+    top = max(x[0] for x in amud) + 2
+    tree = [(0, -1)] * (top + 1)
+    best, back = [], []
+    for k, (a, b, c, d) in enumerate(found):
+        n = amud[c][0] + 1
+        w, arg, q = 0, -1, n
+        while q > 0:
+            if tree[q][0] > w:
+                w, arg = tree[q]
+            q -= q & -q
+        best.append(w + (b - a + 1))
+        back.append(arg)
+        q = n
+        while q <= top:
+            if best[k] > tree[q][0]:
+                tree[q] = (best[k], k)
+            q += q & -q
+    if not best:
+        return 0
+    k = max(range(len(best)), key=best.__getitem__)
+    chain = []
+    while k >= 0:
+        chain.append(found[k])
+        k = back[k]
+    chain.reverse()
+    marks, cur = [], None
+    for a, b, c, d in chain:
+        n, label = amud[c]
+        if cur is None or n > cur:
+            marks.append((a, label))
+            cur = n
+    # into the text, from the end so that the places stay right
+    for a, label in reversed(marks):
+        i, pi, ti = flat[a]
+        rosh[i]["paras"][pi].insert(ti, [f"[דף {label}]", "gem"])
+    return len(marks)
+
+
 # ---------------------------------------------------------------- units of text
 
 @dataclass
@@ -543,10 +702,12 @@ class Book:
         else:
             b = st.with_bold(True)
         lab = Style("David Libre", st.size * 1.08, True)
+        big = Style(st.family, st.size * 1.3, True)
+        gem = Style(st.family, st.size * 0.75)
         out = []
         for t in toks:
             w, bold = t[0], t[1]
-            s_ = lab if bold == "label" else (st.with_bold(True) if bold == "rashi" else (b if bold else st))
+            s_ = {"label": lab, "open": big, "gem": gem, "rashi": st.with_bold(True), "hadran": b}.get(bold) or (b if bold else st)
             out.append(Word(w, s_, width(s_, w), t[2] if len(t) > 2 else None))
         return out
 
@@ -555,8 +716,8 @@ class Book:
         t = f"יום {heb(day)}"
         return Unit("d", [Word(t, s, width(s, t))])
 
-    def heading(self, text, st):
-        s = Style(st.family, st.size * 1.3, True)
+    def heading(self, text, st, k=1.3):
+        s = Style(st.family, st.size * k, True)
         return Unit("h", [Word(w, s, width(s, w)) for w in text.split()])
 
     def rosh_units(self, day_at):
@@ -569,7 +730,18 @@ class Book:
                 perek = s["perek"]
                 units.append(self.heading(perek, self.st_rosh))
             for k, p in enumerate(s["paras"]):
-                toks = ([[f"[{s['num']}]", True]] if k == 0 else []) + p
+                if p and p[0][1] == "hadran":
+                    units.append(self.heading(" ".join(w for w, *_ in p), self.st_rosh, 1.1))
+                    continue
+                toks = p
+                if k == 0:
+                    # the siman's letter and its first word large, as in the printed Rosh
+                    # (a mark of the Gemara's page before it stays between them)
+                    toks = [list(t) for t in p]
+                    w = next((t for t in toks if t[1] != "gem"), None)
+                    if w is not None and w[1] != "label":
+                        w[1] = "open"
+                    toks = [[s["num"], "open"]] + toks
                 units.append(Unit("p", self.words(toks, self.st_rosh), i, k == 0))
         return units
 
@@ -1091,23 +1263,36 @@ def day_starts(rosh, rif, comm, ndays, al):
     cum_r = [0]
     for x in rw:
         cum_r.append(cum_r[-1] + x)
+    # the Rif's share of each siman: its passages up to where the next siman's (in the
+    # Rif's order) begin; so the days follow the Rosh even where the Rif has the perakim
+    # in another order
+    share = [0] * len(rosh)
+    if rif:
+        firsts = sorted(set(al))
+        nxt = {a: b for a, b in zip(firsts, firsts[1:] + [len(rif)])}
+        owner = {}
+        for k, j in enumerate(al):
+            owner.setdefault(j, k)
+        for j, k in owner.items():
+            share[k] = sum(fw[x] + cw[x] for x in range(j, nxt[j]))
     cum_f = [0]
-    for j in range(len(rif)):
-        cum_f.append(cum_f[-1] + fw[j] + cw[j])
-    starts = [(0, 0)]
+    for x in share:
+        cum_f.append(cum_f[-1] + x)
+    starts, used = [(0, 0)], {al[0] if rif else 0}
     for d in range(1, ndays):
         target = total * d / ndays
         best = None
         for k in range(starts[-1][0] + 1, len(rosh)):
             j = al[k] if rif else 0
-            if rif and j <= starts[-1][1]:
+            if rif and (j in used or j == al[k - 1]):
                 continue
-            w = cum_r[k] + (cum_f[j] if rif else 0)
+            w = cum_r[k] + cum_f[k]
             if best is None or abs(w - target) < abs(best[0] - target):
                 best = (w, k, j)
         if best is None:
             break
         starts.append((best[1], best[2]))
+        used.add(best[2])
     return starts
 
 
@@ -1116,6 +1301,9 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297)):
     al = align(rosh, rif) if rif and rosh else [0] * len(rosh)
     if rif and rosh:
         rif_page_marks(rosh, rif, al)
+    gem = sources(root, m)["gemara"]
+    if rosh and gem:
+        report.append(f"ברא\"ש {gemara_marks(rosh, read(gem[0]))} סימני דפי הגמרא")
     starts = day_starts(rosh, rif, comm, ndays, al)
     rosh_days = {k: first_day + d for d, (k, _) in enumerate(starts)}
     rif_days = {j: first_day + d for d, (_, j) in enumerate(starts)} if rif else {}
@@ -1135,13 +1323,22 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297)):
         for l in pg["text"]:
             if l.unit.kind == "p" and l.unit.ref not in para_page:
                 para_page[l.unit.ref] = off + n
-    xref = []
+    xref, amud = [], None
     for n, pg in enumerate(rosh_pages):
         refs = [l.unit.ref for col in pg["cols"] for l in col if l.unit.kind == "p"]
         perek = rosh[refs[0]]["perek"] if refs else ""
         s = refs[0] if refs else None
         target = para_page.get(al[s]) if (s is not None and rif) else None
-        xref.append(f"{perek}" + (f" · ברי\"ף עמ' {heb(target + 1)}" if target is not None else ""))
+        # the amudim of the Gemara the page is on: the one it opens in, to the last marked
+        ws = [w.text for col in pg["cols"] for l in col for w in l.words]
+        seen = [w[4:-1] for w in ws if GEM_MARK.match(w)]
+        opens = seen and any(GEM_MARK.match(w) for w in ws[:2])    # a mark at the head of the page
+        first = seen[0] if (opens or not amud) and seen else amud
+        if seen:
+            amud = seen[-1]
+        daf = (f"דף {first}" + (f"–{amud}" if amud != first else "")) if first else ""
+        xref.append(" · ".join(x for x in (perek, daf) if x) +
+                    (f" · ברי\"ף עמ' {heb(target + 1)}" if target is not None else ""))
     for n, pg in enumerate(rif_pages):
         refs = [l.unit.ref for l in pg["text"] if l.unit.kind == "p"]
         if refs:
