@@ -263,6 +263,70 @@ def mark_found(toks, ref, n=4, min_run=4, excl=None, value=True, used=None):
     return count
 
 
+def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, near=40, max_occ=60):
+    """Make bold in toks every stretch (min_run words or more) of the text of ref_toks,
+    each word of ref_toks used once. Long shared stretches are taken first; a line that
+    appears in toks more than once but in ref_toks once goes with the occurrence that
+    stands next to a stretch already taken (near it in both texts), not with a
+    stray repetition."""
+    S, src = lseq(toks)
+    R = lseq(ref_toks)[0]
+    index = {}
+    for p in range(len(R) - n + 1):
+        index.setdefault(tuple(R[p:p + n]), []).append(p)
+    runs = []
+    for i in range(len(S) - n + 1):
+        ps = index.get(tuple(S[i:i + n]))
+        if not ps or len(ps) > max_occ:
+            continue
+        for p in ps:
+            if i and p and S[i - 1] == R[p - 1]:
+                continue    # inside a stretch found from its start
+            L = n
+            while i + L < len(S) and p + L < len(R) and S[i + L] == R[p + L]:
+                L += 1
+            runs.append((L, i, p))
+    used_r, bold_s, taken = bytearray(len(R)), bytearray(len(S)), []
+
+    def take(L, i, p):
+        k = 0
+        while k < L:
+            if used_r[p + k] or bold_s[i + k]:
+                k += 1
+                continue
+            e = k
+            while e < L and not used_r[p + e] and not bold_s[i + e]:
+                e += 1
+            if e - k >= min_run:
+                for j in range(k, e):
+                    used_r[p + j] = bold_s[i + j] = 1
+                taken.append((i + k, p + k, e - k))
+            k = e
+
+    runs.sort(reverse=True)
+    for L, i, p in runs:
+        if L >= big:
+            take(L, i, p)
+
+    def beside(L, i, p):
+        for ti, tp, tl in taken:
+            if (abs(p - (tp + tl)) < near or abs(tp - (p + L)) < near) and \
+                    (abs(i - (ti + tl)) < 2 * near or abs(ti - (i + L)) < 2 * near):
+                return 1
+        return 0
+
+    rest = [x for x in runs if x[0] < big]
+    rest.sort(key=lambda x: (beside(*x), x[0]), reverse=True)
+    for L, i, p in rest:
+        take(L, i, p)
+    count = 0
+    for k, b in enumerate(bold_s):
+        if b and toks[src[k]][1] is False:
+            toks[src[k]][1] = True
+            count += 1
+    return count
+
+
 def rashi_words(path):
     """Rashi's own words (without the dibbur hamatchil, which is the Gemara's)."""
     out = []
@@ -1001,9 +1065,7 @@ def load_masechet(root, m):
     mark_labels([t for x in rosh for t in x["paras"]])
     mark_labels([p["tokens"] for p in rif])
     if rif:
-        ref = loose_counts([w for p in rif for w, *_ in p["tokens"]], 4)
-        used = {}
-        n = sum(mark_found(t, ref, 4, 4, used=used) for x in rosh for t in x["paras"])
+        n = mark_aligned([t for x in rosh for p in x["paras"] for t in p], [t for p in rif for t in p["tokens"]])
         report.append(f"ברא\"ש הודגשו {n} מילים מהרי\"ף")
     if comm:
         rsh, gem = set(), set()
