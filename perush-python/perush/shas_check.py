@@ -9,8 +9,9 @@ Each finding: {'kind', 'where', 'text', 'fixed'}; kinds:
   missed    a stretch of six words or more that is in the siman's passages of the Rif, is
             not bold, and is not a stretch the Rosh brings again (bold elsewhere in the
             siman): it is made bold
-  link      a comment of the Ran whose dibbur hamatchil is on its own page of the Rif,
-            but more than two passages from the one it was put with
+  link      a comment of the Ran whose dibbur hamatchil is in a passage of the Rif further
+            off than the one it was put with (the Ran's order), printed on a page that does
+            not have that passage, nor follow it (found by shas.check_layout)
   no_rashi  a comment of the Ran on a passage that brings no Gemara of the masechet, so
             Rashi was not looked at for it
   ran_lone  one word of the Ran bold alone as Rashi's; it loses it
@@ -144,7 +145,9 @@ def check_ran(rif, comm):
                 elsewhere = [j for j in range(len(rif)) if has(j) and
                              any(d == e["daf"] for _, d in rif[j]["dafs"])]
                 if elsewhere:
-                    out.append({"kind": "link", "where": where, "text": text(e["tokens"], 0, 12), "fixed": False})
+                    # the Ran's own order: whether it is printed by its passage is seen after the
+                    # layout (check_layout)
+                    e["dh_at"] = min(elsewhere, key=lambda j: abs(j - e["para"]))
         if e.get("why") is None:
             out.append({"kind": "no_rashi", "where": where, "text": text(e["tokens"], 0, 8), "fixed": False})
         toks = e["tokens"]

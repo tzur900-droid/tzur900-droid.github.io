@@ -992,6 +992,9 @@ class Unit:
     first: bool = True  # first paragraph of its siman / passage
 
 
+LONG_COMM = 15
+
+
 class Book:
     def __init__(self, name, rosh, rif, comm, comm_name, page=(210, 297), margin=14, rosh_size=12, rif_size=11.5,
                  comm_size=10, head_size=9):
@@ -1118,7 +1121,9 @@ class Book:
             for col in cols:
                 tot = sum(l.h for l in col)
                 spare = self.H - tot
-                if col and not last and 0 < spare < self.lh_rosh * 2.5:
+                # (a heading and a day marker carried together to the next column leave
+                # up to about four lines)
+                if col and not last and 0 < spare < self.lh_rosh * 4.5:
                     for l in col:
                         l.h += spare / len(col)
                 y = 0.0
@@ -1163,6 +1168,12 @@ class Book:
             if e.get("gem"):
                 toks = [[f"[דף {e['gem']}]", "gem"]] + toks
             ws = self.words(toks, self.st_comm)
+            # a long comment (its dibbur and what it says to the next dibbur, LONG_COMM lines
+            # or more across the commentary's half of the page) begins a line of its own
+            sp = space(self.st_comm)
+            if ws and sum(w.w + sp for w in ws) >= LONG_COMM * self.wide:
+                ws[0].brk = True
+            e["c_start"] = len(self.cwords)
             self.cwords.extend(ws)
             self.c_end_of_para[e["para"]] = len(self.cwords)
 
@@ -1224,11 +1235,13 @@ class Book:
                     break
                 right, w = width_at(y)
                 cur, nat, j = [words[i]], words[i].w, i + 1
-                while j < n and nat + sp + words[j].w <= w + 0.01:
+                while j < n and nat + sp + words[j].w <= w + 0.01 and not getattr(words[j], "brk", False):
                     nat += sp + words[j].w
                     cur.append(words[j])
                     j += 1
-                col.append(Line(cur, right, w, nat, self.lh_comm, self.st_comm, "justify", j >= n, y))
+                # a line before a long comment that begins a line of its own: not stretched
+                end = j >= n or getattr(words[j], "brk", False)
+                col.append(Line(cur, right, w, nat, self.lh_comm, self.st_comm, "justify", end, y))
                 y += self.lh_comm
                 i = j
             cols.append(col)
@@ -1350,16 +1363,6 @@ class Book:
         text, t = self.text_lines(a, b, wa, t0)
         return cs, h, text, t, t0
 
-    def backlog(self, a, cptr):
-        if a <= 0:
-            return False
-        k = self.unit_at(a - 1)
-        u = self.units[k]
-        if self.off[k] + len(u.words) > a:
-            k -= 1
-        refs = [x.ref for x in self.units[:k + 1] if x.kind == "p"]
-        return bool(refs) and self.c_upto(refs[-1]) > cptr
-
     def layout_rif(self, units):
         self.rif_flow(units)
         pages, a, cptr, guard = [], 0, 0, 0
@@ -1390,13 +1393,9 @@ class Book:
                     x += 1
             r = self.compose(a, g, cptr) if g else None
             if r is None or r["th"] - r.get("t0", 0.0) < min_text and not r["at_end"]:
-                if self.backlog(a, cptr):
-                    r2 = self.compose(a, a, cptr, comm_only=True)
-                    if r2["n"]:
-                        pages.append(self.finish(r2))
-                        cptr = r2["cnext"]
-                        continue
-                # a commentary longer than a page: a few lines of the Rif, the rest runs on
+                # a commentary longer than a page (or owed for passages already set): a few
+                # lines of the Rif in the middle, the commentary around them, and the rest of
+                # it runs on; never a page of commentary alone while the Rif goes on
                 x = a + 1
                 while x < self.total and self.text_lines(a, x, lambda y: (0, self.W - 2 * (self.cw + self.gap)))[1] < min_text:
                     x += 1
@@ -1935,6 +1934,27 @@ def check_layout(book, rosh_pages, rif_pages):
                 else:
                     continue
                 break
+    # a comment of the commentary in its own order, away from its passage: is it printed on
+    # a page that has the passage, or the page after it?
+    if rif_pages and book.comm:
+        first, last, c_page = {}, {}, []
+        for n, pg in enumerate(rif_pages):
+            for l in pg["text"]:
+                for ref in getattr(l, "refs", [l.unit.ref]):
+                    first.setdefault(ref, n)
+                    last[ref] = n
+            c_page += [n] * sum(len(l.words) for c in pg["cols"] for l in c)
+        for e in book.comm:
+            j = e.get("dh_at")
+            if j is None or e.get("c_start", len(c_page)) >= len(c_page) or j not in first:
+                continue
+            pc = c_page[e["c_start"]]
+            # the same opening of the book is as good: page 1 is a left-hand page, so pages
+            # 2k and 2k+1 face each other
+            spread = lambda n: (off + n + 1) // 2
+            if not (first[j] <= pc <= last[j] + 1 or spread(pc) == spread(first[j])):
+                out.append({"kind": "link", "page": off + pc + 1,
+                            "detail": " ".join(t[0] for t in e["tokens"][:10])})
     # every word on the pages once, in its order: the Rosh, the Rif, the commentary
     def same(name, laid, src):
         if [id(w) for w in laid] != [id(w) for w in src]:
