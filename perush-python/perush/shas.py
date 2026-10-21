@@ -392,6 +392,7 @@ def parse_rashi(lines):
         if m:
             amud = gem_daf(m.group(1))
             continue
+        l = re.sub(r"\s[–—]\s", " - ", l)        # some files have another dash
         if l.startswith("<h") or amud is None or " - " not in l:
             continue
         dh, _, rest = re.sub(r"<[^>]+>", " ", l).partition(" - ")
@@ -428,7 +429,7 @@ def passage_amudim(rif, gem_lines):
     return smooth
 
 
-def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None):
+def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozenset()):
     """Make bold in a commentary entry what it takes from Rashi (entries: Rashi's comments
     on the place; gem: loose 3-grams of the Gemara), as the Oz Vehadar Rif does:
       * its dibbur hamatchil (marked "dh" in toks), where Rashi has a dibbur with the
@@ -516,6 +517,9 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None):
             # words of the two texts (an abbreviation is one), leaving out the Gemara's
             own = [(i, p) for i, p in best if not gemara_word(i)]
             n = min(len({src[i] for i, _ in own}), len({rsrc[p] for _, p in own}))
+            # two of them at least not among the commentary's commonest words (לא, אבל, כל ...)
+            if len({src[i] for i, _ in own if sseq[i] not in weak}) < 2:
+                n = 0
             head = len(best) == 2 and e in mine and i0 == dh_end and best[0][1] == 0
             if dense and (n >= 3 or head):
                 for k in range(i0, i1 + 1):
@@ -1135,13 +1139,16 @@ class Book:
         self.total = t
         # the commentary as one run of words, entry after entry
         self.cwords, self.c_end_of_para = [], {}
-        # where a day begins in the commentary: its first entry on the day's passage of the
-        # Rif (or after it)
-        day_entry, pending = {}, sorted(getattr(self, "rif_day_at", {}).items())
-        for k, e in enumerate(self.comm):
-            while pending and e["para"] >= pending[0][0]:
-                day_entry.setdefault(k, pending[0][1])
-                pending.pop(0)
+        # where a day begins in the commentary: its first entry on the day's passages of the
+        # Rif (a day with no commentary on them has no mark in it)
+        starts = sorted(getattr(self, "rif_day_at", {}).items())
+        day_entry = {}
+        for q, (j, day) in enumerate(starts):
+            end = starts[q + 1][0] if q + 1 < len(starts) else len(self.rif)
+            k = next((k for k, e in enumerate(self.comm) if j <= e["para"] < end), None)
+            if k is not None:
+                day_entry[k] = day
+        self.comm_days = len(day_entry)
         for k, e in enumerate(self.comm):
             toks = e["tokens"]
             # the dibbur hamatchil in its own letters (square, bold), also where it is Rashi's
@@ -1275,6 +1282,7 @@ class Book:
         cws = self.cwords[cptr:avail]
         T = self.ktop * self.lh_comm if cws else 0.0
         t0 = T + self.vgap / 2 if T else 0.0
+        r["T"] = T
         if comm_only or b <= a:
             text, th = [], 0.0
         else:
@@ -1489,9 +1497,14 @@ class Book:
                 y += l.h
 
         last = r["at_end"] and r["cnext"] >= len(self.cwords)
+        T = r.get("T", 0.0) if r["text"] else 0.0
+
+        def below_top(c):
+            # the top block above the Rif stays as it is
+            return [l for l in c if l.y >= T - EPS]
         if r["mode"] == "long":
             for c in r["cols"]:
-                stretch(c, self.H, self.lh_comm * 1.5)
+                stretch(below_top(c), self.H, self.lh_comm * 1.5)
         elif r["mode"] == "short" and "below" in r:
             T = r.get("T", 0.0)
             for c in r["cols"]:
@@ -1509,7 +1522,7 @@ class Book:
                 stretch(r["text"], self.H, self.lh_rif * 0.25 * max(1, len(r["text"])))
         else:
             for c in r["cols"]:
-                stretch(c, r["total"] if last else self.H, self.lh_comm * 0.3 * max(1, len(c)))
+                stretch(below_top(c), r["total"] if last else self.H, self.lh_comm * 0.3 * max(1, len(c)))
         r["kind"] = "rif"
         return r
 
@@ -1604,11 +1617,14 @@ def sources(root, m):
            find_file(os.path.join(root, "OraytaToOtzaria"), f"{m}.txt")]
     rashi = [find_file(os.path.join(rish, "רשי"), f"רשי על {m}.txt"),
              find_file(os.path.join(root, "OraytaToOtzaria"), f"תלמוד בבלי - {m} - רשי.txt")]
+    # where Rashi's commentary stops, the Rashbam's printed in its place (Bava Batra from
+    # 29a, Pesachim perek 10)
+    rashbam = find_file(os.path.join(rish, "רשבם"), f"רשבם על {m}.txt")
     return {
         "rosh": find_file(os.path.join(rish, "ראש"), f"פסקי הראש על {m}.txt"),
         "rif": find_file(os.path.join(rish, "ריף"), f"ריף {m}.txt", f"הלכות קטנות לריף ({m}).txt"),
         "comm": comm, "comm_name": comm_name,
-        "gemara": [p for p in gem if p], "rashi": [p for p in rashi if p],
+        "gemara": [p for p in gem if p], "rashi": [p for p in rashi if p], "rashbam": rashbam,
     }
 
 
@@ -1686,17 +1702,31 @@ def load_masechet(root, m, found=None):
                     e["dh_len"] += 1
         if s["rashi"] and s["gemara"]:
             rashi = parse_rashi(read(s["rashi"][0]))
+            if s.get("rashbam"):
+                # the Rashbam on the amudim Rashi has not
+                have = {x["amud"] for x in rashi}
+                for x in parse_rashi(read(s["rashbam"])):
+                    if x["amud"] not in have:
+                        x["id"] = len(rashi)
+                        rashi.append(x)
             gl = read(s["gemara"][0])
             amudim = passage_amudim(rif, gl)
             gtoks, gamud = parse_gemara(gl)
             g = lseq(gtoks)[0]
             gem = {tuple(g[k:k + 3]) for k in range(len(g) - 2)}
+            # the commonest words of the commentary: a match of them alone is no quotation
+            freq = {}
+            for e in comm:
+                for w in lseq(e["tokens"])[0]:
+                    w = stem(w)
+                    freq[w] = freq.get(w, 0) + 1
+            weak = frozenset(sorted(freq, key=freq.get, reverse=True)[:120])
             n = 0
             for e in comm:
                 a = amudim[e["para"]]
                 near = [x for x in rashi if a is not None and a - 2 <= x["amud"] <= a + 2]
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
-                n += mark_rashi(e["tokens"], near, gem, trace=e["why"])
+                n += mark_rashi(e["tokens"], near, gem, trace=e["why"], weak=weak)
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
             report.append(f"ב{s['comm_name']} {comm_gemara_marks(comm, amudim, gtoks, gamud)} סימני דפי הגמרא")
         report.append(f"ב{s['comm_name']} {mishna_openers(comm, rif)} פתיחות של משנה")
@@ -1924,7 +1954,8 @@ def check_layout(book, rosh_pages, rif_pages):
         if book.cwords:
             parts.append(("המפרש", days_in(w for pg in rif_pages for c in pg["cols"] for l in c for w in l.words)))
     for name, got in parts:
-        if len(got) != len(set(got)) or (len(parts) > 1 and len(got) != len(parts[0][1])):
+        want = getattr(book, "comm_days", len(parts[0][1])) if name == "המפרש" else len(parts[0][1])
+        if len(got) != len(set(got)) or len(got) != want:
             out.append({"kind": "days", "page": 0,
                         "detail": f"{name}: {len(got)} סימוני ימים ({len(set(got))} שונים) מול {len(parts[0][1])} ברא\"ש"})
     if rosh_pages:
