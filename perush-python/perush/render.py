@@ -97,12 +97,14 @@ def new_writer(path, w, h, title):
     return writer
 
 
-def export_pdf(pages, path, title="", book=False, cover=None):
+def export_pdf(pages, path, title="", book=False, cover=None, outer=True):
     """book: the PDF opens as a book bound on the right (pages side by side from right to
     left, the first alone), so the inner side of each page faces the spine.
     cover: the cover's words (cover.book_info): the PDF begins with the front cover, its
     blank inside, a title page and its blank back, and ends with the back cover, so the
-    first page of the text is still a left-hand page."""
+    first page of the text is still a left-hand page. outer=False: the inside of the book
+    only, for printing: the title page, its blank back, the text, and a blank page to make
+    the number even. Returns the number of pages inside the covers."""
     if not pages:
         raise ValueError("אין עמודים לייצוא")
     w, h = pages[0].width, pages[0].height
@@ -119,32 +121,38 @@ def export_pdf(pages, path, title="", book=False, cover=None):
 
     if cover:
         from .cover import draw_front
-        new_page()
-        draw_front(p, rect, cover)
-        new_page()
+        if outer:
+            new_page()
+            draw_front(p, rect, cover)
+            new_page()
         new_page()
         draw_front(p, rect, cover, gilt=False)
         new_page()
     for page in pages:
         new_page()
         draw_page(p, page)
+    inside = len(pages)
     if cover:
         from .cover import draw_back
+        inside += 2
         if len(pages) % 2:
             new_page()          # the inside of the back cover
-        new_page()
-        draw_back(p, rect, cover)
+            inside += 1
+        if outer:
+            new_page()
+            draw_back(p, rect, cover)
     p.end()
     if book or cover:
         right_to_left(path)
+    return inside
 
 
-def export_cover(path, w, h, n_pages, cover):
+def export_cover(path, w, h, n_pages, cover, grams=80):
     """The whole cover for printing, laid flat: front, spine (as thick as n_pages make it)
     and back, with bleed all round."""
     from .cover import BLEED_MM, draw_wrap, spine_mm
     bleed = BLEED_MM * PT_PER_MM
-    spine = spine_mm(n_pages) * PT_PER_MM
+    spine = spine_mm(n_pages, grams) * PT_PER_MM
     W, H = 2 * w + spine + 2 * bleed, h + 2 * bleed
     writer = new_writer(path, W, H, cover.get("title", ""))
     p = QPainter(writer)

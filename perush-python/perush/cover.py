@@ -442,9 +442,14 @@ def draw_wrap(p, rect, info, spine_w, bleed):
     draw_spine(p, QRectF(spine.left(), spine.top() + bleed, spine.width(), rect.height() - 2 * bleed), info)
 
 
-def spine_mm(n_pages, paper_mm=0.1):
-    """The thickness of the book block: a sheet (two pages) of ordinary 80g paper is about 0.1mm."""
-    return max(3.0, math.ceil(n_pages / 2) * paper_mm)
+# the thickness of a sheet of ordinary uncoated book paper, by its weight (g/m²), in mm
+PAPER_MM = {60: 0.075, 70: 0.09, 80: 0.1, 90: 0.11, 100: 0.125, 120: 0.15}
+
+
+def spine_mm(n_pages, grams=80):
+    """The thickness of the book block: one sheet for every two pages."""
+    sheet = PAPER_MM.get(grams, grams / 800)
+    return max(3.0, math.ceil(n_pages / 2) * sheet)
 
 
 BLEED_MM = 3.0

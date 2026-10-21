@@ -2,8 +2,9 @@
 
     python main.py                       open the window
     python main.py project.json out.pdf  lay out a project straight to PDF (no window)
-        (--cover adds a front cover, a title page and a back cover, and writes the
-        whole cover for printing beside it)
+        (--cover adds a front cover, a title page and a back cover, and writes beside it
+        the whole cover for printing and the inside of the book for printing;
+        --paper 70 sets the weight of the paper, which sets the width of the spine)
     python main.py --import OUT_DIR files…  convert Sefaria text files into project files
         (--comms onkelos,orhachaim chooses the commentaries; default onkelos,rashi,ramban)
 """
@@ -76,7 +77,8 @@ def main():
         print("\n".join(report + written))
         return 0
 
-    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    # the files: what isn't an option or the value of one
+    args = [a for k, a in enumerate(sys.argv[1:], 1) if not a.startswith("-") and sys.argv[k - 1] != "--paper"]
     if len(args) == 2:
         from perush.cover import book_info
         from perush.engine import layout_project
@@ -87,12 +89,17 @@ def main():
         for w in warnings:
             print("⚠", w)
         cover = book_info(project) if "--cover" in sys.argv else None
+        grams = int(sys.argv[sys.argv.index("--paper") + 1]) if "--paper" in sys.argv else 80
         export_pdf(pages, args[1], project["title"], book=project.get("bookMode", False), cover=cover)
         print(f"{len(pages)} עמודים נשמרו ב־{args[1]}")
         if cover:
-            out = os.path.splitext(args[1])[0] + " - כריכה לדפוס.pdf"
-            spine = export_cover(out, pages[0].width, pages[0].height, len(pages) + 4, cover)
-            print(f"כריכה (קדמית, שדרה {spine:.1f} מ\"מ, אחורית) נשמרה ב־{out}")
+            base = os.path.splitext(args[1])[0]
+            inside = export_pdf(pages, base + " - פנים הספר לדפוס.pdf", project["title"], book=True,
+                                cover=cover, outer=False)
+            print(f"פנים הספר בלי כריכה ({inside} עמודים) נשמר ב־{base} - פנים הספר לדפוס.pdf")
+            out = base + " - כריכה לדפוס.pdf"
+            spine = export_cover(out, pages[0].width, pages[0].height, inside, cover, grams)
+            print(f"כריכה (קדמית, שדרה {spine:.1f} מ\"מ לנייר {grams} גרם, אחורית) נשמרה ב־{out}")
         return 0
 
     from perush.app import MainWindow
