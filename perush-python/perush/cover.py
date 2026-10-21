@@ -708,18 +708,9 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
     k = min(rect.width() / 595.0, rect.height() / 842.0)
     lay = style["layout"]
     if not gilt:
+        # the title page: the same design as the cover, in its colour on white paper
         p.fillRect(rect, QColor("white"))
-        ink = Ink(rect, False, style)
-        if lay == "gate":
-            inner = frame(p, ink, rect, k)
-            box, top, bottom = gate(p, ink, inner, k)
-        else:
-            inner = frame(p, ink, rect, k, "double", True)
-            bottom = inner.top() + inner.height() * 0.72
-            box = QRectF(inner.left() + 24 * k, inner.top() + 40 * k, inner.width() - 48 * k, bottom - inner.top() - 40 * k)
-        title_block(p, box, info, k, ink, style)
-        cartouche(p, ink, QRectF(inner.center().x() - inner.width() * 0.33, (bottom + inner.bottom()) / 2 - 20 * k,
-                                 inner.width() * 0.66, 40 * k), info.get("verse", ""), k, lay == "gate")
+        draw_front(p, rect, info, True, title_style(style))
         return
     ground(p, rect.adjusted(-bleed, -bleed, bleed, bleed), style, k)
     ink = Ink(rect, True, style)
@@ -917,6 +908,39 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
     else:
         from .cover_designs import LAYOUTS
         LAYOUTS[lay](p, rect, info, k, ink, style)
+
+
+def title_style(style):
+    """The style of the title page inside the book: the cover's design on white paper,
+    drawn in the cover's own colour (its leather or cloth, or its ink when that is dark),
+    without the pictures of the ground (stars, waves…), which need the cover's colours."""
+    material, colours = style["bg"]
+
+    def dark(c):
+        c = QColor(c)
+        return 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue() < 110
+
+    if material in ("leather", "cloth") or dark(colours[0]):
+        colour = colours[1] if material != "paper" else colours[-1]
+    elif style["ink"] not in ("gold", "silver") and dark(style["ink"]):
+        colour = style["ink"]
+    else:
+        colour = style.get("ink2") or style.get("field") or INK
+        if not dark(colour):
+            colour = INK
+    if not dark(colour):
+        colour = INK
+    ts = dict(style, bg=("paper", ("#ffffff", "#ffffff", "#ffffff")), ink=colour, extras=())
+    for key in ("field", "panel"):
+        if key in ts:
+            c = QColor(ts[key])
+            # a dark field becomes a pale tint of itself, so that the words on it can be read
+            ts[key] = "#ffffff" if not dark(c) else QColor(
+                int(c.red() * 0.18 + 255 * 0.82), int(c.green() * 0.18 + 255 * 0.82),
+                int(c.blue() * 0.18 + 255 * 0.82)).name()
+    if "ink2" in ts and not dark(ts["ink2"]):
+        ts["ink2"] = colour
+    return ts
 
 
 def draw_back(p, rect, info, style=None, bleed=0.0):
