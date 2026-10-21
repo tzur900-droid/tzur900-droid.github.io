@@ -968,6 +968,10 @@ def draw_back(p, rect, info, style=None, bleed=0.0):
     elif lay == "field":
         plain_text(p, ink, text, cx, rect.top() + H * 0.35, k, W * 0.7)
     else:
+        if lay == "vine":
+            from .cover_designs import vine
+            for x, side in ((rect.left() + W * 0.08, 1), (rect.right() - W * 0.08, -1)):
+                vine(p, ink, x, rect.top() + 30 * k, rect.bottom() - 30 * k, k, side)
         p.setPen(ink.pen(0.6 * k))
         if lay == "letter":
             p.setBrush(Qt.NoBrush)
