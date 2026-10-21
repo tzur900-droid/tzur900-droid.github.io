@@ -241,8 +241,8 @@ class MainWindow(QMainWindow):
         """Download the latest version from the site and install it over this one."""
         from . import updater
         if updater.frozen():
-            QMessageBox.information(self, APP_NAME, "בגרסת ה־exe מעדכנים כך: מורידים מהאתר את perush-python.zip "
-                                    "ובונים שוב עם build_exe.bat.")
+            QMessageBox.information(self, APP_NAME, "בגרסה הזאת מעדכנים כך: מורידים מהאתר את perush-python.zip "
+                                    "ומחלצים אותו על תיקיית התוכנה.")
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
