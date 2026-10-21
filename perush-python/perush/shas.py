@@ -1637,7 +1637,110 @@ def load_masechet(root, m, found=None):
 
 def day_starts(rosh, rif, comm, ndays, al):
     """Where each day begins: (siman index, passage index) pairs, the Rosh at the start of a
-    siman and the Rif at the start of a passage, both about the same place."""
+    siman and the Rif at the start of a passage, both about the same place; the days as
+    even as they can be (first_starts, then balance_days)."""
+    starts = first_starts(rosh, rif, comm, ndays, al)
+    return balance_days(starts, rosh, rif, comm, al)
+
+
+def day_amounts(starts, rw_cum, rif_cum, nrif):
+    """The words of each day: the Rosh from its siman to the next day's, the Rif (with the
+    commentary) from its passage to the next day's marker in the Rif's own order."""
+    ks = [k for k, _ in starts] + [len(rw_cum) - 1]
+    js = sorted(j for _, j in starts)
+    nxt = {a: b for a, b in zip(js, js[1:] + [nrif])}
+    return [rw_cum[ks[d + 1]] - rw_cum[ks[d]] + (rif_cum[nxt[j]] - rif_cum[j] if nrif else 0)
+            for d, (_, j) in enumerate(starts)]
+
+
+def balance_days(starts, rosh, rif, comm, al, reach=10, rif_reach=(-1, 4)):
+    """Make the days as even as they can be: each day's start moved a few simanim (and its
+    passage in the Rif a passage or two from the siman's own, or anywhere in Rif that has
+    nothing in the Rosh before the siman's) while that makes the largest
+    day's distance from the mean smaller, or (the largest the same) all of them together."""
+    if len(starts) < 2:
+        return starts
+    rw = [sum(len(p) for p in s["paras"]) for s in rosh]
+    fw = [len(p["tokens"]) for p in rif]
+    for e in comm:
+        fw[e["para"]] += len(e["tokens"])
+    rw_cum, rif_cum = [0], [0]
+    for x in rw:
+        rw_cum.append(rw_cum[-1] + x)
+    for x in fw:
+        rif_cum.append(rif_cum[-1] + x)
+    nrif = len(rif)
+    mean = (rw_cum[-1] + rif_cum[-1]) / len(starts)
+
+    def cost(st):
+        a = day_amounts(st, rw_cum, rif_cum, nrif)
+        dev = [abs(x - mean) / mean for x in a]
+        return (round(max(dev), 4), sum(d * d for d in dev))
+
+    def options(d, st):
+        lo = st[d - 1][0] + 1
+        hi = (st[d + 1][0] - 1) if d + 1 < len(st) else len(rosh) - 1
+        k0 = st[d][0]
+        taken = {j for i, (_, j) in enumerate(st) if i != d}
+        for k in range(max(lo, k0 - reach), min(hi, k0 + reach) + 1):
+            if not nrif:
+                yield (k, 0)
+                continue
+            # about the siman's place in the Rif: between the places of the simanim a few
+            # before and after it (where the Rosh is short against the Rif, its simanim are
+            # far apart there); or, where the passages before it are Rif the Rosh has
+            # nothing against (Shevuot: the Rif's first perakim), any of them
+            near = [al[i] for i in range(max(0, k - 3), min(len(al), k + 4)) if abs(al[i] - al[k]) <= 40]
+            below = [a for a in al if a < al[k]]
+            lo_j = min(min(near) + rif_reach[0], (max(below) + 1) if below else 1)
+            hi_j = max(near) + rif_reach[1]
+            # in the order of the days, unless the Rif goes back here (perakim in another order)
+            pj, pk = st[d - 1][1], st[d - 1][0]
+            if al[k] >= al[pk] - 6:
+                lo_j = max(lo_j, pj + 1)
+            if pj < min(al):
+                # the day before begins in the Rif before anything of the Rosh: this one may
+                # too (that stretch shared among the first days)
+                lo_j = min(lo_j, pj + 1)
+            if d + 1 < len(st) and al[st[d + 1][0]] >= al[k] - 6:
+                hi_j = min(hi_j, st[d + 1][1] - 1)
+            for j in range(max(1, lo_j, al[k] - 80), hi_j + 1):
+                if 0 < j < nrif and j not in taken:
+                    yield (k, j)
+
+    st, best = list(starts), cost(starts)
+    for _ in range(60):
+        better = False
+        for d in range(1, len(st)):
+            for o in options(d, st):
+                if o == st[d]:
+                    continue
+                trial = st[:d] + [o] + st[d + 1:]
+                c = cost(trial)
+                if c < best:
+                    st, best, better = trial, c, True
+        if better:
+            continue
+        # stuck: two neighbouring starts moved together, around the day furthest from the
+        # mean (making one day smaller makes the next one larger)
+        a = day_amounts(st, rw_cum, rif_cum, nrif)
+        worst = max(range(len(a)), key=lambda i: abs(a[i] - mean))
+        for d in {x for x in (worst - 1, worst, worst + 1, worst + 2) if 1 <= x < len(st) - 1}:
+            for o in list(options(d, st)):
+                t1 = st[:d] + [o] + st[d + 1:]
+                for o2 in options(d + 1, t1):
+                    trial = t1[:d + 1] + [o2] + t1[d + 2:]
+                    c = cost(trial)
+                    if c < best:
+                        st, best, better = trial, c, True
+        if not better:
+            break
+    return st
+
+
+def first_starts(rosh, rif, comm, ndays, al):
+    """A first division into days: each day's start the siman nearest to where its share of
+    the masechet begins."""
     rw = [sum(len(p) for p in s["paras"]) for s in rosh]
     fw = [len(p["tokens"]) for p in rif]
     cw = [0] * len(rif)
