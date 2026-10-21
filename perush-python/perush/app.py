@@ -402,6 +402,9 @@ class MainWindow(QMainWindow):
         self.ded.setMaximumHeight(56)
         self.ded.setToolTip("נכתב באותיות קטנות בתחתית העמוד הראשון. שורה חדשה = שורה נפרדת. ריק = בלי הקדשה.")
         form.addRow("הקדשה בעמוד הראשון:", self.ded)
+        self.title_sub = QLineEdit()
+        self.title_sub.setPlaceholderText("ריק = לפי הפירושים, למשל: עם תרגום אונקלוס, רש\"י ורמב\"ן")
+        form.addRow("כיתוב בשער מתחת לשם:", self.title_sub)
         self.cb = {
             "verseNewLine": QCheckBox("כל פסוק בשורה חדשה"),
             "numbers": QCheckBox("אותיות פסוקים"),
@@ -409,6 +412,7 @@ class MainWindow(QMainWindow):
             "names": QCheckBox("שם המתרגם / המפרש מעל כל טור"),
             "inlineChapters": QCheckBox("פרק בתוך הטקסט (אות הפרק גדולה ומודגשת, בלי שורת כותרת)"),
             "bookMode": QCheckBox("צורת ספר: התרגום תמיד בצד הפנימי (העמוד הראשון שמאלי)"),
+            "titlePage": QCheckBox("עמוד שער (שם הספר, הפירושים וההקדשה)"),
         }
         for c in self.cb.values():
             form.addRow(c)
@@ -433,6 +437,7 @@ class MainWindow(QMainWindow):
         for c in self.cb.values():
             c.toggled.connect(self.changed)
         self.ded.textChanged.connect(self.changed)
+        self.title_sub.textChanged.connect(self.changed)
         return area
 
     def build_preview(self):
@@ -478,6 +483,7 @@ class MainWindow(QMainWindow):
         for k, c in self.cb.items():
             c.setChecked(bool(p[k]))
         self.ded.setPlainText(p.get("dedication", ""))
+        self.title_sub.setText(p.get("titleSub", ""))
         self.tabs.clear()
         for c in p["comms"]:
             self.tabs.addTab(CommEditor(c, self.changed), c["name"] or "—")
@@ -495,6 +501,7 @@ class MainWindow(QMainWindow):
         for k, c in self.cb.items():
             p[k] = c.isChecked()
         p["dedication"] = self.ded.toPlainText()
+        p["titleSub"] = self.title_sub.text()
         p["comms"] = [self.tabs.widget(i).comm for i in range(self.tabs.count())]
         for i in range(self.tabs.count()):
             self.tabs.setTabText(i, self.tabs.widget(i).comm["name"] or "—")

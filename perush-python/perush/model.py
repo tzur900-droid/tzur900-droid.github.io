@@ -61,6 +61,8 @@ DEFAULTS = {
     "bookMode": False,
     # printed small at the foot of the first page; a line break ("\n") starts a new line
     "dedication": DEDICATION,
+    "titlePage": True,       # a title page at the start: the name of the book, what is in it, the dedication
+    "titleSub": "",          # the line under the name on the title page ("" = made from the commentaries)
 }
 
 COMM_DEFAULTS = {

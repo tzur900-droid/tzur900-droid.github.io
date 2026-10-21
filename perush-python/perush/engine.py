@@ -830,7 +830,35 @@ class Engine:
         first = int(self.P.get("firstPage") or 1)
         for n, (r, chapter, parasha) in enumerate(self.pages):
             pages.append(self.finalize(r, chapter, parasha, heb(first + n), n))
+        if self.P.get("titlePage"):
+            pages = self.title_pages() + pages
         return pages
+
+    def title_pages(self):
+        """The title page (and, in book form, the blank page behind it, so that the text
+        still begins on a left-hand page)."""
+        from .titlepage import blank_page, title_page, with_list
+        P = self.P
+        lines = []
+        parashot = [it["text"] for it in self.all_items if it["type"] == "h" and not it["noComm"]
+                    and re.match(r"^פרש(ת|ה)\s", it["text"])]
+        if len(parashot) == 1 and parashot[0] != P["title"]:
+            lines.append(parashot[0])
+        sub = (P.get("titleSub") or "").strip()
+        if not sub:
+            names = []
+            for c in self.comms:
+                n = c["name"]
+                names.append("תרגום " + n if n == "אונקלוס" else n)
+            if any(it["noComm"] for it in self.all_items):
+                names.append("הפטרות")
+            sub = ("עם " + with_list(names)) if names else ""
+        if sub:
+            lines.append(sub)
+        out = [title_page(self.page_w, self.page_h, self.m, P["mainFont"], P["title"] or "", lines, self.ded_lines)]
+        if P.get("bookMode"):
+            out.append(blank_page(self.page_w, self.page_h))
+        return out
 
     def tick(self):
         self.memo.clear()   # a new page: what was tried for the last one is no use
@@ -1244,7 +1272,7 @@ class Engine:
         index = getattr(self, "finalizing", None)
         if index is None:
             index = len(getattr(self, "pages", []))
-        return self.body_h - (self.ded_h if index == 0 else 0.0)
+        return self.body_h - (self.ded_h if index == 0 and not self.P.get("titlePage") else 0.0)
 
     def finalize(self, r, chapter, parasha, number, index=0):
         if r.get("col_w"):
@@ -1268,7 +1296,7 @@ class Engine:
         self.finalizing = index
         y = self.place_body(r, page, y)
         page.overfull = y - T > self.contentH + 1
-        if index == 0 and self.ded_lines:
+        if index == 0 and self.ded_lines and not P.get("titlePage"):
             st = self.ded_style
             lines = []
             for k, text in enumerate(self.ded_lines):

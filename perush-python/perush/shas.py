@@ -606,7 +606,7 @@ class Book:
         pages, i, n = [], 0, len(lines)
         while i < n:
             cols = []
-            H = self.H - (self.ded_h if not pages else 0.0)   # the first page: room for the dedication
+            H = self.H
             for _ in range(2):
                 col, h = [], 0.0
                 while i < n and h + lines[i].h <= H + EPS:
@@ -981,16 +981,6 @@ class Book:
                     for l in cols[1]:
                         l.right = (self.wide - l.width) if l.width < self.wide - 0.5 else 0.0
                     page.frames.append(Frame(cols[1], L + self.wide, top))
-            if n == 0 and self.ded_lines:
-                st = Style("Frank Ruhl Libre", 8.5)
-                lines = []
-                for k, text in enumerate(self.ded_lines):
-                    ln = break_lines(self.words([[w, False] for w in text.split()], st), st, self.ded_lh,
-                                     full_width(self.W), k * self.ded_lh, "center")
-                    for l in ln:
-                        l.last = True
-                    lines.extend(ln)
-                page.frames.append(Frame(lines, R, top + self.H - len(self.ded_lines) * self.ded_lh))
             out.append(page)
         return out
 
@@ -1167,5 +1157,13 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297)):
             xref.append(comm_name)
     title_rif = f"רי\"ף ו{comm_name}" if comm_name else "רי\"ף"
     pages = book.render(rosh_pages, rif_pages, xref, "פסקי הרא\"ש", title_rif)
+    # the title page and the blank page behind it (the text begins on a left-hand page)
+    from .titlepage import blank_page, title_page
+    lines = ["פסקי הרא\"ש ורי\"ף" if rif else "פסקי הרא\"ש"]
+    if comm_name:
+        lines.append(f"עם {comm_name}")
+    lines.append("בחלוקה ללימוד יומי · כל הש\"ס בשנה")
+    pages = [title_page(book.pw, book.ph, book.m, "Frank Ruhl Libre", f"מסכת {m}", lines, book.ded_lines),
+             blank_page(book.pw, book.ph)] + pages
     report.append(f"{m}: {len(rosh_pages)} עמודי רא\"ש, {len(rif_pages)} עמודי רי\"ף, ימים {heb(first_day)}–{heb(first_day + len(starts) - 1)}")
     return pages, report
