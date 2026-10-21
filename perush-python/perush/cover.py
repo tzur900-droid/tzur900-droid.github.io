@@ -50,7 +50,7 @@ def book_info(project):
     haftara = "הפטרת" in project.get("main", "")
     return {
         "top": "חמשה חומשי תורה" if title in TORAH else "",
-        "title": f"ספר {title}" if title in TORAH else title,
+        "title": f"חומש {title}" if title in TORAH else title,
         "lines": lines,
         "details": " · ".join(d for d in details if d),
         "extra": ("הפטרות עם פירוש " + " ו".join(bases)) if haftara and bases else ("והפטרות" if haftara else ""),
