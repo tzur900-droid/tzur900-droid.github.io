@@ -7,7 +7,8 @@
         --paper 70 sets the weight of the paper, which sets the width of the spine;
         --size B5 or --size 165x235 (mm) sets the page size and fits the fonts and margins to it;
         --cover-style 3 picks the style of the cover (1-10, see cover.STYLES);
-        --cover-samples writes the front cover in every style beside the PDF)
+        --cover-samples writes the front cover in every style beside the PDF;
+        --no-front-verse leaves the verse off the front cover and the title page)
     python main.py --import OUT_DIR files…  convert Sefaria text files into project files
         (--comms onkelos,orhachaim chooses the commentaries; default onkelos,rashi,ramban)
 """
@@ -109,6 +110,8 @@ def main():
         grams = int(sys.argv[sys.argv.index("--paper") + 1]) if "--paper" in sys.argv else 80
         from perush.cover import STYLES, style_of
         style = style_of(int(sys.argv[sys.argv.index("--cover-style") + 1])) if "--cover-style" in sys.argv else None
+        if "--no-front-verse" in sys.argv:
+            style = dict(style or STYLES[0], front_verse=False)
         if "--cover-samples" in sys.argv:
             from perush.render import export_cover_samples
             out = os.path.splitext(args[1])[0] + " - דוגמאות כריכה.pdf"

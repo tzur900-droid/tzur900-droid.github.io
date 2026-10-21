@@ -703,6 +703,8 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
     bleed: how far the background goes on past rect (on a cover laid flat for printing)."""
     style = style or STYLES[0]
     info = dict(info, verse=style.get("verse") or info.get("verse", ""))
+    if style.get("front_verse") is False:     # no verse on the front (and the title page)
+        info["verse"] = ""
     k = min(rect.width() / 595.0, rect.height() / 842.0)
     lay = style["layout"]
     if not gilt:
