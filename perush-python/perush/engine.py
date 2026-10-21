@@ -112,7 +112,12 @@ class Engine:
         self.page_h = hmm * PT_PER_MM
         self.m = P["margin"] * PT_PER_MM
         self.W = self.page_w - 2 * self.m
-        self.contentH = self.page_h - 2 * self.m
+        self.body_h = self.page_h - 2 * self.m
+        # the dedication at the foot of the first page
+        self.ded_style = Style(P["mainFont"], 8.5)
+        self.ded_lines = [l.strip() for l in str(P.get("dedication") or "").split("\n") if l.strip()]
+        self.ded_lh = 8.5 * 1.45
+        self.ded_h = (len(self.ded_lines) * self.ded_lh + 4 * PT_PER_MM) if self.ded_lines else 0.0
         self.gap = P["colGap"] * PT_PER_MM
         self.sgap = P["sectionGap"] * PT_PER_MM
         self.lh_k = P["lineHeight"]
@@ -990,6 +995,18 @@ class Engine:
         hole = self.contentH - self.total_h(best)
         if not best["at_end"] and best["sections"] and not self.can_close(best, hole):
             best = self.fill_hole(pos, g0, g, pre) or best
+        text = [l for l in best["text"] if l.kind == "p"]
+        hole = self.contentH - self.total_h(best)
+        if (not best["at_end"] and not best["sections"] and text and hole > 1.5 * self.main_lh
+                and hole / len(text) > 0.16 * self.main_lh):
+            # no commentary to fill the page and the translation can't go on: rather the
+            # text running on under the translation column than a hole
+            for x in range(min(self.total, g + 80), g, -1):
+                q = self.compose(pos, self.pos(x), False, pre)
+                if (q["req_fit"] and q["top_fits"] and self.contentH - self.total_h(q) < 1.5 * self.main_lh
+                        and self.full_line_end(q, g0, x) == x):
+                    best = q
+                    break
         return best
 
     def fill_hole(self, pos, g0, g, pre):
@@ -1221,6 +1238,14 @@ class Engine:
             y += r["post"]["h"]
         return y
 
+    @property
+    def contentH(self):
+        """The height of the page's body; the first page leaves room for the dedication."""
+        index = getattr(self, "finalizing", None)
+        if index is None:
+            index = len(getattr(self, "pages", []))
+        return self.body_h - (self.ded_h if index == 0 else 0.0)
+
     def finalize(self, r, chapter, parasha, number, index=0):
         if r.get("col_w"):
             self.col_w = dict(r["col_w"])
@@ -1240,8 +1265,20 @@ class Engine:
             ry = y + 9.0 * 1.3 + 1 * PT_PER_MM
             page.rules.append((L, ry, R))
             y += self.head_h
+        self.finalizing = index
         y = self.place_body(r, page, y)
         page.overfull = y - T > self.contentH + 1
+        if index == 0 and self.ded_lines:
+            st = self.ded_style
+            lines = []
+            for k, text in enumerate(self.ded_lines):
+                ws = words_of([(w, False) for w in text.split()], st)
+                ln = break_lines(ws, st, self.ded_lh, full_width(self.W), k * self.ded_lh, "center")
+                for l in ln:
+                    l.last = True
+                lines.extend(ln)
+            page.frames.append(Frame(lines, R, T + self.body_h - len(self.ded_lines) * self.ded_lh))
+        self.finalizing = None
         return page
 
 

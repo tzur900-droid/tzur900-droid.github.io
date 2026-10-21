@@ -398,6 +398,10 @@ class MainWindow(QMainWindow):
         form.addRow("רווח בין חלקי העמוד:", self.sp["sectionGap"])
         form.addRow("מינימום שורות טקסט בעמוד:", self.sp["minLines"])
         form.addRow("מספר העמוד הראשון:", self.sp["firstPage"])
+        self.ded = QPlainTextEdit()
+        self.ded.setMaximumHeight(56)
+        self.ded.setToolTip("נכתב באותיות קטנות בתחתית העמוד הראשון. שורה חדשה = שורה נפרדת. ריק = בלי הקדשה.")
+        form.addRow("הקדשה בעמוד הראשון:", self.ded)
         self.cb = {
             "verseNewLine": QCheckBox("כל פסוק בשורה חדשה"),
             "numbers": QCheckBox("אותיות פסוקים"),
@@ -428,6 +432,7 @@ class MainWindow(QMainWindow):
             s.valueChanged.connect(self.changed)
         for c in self.cb.values():
             c.toggled.connect(self.changed)
+        self.ded.textChanged.connect(self.changed)
         return area
 
     def build_preview(self):
@@ -472,6 +477,7 @@ class MainWindow(QMainWindow):
         self.sp["pageH"].setValue(h)
         for k, c in self.cb.items():
             c.setChecked(bool(p[k]))
+        self.ded.setPlainText(p.get("dedication", ""))
         self.tabs.clear()
         for c in p["comms"]:
             self.tabs.addTab(CommEditor(c, self.changed), c["name"] or "—")
@@ -488,6 +494,7 @@ class MainWindow(QMainWindow):
             p[k] = s.value()
         for k, c in self.cb.items():
             p[k] = c.isChecked()
+        p["dedication"] = self.ded.toPlainText()
         p["comms"] = [self.tabs.widget(i).comm for i in range(self.tabs.count())]
         for i in range(self.tabs.count()):
             self.tabs.setTabText(i, self.tabs.widget(i).comm["name"] or "—")

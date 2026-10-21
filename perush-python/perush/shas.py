@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 from .engine import Frame, Page
 from .abbrev import expand
-from .model import heb
+from .model import DEDICATION, heb
 from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width
 
 EPS = 0.01
@@ -533,6 +533,9 @@ class Book:
         self.lh_rif = rif_size * 1.34
         self.lh_comm = comm_size * 1.26
         self.head_style = Style("Frank Ruhl Libre", 9)
+        self.ded_lines = DEDICATION.split("\n")   # at the foot of the book's first page
+        self.ded_lh = 8.5 * 1.45
+        self.ded_h = len(self.ded_lines) * self.ded_lh + 4 * PT_PER_MM
         self.cw = self.W * 0.25            # a commentary column beside the Rif
         self.wide = (self.W - self.gap) / 2  # a commentary column under it
 
@@ -603,9 +606,10 @@ class Book:
         pages, i, n = [], 0, len(lines)
         while i < n:
             cols = []
+            H = self.H - (self.ded_h if not pages else 0.0)   # the first page: room for the dedication
             for _ in range(2):
                 col, h = [], 0.0
-                while i < n and h + lines[i].h <= self.H + EPS:
+                while i < n and h + lines[i].h <= H + EPS:
                     col.append(lines[i])
                     h += lines[i].h
                     i += 1
@@ -617,7 +621,7 @@ class Book:
             last = i >= n
             for col in cols:
                 tot = sum(l.h for l in col)
-                spare = self.H - tot
+                spare = H - tot
                 if col and not last and 0 < spare < self.lh_rosh * 2.5:
                     for l in col:
                         l.h += spare / len(col)
@@ -977,6 +981,16 @@ class Book:
                     for l in cols[1]:
                         l.right = (self.wide - l.width) if l.width < self.wide - 0.5 else 0.0
                     page.frames.append(Frame(cols[1], L + self.wide, top))
+            if n == 0 and self.ded_lines:
+                st = Style("Frank Ruhl Libre", 8.5)
+                lines = []
+                for k, text in enumerate(self.ded_lines):
+                    ln = break_lines(self.words([[w, False] for w in text.split()], st), st, self.ded_lh,
+                                     full_width(self.W), k * self.ded_lh, "center")
+                    for l in ln:
+                        l.last = True
+                    lines.extend(ln)
+                page.frames.append(Frame(lines, R, top + self.H - len(self.ded_lines) * self.ded_lh))
             out.append(page)
         return out
 

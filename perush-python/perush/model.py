@@ -36,6 +36,8 @@ def page_mm(project):
     _, w, h = PAGE_SIZES.get(project.get("pageSize"), PAGE_SIZES["A4"])
     return float(w), float(h)
 
+DEDICATION = "הספר עומד ועוצב בסיוע ובמימון אבנר אליאסיאן\nלימוד התורה יעמוד לזכות לו ולבני משפחתו"
+
 DEFAULTS = {
     "title": "",
     "main": "",
@@ -57,6 +59,8 @@ DEFAULTS = {
     "names": True,
     "inlineChapters": False,
     "bookMode": False,
+    # printed small at the foot of the first page; a line break ("\n") starts a new line
+    "dedication": DEDICATION,
 }
 
 COMM_DEFAULTS = {
