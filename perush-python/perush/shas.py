@@ -1319,6 +1319,15 @@ class Book:
                 text, th = self.text_lines(a, b, wa, t02)
                 total = th
                 r["hc"], r["t0"] = hc, t02
+                if th > self.H + EPS and req < avail:
+                    # all of it beside the Rif pushes the Rif off the page: only what is owed
+                    # (the passages ended), the rest goes on with its passage
+                    alt = self.short_layout(a, b, self.cwords[cptr:req], th)
+                    if alt is not None and alt[3] <= self.H + EPS:
+                        cols, hc, text, th, t02 = alt
+                        total = th
+                        r.update(hc=hc, t0=t02, T=max(0.0, t02 - self.vgap / 2))
+                        cws = self.cwords[cptr:req]
             else:
                 # under the Rif, as far down as it goes: balance the two columns
                 best = (cols, hcol)
@@ -1953,7 +1962,7 @@ def check_layout(book, rosh_pages, rif_pages):
             # 2k and 2k+1 face each other
             spread = lambda n: (off + n + 1) // 2
             if not (first[j] <= pc <= last[j] + 1 or spread(pc) == spread(first[j])):
-                out.append({"kind": "link", "page": off + pc + 1,
+                out.append({"kind": "link", "page": off + pc + 1, "entry": id(e),
                             "detail": " ".join(t[0] for t in e["tokens"][:10])})
     # every word on the pages once, in its order: the Rosh, the Rif, the commentary
     def same(name, laid, src):
@@ -2009,6 +2018,20 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     book = Book(m, rosh, rif, comm, comm_name, page, **(sizes or {}))
     rosh_pages = book.layout_rosh(book.rosh_units(rosh_days)) if rosh else []
     rif_pages = book.layout_rif(book.rif_units(rif_days)) if rif else []
+    # a comment the Ran gives pages before (or after) the passage of the Rif it explains,
+    # in another opening of the book: moved to stand with its passage, and the Rif laid
+    # out again
+    far = {x["entry"] for x in check_layout(book, rosh_pages, rif_pages) if x["kind"] == "link"}
+    if far:
+        for e in [e for e in comm if id(e) in far]:
+            comm.remove(e)
+            e["para"] = e.pop("dh_at")
+            k = next((q for q, x in enumerate(comm) if x["para"] > e["para"]), len(comm))
+            comm.insert(k, e)
+        report.append(f"ב{comm_name} {len(far)} דיבורים הועברו ליד הקטע שלהם ברי\"ף")
+        book = Book(m, rosh, rif, comm, comm_name, page, **(sizes or {}))
+        rosh_pages = book.layout_rosh(book.rosh_units(rosh_days)) if rosh else []
+        rif_pages = book.layout_rif(book.rif_units(rif_days)) if rif else []
     # the Rif from a left-hand page (an odd one): a blank page after the Rosh when it ends on one
     pad = [None] if rif_pages and len(rosh_pages) % 2 == 1 else []
     # where each siman and each passage begins (book page index)
