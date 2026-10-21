@@ -8,10 +8,10 @@ import math
 import random
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QLinearGradient, QPainterPath, QPen,
+from PySide6.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainterPath, QPen,
                            QRadialGradient, QTransform)
 
-from .textlayout import PT_PER_MM, ref_device
+from .textlayout import PT_PER_MM
 
 TITLE_FONT = "Frank Ruhl Libre"
 TEXT_FONT = "David Libre"
@@ -196,7 +196,11 @@ def qf(family, size, bold=True):
 
 
 def text_width(font, text):
-    return QFontMetricsF(font, ref_device()).horizontalAdvance(text)
+    """The width of text as draw_text draws it (a path of the letters, which Qt sets at the
+    screen's resolution, wider than the font's metrics at 72 dpi)."""
+    path = QPainterPath()
+    path.addText(QPointF(0, 0), font, text)
+    return path.boundingRect().width()
 
 
 def fit_font(family, size, text, max_w, bold=True):
@@ -307,8 +311,71 @@ def scroll(p, ink, c, w, flip=1, up=1):
 
 
 def divider(p, ink, cx, y, w, kind="scroll"):
-    """A line of ornament under a title: two scrolls from a lozenge in the middle, or (line)
-    a thin line broken by a small lozenge."""
+    """A line of ornament under a title: two scrolls from a lozenge in the middle (scroll),
+    a thin line broken by a small lozenge (line), a row of dots (dots), a heavy and a thin
+    line (double), a wave (wave), three lozenges (diamonds), or a vine (vine)."""
+    if kind == "dots":
+        n = max(5, int(w / 9))
+        p.setPen(Qt.NoPen)
+        p.setBrush(ink.brush)
+        for i in range(n):
+            x = cx - w / 2 + w * i / (n - 1)
+            r = 1.6 if i % 4 == 0 else 0.9
+            p.drawEllipse(QPointF(x, y), r, r)
+        return
+    if kind == "double":
+        p.setPen(ink.pen(max(1.0, w * 0.008)))
+        p.drawLine(QPointF(cx - w / 2, y - 1.5), QPointF(cx + w / 2, y - 1.5))
+        p.setPen(ink.pen(max(0.4, w * 0.003)))
+        p.drawLine(QPointF(cx - w * 0.42, y + 2), QPointF(cx + w * 0.42, y + 2))
+        return
+    if kind == "wave":
+        path = QPainterPath()
+        n = 80
+        for i in range(n + 1):
+            x = cx - w / 2 + w * i / n
+            yy = y + math.sin(i / n * math.pi * 8) * 2.4
+            path.moveTo(x, yy) if i == 0 else path.lineTo(x, yy)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(ink.pen(max(0.6, w * 0.004)))
+        p.drawPath(path)
+        return
+    if kind == "diamonds":
+        p.setPen(ink.pen(max(0.5, w * 0.003)))
+        p.drawLine(QPointF(cx - w / 2, y), QPointF(cx + w / 2, y))
+        for dx, s in ((-w * 0.18, 0.6), (0, 1.0), (w * 0.18, 0.6)):
+            path = QPainterPath()
+            r = max(2.5, w * 0.025) * s
+            path.moveTo(cx + dx, y - r)
+            path.lineTo(cx + dx + r * 0.7, y)
+            path.lineTo(cx + dx, y + r)
+            path.lineTo(cx + dx - r * 0.7, y)
+            path.closeSubpath()
+            p.setPen(Qt.NoPen)
+            p.setBrush(ink.brush)
+            p.drawPath(path)
+        return
+    if kind == "vine":
+        path = QPainterPath()
+        n = 60
+        for i in range(n + 1):
+            x = cx - w / 2 + w * i / n
+            yy = y + math.sin(i / n * math.pi * 4) * 2.0
+            path.moveTo(x, yy) if i == 0 else path.lineTo(x, yy)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(ink.pen(max(0.5, w * 0.003)))
+        p.drawPath(path)
+        for i in range(1, 8):
+            x = cx - w / 2 + w * i / 8
+            s = 1 if i % 2 else -1
+            leaf = QPainterPath()
+            leaf.moveTo(x, y)
+            leaf.quadTo(x + 2.5, y - s * 4.5, x + 6, y - s * 3)
+            leaf.quadTo(x + 3, y - s * 0.5, x, y)
+            p.setPen(Qt.NoPen)
+            p.setBrush(ink.brush)
+            p.drawPath(leaf)
+        return
     if kind == "line":
         s = max(2.0, w * 0.03)
         p.setPen(ink.pen(max(0.5, w * 0.004)))
@@ -366,6 +433,39 @@ def frame(p, ink, rect, k, kind="ornate", corners=True):
         elif kind == "single":
             p.setPen(ink.pen(0.9 * k))
             p.drawRect(inner)
+        elif kind == "triple":
+            for d, w in ((14, 0.6), (18, 1.8), (22, 0.6)):
+                p.setPen(ink.pen(w * k))
+                p.drawRect(rect.adjusted(d * k, d * k, -d * k, -d * k))
+        elif kind == "rounded":
+            p.setPen(ink.pen(1.6 * k))
+            r = rect.adjusted(18 * k, 18 * k, -18 * k, -18 * k)
+            p.drawRoundedRect(r, 22 * k, 22 * k)
+            p.setPen(ink.pen(0.6 * k))
+            p.drawRoundedRect(inner, 16 * k, 16 * k)
+        elif kind in ("dotted", "dashed"):
+            pen = ink.pen(1.2 * k)
+            pen.setStyle(Qt.DotLine if kind == "dotted" else Qt.DashLine)
+            p.setPen(pen)
+            p.drawRect(inner)
+            p.setPen(ink.pen(0.5 * k))
+            p.drawRect(inner.adjusted(-5 * k, -5 * k, 5 * k, 5 * k))
+        elif kind == "notched":
+            # a frame with its corners cut in, as on old title pages
+            c = 16 * k
+            path = QPainterPath()
+            l, t, r_, b = inner.left(), inner.top(), inner.right(), inner.bottom()
+            path.moveTo(l + c, t)
+            path.lineTo(r_ - c, t)
+            path.arcTo(QRectF(r_ - c, t - c, 2 * c, 2 * c), 180, 90)
+            path.lineTo(r_, b - c)
+            path.arcTo(QRectF(r_ - c, b - c, 2 * c, 2 * c), 90, 90)
+            path.lineTo(l + c, b)
+            path.arcTo(QRectF(l - c, b - c, 2 * c, 2 * c), 0, 90)
+            path.lineTo(l, t + c)
+            path.arcTo(QRectF(l - c, t - c, 2 * c, 2 * c), 270, 90)
+            p.setPen(ink.pen(1.4 * k))
+            p.drawPath(path)
         else:
             return rect.adjusted(34 * k, 34 * k, -34 * k, -34 * k)
         if corners:
@@ -581,9 +681,13 @@ def ground(p, rect, style, k, seed=7, front=True):
     if lay == "stars":
         stars(p, rect, k, seed)
     elif lay == "field":
-        if front:
+        if front and not style.get("extras"):
             sun(p, QPointF(rect.left() + rect.width() * 0.78, rect.top() + rect.height() * 0.16), 16 * k)
-        hills(p, rect, k)
+        if not style.get("extras"):
+            hills(p, rect, k)
+    if style.get("extras"):
+        from .cover_designs import extras
+        extras(p, rect, style, k, front)
 
 
 def raised_bands(p, ink, rect, k, ys):
@@ -598,6 +702,7 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
     the same words in black on white, in a plain frame (the gate's ornate one for the gate).
     bleed: how far the background goes on past rect (on a cover laid flat for printing)."""
     style = style or STYLES[0]
+    info = dict(info, verse=style.get("verse") or info.get("verse", ""))
     k = min(rect.width() / 595.0, rect.height() / 842.0)
     lay = style["layout"]
     if not gilt:
@@ -627,7 +732,7 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
                                  inner.width() * 0.66, 40 * k), verse, k)
 
     elif lay == "medallion":
-        inner = frame(p, ink, rect, k, "double", True)
+        inner = frame(p, ink, rect, k, style.get("frame", "double"), True)
         ow, oh = inner.width() * 0.86, inner.height() * 0.56
         oval = QRectF(cx - ow / 2, inner.top() + inner.height() * 0.15, ow, oh)
         p.setBrush(Qt.NoBrush)
@@ -721,7 +826,7 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
         title_block(p, upper, info_top, k, ink, style, scale=1.1)
         low = solid(style["ink2"])
         lower = QRectF(rect.left() + W * 0.1, cut + H * 0.01, W * 0.8, H * 0.26)
-        title_block(p, lower, dict(info, top="", title=""), k, low, dict(style, divider="line"), scale=0.92,
+        title_block(p, lower, dict(info, top="", title=""), k, low, dict({"divider": "line"}, **style), scale=0.92,
                     top_in_box=False)
         plain_text(p, low, verse, cx, rect.top() + H * 0.93, k, W * 0.6, 13)
 
@@ -745,7 +850,7 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
             draw_text(p, gl, info["top"], f, 0, f.pointSizeF() * 0.35)
             p.restore()
         area = QRectF(rect.left() + W * 0.07, rect.top() + H * 0.18, W * 0.66, H * 0.5)
-        title_block(p, area, info, k, ink, dict(style, divider="line"), top_in_box=False)
+        title_block(p, area, info, k, ink, dict({"divider": "line"}, **style), top_in_box=False)
         plain_text(p, ink, verse, area.center().x(), rect.top() + H * 0.86, k, area.width())
 
     elif lay == "letter":
@@ -763,7 +868,7 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
         p.setPen(ink.pen(0.8 * k))
         p.drawRect(rect.adjusted(20 * k, 20 * k, -20 * k, -20 * k))
         title_block(p, QRectF(rect.left() + W * 0.08, rect.top() + H * 0.2, W * 0.84, H * 0.52), info, k, ink,
-                    dict(style, divider="line"))
+                    dict({"divider": "line"}, **style))
         plain_text(p, ink, verse, cx, rect.top() + H * 0.85, k, W * 0.66)
 
     elif lay == "stars":
@@ -798,18 +903,23 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
         p.setPen(gl.pen(1.0 * k))
         p.drawPath(outline)
         title_block(p, QRectF(l + aw * 0.08, top + aw * 0.22, aw * 0.84, bot - top - aw * 0.3), info, k, ink,
-                    dict(style, divider="line"), scale=0.92)
+                    dict({"divider": "line"}, **style), scale=0.92)
         plain_text(p, solid(style["ink2"]), verse, cx, rect.top() + H * 0.89, k, W * 0.7)
 
     elif lay == "field":
         H, W = rect.height(), rect.width()
         title_block(p, QRectF(rect.left() + W * 0.08, rect.top() + H * 0.14, W * 0.84, H * 0.48), info, k, ink,
-                    dict(style, divider="line"), scale=1.05)
+                    dict({"divider": "line"}, **style), scale=1.05)
         plain_text(p, solid("#ffffff"), verse, cx, rect.top() + H * 0.93, k, W * 0.7)
+
+    else:
+        from .cover_designs import LAYOUTS
+        LAYOUTS[lay](p, rect, info, k, ink, style)
 
 
 def draw_back(p, rect, info, style=None, bleed=0.0):
     style = style or STYLES[0]
+    info = dict(info, back=style.get("back") or info.get("back", ""))
     k = min(rect.width() / 595.0, rect.height() / 842.0)
     lay = style["layout"]
     ground(p, rect.adjusted(-bleed, -bleed, bleed, bleed), style, k, seed=11, front=False)
@@ -938,3 +1048,71 @@ def spine_mm(n_pages, grams=80):
 
 
 BLEED_MM = 3.0
+
+
+from .cover_designs import MORE_STYLES  # noqa: E402  (the designs build on the helpers above)
+
+STYLES += MORE_STYLES
+
+# the verse at the foot of each cover and its lines: (verse, divider, frame or None)
+VARIETY = {
+    "שער מעוטר": ("תורה צוה לנו משה מורשה קהלת יעקב", "scroll", None),
+    "מדליון": ("עץ חיים היא למחזיקים בה ותמכיה מאשר", "diamonds", "triple"),
+    "תווית קלף": ("תורת ה' תמימה משיבת נפש", "double", None),
+    "קרני זהב": ("השמים מספרים כבוד אל ומעשה ידיו מגיד הרקיע", "dots", None),
+    "שני שדות": ("דרכיה דרכי נעם וכל נתיבותיה שלום", "line", None),
+    "פס צבע": ("גל עיני ואביטה נפלאות מתורתך", "double", None),
+    "אות גדולה": ("בראשית ברא אלהים את השמים ואת הארץ", "line", None),
+    "שמי לילה": ("הבט נא השמימה וספר הכוכבים", "dots", None),
+    "קשת מודרנית": ("נר לרגלי דברך ואור לנתיבתי", "diamonds", None),
+    "ברסלב": ("עבדו את ה' בשמחה באו לפניו ברננה", "vine", None),
+    "לוח מוזהב": ("פקודי ה' ישרים משמחי לב", "scroll", None),
+    "ספר תורה": ("וזאת התורה אשר שם משה לפני בני ישראל", "double", None),
+    "לוחות הברית": ("אנכי ה' אלהיך אשר הוצאתיך מארץ מצרים", "diamonds", None),
+    "מנורה": ("אל מול פני המנורה יאירו שבעת הנרות", "dots", "rounded"),
+    "כתר תורה": ("ויהי בישרון מלך בהתאסף ראשי עם", "scroll", "notched"),
+    "עמודי המקדש": ("בית יעקב לכו ונלכה באור ה'", "double", None),
+    "מגן דוד": ("ה' עז לעמו יתן ה' יברך את עמו בשלום", "diamonds", None),
+    "מגן": ("מגן הוא לכל החסים בו", "line", None),
+    "חותם": ("שימני כחותם על לבך כחותם על זרועך", "dots", "dashed"),
+    "קלף": ("וכתבתם על מזזות ביתך ובשעריך", "double", None),
+    "ירושלים": ("ירושלים הבנויה כעיר שחברה לה יחדו", "line", None),
+    "ים": ("כי מלאה הארץ דעה את ה' כמים לים מכסים", "wave", None),
+    "מדבר": ("לך לך מארצך וממולדתך ומבית אביך", "dots", None),
+    "הר סיני": ("וירד ה' על הר סיני אל ראש ההר", "double", None),
+    "ויהי אור": ("ויאמר אלהים יהי אור ויהי אור", "dots", None),
+    "קשת בענן": ("את קשתי נתתי בענן והיתה לאות ברית", "wave", None),
+    "עץ החיים": ("והיה כעץ שתול על פלגי מים", "vine", "rounded"),
+    "גפן": ("אשתך כגפן פריה בירכתי ביתך", "vine", None),
+    "לילה בשדה": ("ויצא יצחק לשוח בשדה לפנות ערב", "dots", None),
+    "שמש עולה": ("וזרחה לכם יראי שמי שמש צדקה", "line", None),
+    "פסיפס": ("מה רבו מעשיך ה' כלם בחכמה עשית", "diamonds", None),
+    "סבכה": ("כי לקח טוב נתתי לכם תורתי אל תעזבו", "double", None),
+    "חיתוך נייר": ("שמחו בה' וגילו צדיקים", "dots", None),
+    "פסי טלית": ("וראיתם אתו וזכרתם את כל מצות ה'", "double", None),
+    "אותיות": ("והגית בו יומם ולילה", "diamonds", None),
+    "פינות מעוטרות": ("ושמתם את דברי אלה על לבבכם", "scroll", None),
+    "פסוק מסביב": ("לא ימוש ספר התורה הזה מפיך", "double", None),
+    "חלונות בית הכנסת": ("מה טבו אהליך יעקב משכנתיך ישראל", "diamonds", None),
+    "שיש": ("ושמרתם ועשיתם כי היא חכמתכם ובינתכם", "line", None),
+    "פס אלכסוני": ("אור זרע לצדיק ולישרי לב שמחה", "line", None),
+    "מגזין": ("ובחרת בחיים למען תחיה אתה וזרעך", "line", None),
+    "כותרת ענקית": ("חזק ואמץ אל תערץ ואל תחת", "double", None),
+    "מדליון בכוכבים": ("כה יהיה זרעך", "dots", "dotted"),
+    "לוחות בכוכבים": ("כל אשר דבר ה' נעשה ונשמע", "double", None),
+    "מנורה על בד": ("כי נר מצוה ותורה אור", "scroll", "triple"),
+    "ספר תורה בלילה": ("ושננתם לבניך ודברת בם", "double", None),
+    "שמש מעל הים": ("ממזרח שמש עד מבואו מהלל שם ה'", "wave", None),
+    "ירושלים בלילה": ("אם אשכחך ירושלים תשכח ימיני", "dots", None),
+    "מגן דוד בפסיפס": ("הנה מה טוב ומה נעים שבת אחים גם יחד", "diamonds", None),
+    "כתר על שיש": ("ואתם תהיו לי ממלכת כהנים וגוי קדוש", "double", "triple"),
+}
+for _st in STYLES:
+    _v = VARIETY.get(_st["name"])
+    if _v:
+        _st.setdefault("verse", _v[0])
+        _st.setdefault("divider", _v[1])
+        if _v[2]:
+            _st.setdefault("frame", _v[2])
+# the back of the medallion: its front already has the verse of the back
+STYLES[1].setdefault("back", "תורה צוה לנו משה מורשה קהלת יעקב")
