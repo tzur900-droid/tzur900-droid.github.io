@@ -167,6 +167,8 @@ def kind_of(lines):
         return "navi:" + h1
     if h1 in TORAH and any(re.match(r"\s*<h3>\{", l) for l in lines[:20]):
         return "otz_torah"
+    if "רלב" in h1:
+        return "ralbag_milot" if "המלות" in h1 else "ralbag"
     if "אונקלוס" in h1:
         return "onkelos"
     if "רש" in h1 and "על" in h1:
@@ -177,7 +179,10 @@ def kind_of(lines):
 
 
 OTZ_NAMES = {"אונקלוס": "onkelos", "רש\"י": "rashi", "רמב\"ן": "ramban", "אור החיים": "orhachaim"}
-NAMES = {"onkelos": "אונקלוס", "rashi": "רש\"י", "ramban": "רמב\"ן", "orhachaim": "אור החיים"}
+NAMES = {"onkelos": "אונקלוס", "rashi": "רש\"י", "ramban": "רמב\"ן", "orhachaim": "אור החיים",
+         "ralbag_milot": "רלב\"ג - ביאור המלות", "ralbag": "רלב\"ג - ביאור דברי הסיפור והתועלות"}
+# commentaries that come in files of their own from Otzaria, beside the Torah file
+OTZ_OWN_FILES = ("ralbag_milot", "ralbag")
 # the commentaries a book gets unless asked otherwise
 DEFAULT_KINDS = ("onkelos", "rashi", "ramban")
 
@@ -237,6 +242,36 @@ def parse_otzaria_torah(lines):
 
 # (book, chapter, first verse, last verse) to join into the first
 MERGE_VERSES = [("דברים", 5, 17, 20)]
+
+
+def parse_otzaria_comm(lines, book):
+    """A commentary on the whole Torah from Otzaria in a file of its own (Ralbag):
+    '<h2>book</h2>', '<h3>פרק X</h3>', '<h4>פסוק Y</h4>', then its paragraphs. Only the
+    given book is kept; a line naming the parasha ('<big>…פרשת…</big>') is left out."""
+    out = {}
+    cur_book = ""
+    ch = v = 0
+    for l in lines[1:]:
+        m = re.match(r"\s*<h2>(.*?)</h2>", l)
+        if m:
+            cur_book, ch, v = clean(m.group(1)), 0, 0
+            continue
+        m = re.match(r"\s*<h3>\s*פרק\s+(\S+?)\s*</h3>", l)
+        if m:
+            ch, v = gematria(m.group(1)), 0
+            continue
+        m = re.match(r"\s*<h4>\s*פסוק\s+(\S+?)\s*</h4>", l)
+        if m:
+            v = gematria(m.group(1))
+            continue
+        if cur_book != book or not (ch and v) or re.match(r"\s*<big>", l):
+            continue
+        text = clean(l, keep_bold=True)
+        # a heading on a line of its own ('ביאור דברי הספור') runs into the text after it
+        text = re.sub(r"^\*\*([^*]*[^*.:;,])\*\*$", r"**\1:**", text)
+        if text:
+            out.setdefault((ch, v), []).append(text)
+    return out
 
 
 def parse_navi(lines):
@@ -402,6 +437,8 @@ def build(book, verses, comms, parashot, navi=None):
         "rashi": {"name": "רש\"י", "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9.5, "width": 30, "autoW": True, "cols": 2},
         "ramban": {"name": "רמב\"ן", "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9, "width": 30, "autoW": True, "cols": 2},
         "orhachaim": {"name": "אור החיים", "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9.5, "width": 30, "autoW": True, "cols": 2},
+        "ralbag_milot": {"name": NAMES["ralbag_milot"], "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9, "width": 30, "autoW": True, "cols": 2},
+        "ralbag": {"name": NAMES["ralbag"], "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9, "width": 30, "autoW": True, "cols": 2},
     }
     for kind in NAMES:
         if kind in comms:
@@ -420,6 +457,9 @@ def convert(paths, out_dir, kinds=DEFAULT_KINDS):
     if "otz_torah" in files:
         book, verses, comms = parse_otzaria_torah(files["otz_torah"])
         comms = {k: c for k, c in comms.items() if k in kinds}
+        for k in OTZ_OWN_FILES:
+            if k in files and k in kinds:
+                comms[k] = parse_otzaria_comm(files[k], book)
         return write_book(book, verses, comms, navi, out_dir)
     if "torah" not in files:
         raise ValueError("לא נמצא קובץ של הפסוקים (קובץ שהשורה הראשונה שלו היא שם הספר).")
