@@ -446,10 +446,15 @@ def draw_wrap(p, rect, info, spine_w, bleed):
 PAPER_MM = {60: 0.075, 70: 0.09, 80: 0.1, 90: 0.11, 100: 0.125, 120: 0.15}
 
 
+# the soft cover itself (card of about 250-300g) adds to the spine where it wraps the block
+COVER_MM = 0.5
+
+
 def spine_mm(n_pages, grams=80):
-    """The thickness of the book block: one sheet for every two pages."""
+    """The width of the spine of a soft cover: the book block (one sheet for every two
+    pages) and the card of the cover around it."""
     sheet = PAPER_MM.get(grams, grams / 800)
-    return max(3.0, math.ceil(n_pages / 2) * sheet)
+    return max(3.0, math.ceil(n_pages / 2) * sheet + COVER_MM)
 
 
 BLEED_MM = 3.0

@@ -550,15 +550,7 @@ class MainWindow(QMainWindow):
     def fit_to_page(self):
         """Scale the fonts, margins and gaps by the page width compared with A4, for a book
         printed smaller (or larger) than the A4 the projects were set up for."""
-        w, _ = model.page_mm(self.project)
-        k = w / 210.0
-        p = self.project
-        p["mainSize"] = round(max(7.0, p["mainSize"] * k) * 2) / 2
-        p["margin"] = round(max(5.0, p["margin"] * k))
-        p["colGap"] = round(max(2.0, p["colGap"] * k) * 2) / 2
-        p["sectionGap"] = round(max(1.0, p["sectionGap"] * k) * 2) / 2
-        for c in p["comms"]:
-            c["size"] = round(max(6.0, c["size"] * k) * 2) / 2
+        model.fit_to_page(self.project)
         self.fill_editor()
         self.changed()
 

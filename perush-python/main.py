@@ -4,7 +4,8 @@
     python main.py project.json out.pdf  lay out a project straight to PDF (no window)
         (--cover adds a front cover, a title page and a back cover, and writes beside it
         the whole cover for printing and the inside of the book for printing;
-        --paper 70 sets the weight of the paper, which sets the width of the spine)
+        --paper 70 sets the weight of the paper, which sets the width of the spine;
+        --size B5 sets the page size and fits the fonts and margins to it)
     python main.py --import OUT_DIR files…  convert Sefaria text files into project files
         (--comms onkelos,orhachaim chooses the commentaries; default onkelos,rashi,ramban)
 """
@@ -78,13 +79,21 @@ def main():
         return 0
 
     # the files: what isn't an option or the value of one
-    args = [a for k, a in enumerate(sys.argv[1:], 1) if not a.startswith("-") and sys.argv[k - 1] != "--paper"]
+    args = [a for k, a in enumerate(sys.argv[1:], 1) if not a.startswith("-") and sys.argv[k - 1] not in ("--paper", "--size")]
     if len(args) == 2:
         from perush.cover import book_info
         from perush.engine import layout_project
         from perush.model import load_project
         from perush.render import export_cover, export_pdf
         project = load_project(args[0])
+        if "--size" in sys.argv:
+            from perush.model import PAGE_SIZES, fit_to_page
+            size = sys.argv[sys.argv.index("--size") + 1]
+            if size not in PAGE_SIZES or size == "custom":
+                print("גודל לא מוכר:", size, "— אפשר:", ", ".join(k for k in PAGE_SIZES if k != "custom"))
+                return 1
+            project["pageSize"] = size
+            fit_to_page(project)
         pages, warnings = layout_project(project)
         for w in warnings:
             print("⚠", w)

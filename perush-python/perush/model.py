@@ -36,6 +36,20 @@ def page_mm(project):
     _, w, h = PAGE_SIZES.get(project.get("pageSize"), PAGE_SIZES["A4"])
     return float(w), float(h)
 
+
+def fit_to_page(p):
+    """Scale the fonts, margins and gaps by the page width compared with A4, for a book
+    printed smaller (or larger) than the A4 the projects were set up for."""
+    w, _ = page_mm(p)
+    k = w / 210.0
+    p["mainSize"] = round(max(7.0, p["mainSize"] * k) * 2) / 2
+    p["margin"] = round(max(5.0, p["margin"] * k))
+    p["colGap"] = round(max(2.0, p["colGap"] * k) * 2) / 2
+    p["sectionGap"] = round(max(1.0, p["sectionGap"] * k) * 2) / 2
+    for c in p["comms"]:
+        c["size"] = round(max(6.0, c["size"] * k) * 2) / 2
+
+
 DEFAULTS = {
     "title": "",
     "main": "",
