@@ -473,20 +473,32 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None):
     def gemara_word(k):
         return any(tuple(seq[j:j + 3]) in gem for j in range(max(0, k - 2), k + 1))
 
+    sseq = [stem(x) for x in seq]
     for e in entries:
         r, rsrc = e["words"], e["src"]
+        # as in the Rosh: words match without a one-letter prefix and a final ה or א, and
+        # not across a word that changes the meaning which Rashi has not there
         at = {}
         for p, w in enumerate(r):
-            at.setdefault(w, []).append(p)
+            at.setdefault(stem(w), []).append(p)
+        rtext = e["text"]
+
+        def same_sense(ci, i2, cp, p2):
+            mine = {norm(toks[k][0]) for k in set(src[ci + 1:i2])} & MEANING
+            if not mine:
+                return True
+            theirs = {norm(rtext[k]) for k in set(rsrc[cp + 1:p2])}
+            return mine <= theirs
+
         i = dh_end
         while i < len(seq):
             best = []
-            for p0 in at.get(seq[i], ()):
+            for p0 in at.get(sseq[i], ()):
                 chain, ci, cp = [(i, p0)], i, p0
                 while True:
                     nxt = None
                     for i2 in range(ci + 1, min(len(seq), ci + gap + 1)):
-                        ps = [p for p in at.get(seq[i2], ()) if cp < p <= cp + gap + 1]
+                        ps = [p for p in at.get(sseq[i2], ()) if cp < p <= cp + gap + 1 and same_sense(ci, i2, cp, p)]
                         if ps:
                             nxt = (i2, ps[0])
                             break
@@ -1010,10 +1022,11 @@ class Book:
         big = Style(st.family, st.size * 1.3, True)
         gem = Style(st.family, st.size * 0.75)
         copen = Style("Frank Ruhl Libre", st.size * 1.4, True)
+        dh = Style("Frank Ruhl Libre", st.size, True)
         out = []
         for t in toks:
             w, bold = t[0], t[1]
-            s_ = {"label": lab, "open": big, "gem": gem, "rashi": st.with_bold(True), "hadran": b, "dh": st, "copen": copen}.get(bold) or (b if bold else st)
+            s_ = {"label": lab, "open": big, "gem": gem, "rashi": st.with_bold(True), "hadran": b, "dh": dh, "copen": copen}.get(bold) or (b if bold else st)
             out.append(Word(w, s_, width(s_, w), t[2] if len(t) > 2 else None))
         return out
 
@@ -1053,11 +1066,14 @@ class Book:
         return units
 
     def rif_units(self, day_at):
-        units = []
+        """The Rif's passages; they run on with no break between them. Where a day begins,
+        its number goes in the margin beside the line (the passage's first word carries it)."""
+        units, self.rif_day_at = [], dict(day_at)
         for j, p in enumerate(self.rif):
-            if j in day_at:
-                units.append(self.marker(day_at[j], self.st_rif))
-            units.append(Unit("p", self.words(p["tokens"], self.st_rif), j))
+            toks = p["tokens"]
+            if j in day_at and toks:
+                toks = [[toks[0][0], toks[0][1], f"יום {heb(day_at[j])}"]] + toks[1:]
+            units.append(Unit("p", self.words(toks, self.st_rif), j))
         return units
 
     # -------------------------------------------------- the Rosh: two columns
@@ -1077,6 +1093,7 @@ class Book:
         return out
 
     def layout_rosh(self, units):
+        self.rosh_units_list = units
         colw = (self.W - self.gap) / 2
         lines = self.lines_of(units, colw, self.st_rosh, self.lh_rosh)
         pages, i, n = [], 0, len(lines)
@@ -1118,12 +1135,24 @@ class Book:
         self.total = t
         # the commentary as one run of words, entry after entry
         self.cwords, self.c_end_of_para = [], {}
-        for e in self.comm:
+        # where a day begins in the commentary: its first entry on the day's passage of the
+        # Rif (or after it)
+        day_entry, pending = {}, sorted(getattr(self, "rif_day_at", {}).items())
+        for k, e in enumerate(self.comm):
+            while pending and e["para"] >= pending[0][0]:
+                day_entry.setdefault(k, pending[0][1])
+                pending.pop(0)
+        for k, e in enumerate(self.comm):
             toks = e["tokens"]
+            # the dibbur hamatchil in its own letters (square, bold), also where it is Rashi's
+            toks = [[t[0], "dh"] if q < e.get("dh_len", 0) and t[1] in (True, "rashi", "dh") else t
+                    for q, t in enumerate(toks)]
+            if k in day_entry and toks:
+                toks = [[toks[0][0], toks[0][1], f"יום {heb(day_entry[k])}"]] + toks[1:]
             if e.get("open"):
                 # the word that opens a Mishna, large in square letters
                 k = next((i for i, t in enumerate(toks) if norm(t[0]) not in SKIP_DH), 0)
-                toks = toks[:k] + [[toks[k][0], "copen"]] + toks[k + 1:]
+                toks = toks[:k] + [[toks[k][0], "copen"] + list(toks[k][2:])] + toks[k + 1:]
             if e.get("gem"):
                 toks = [[f"[דף {e['gem']}]", "gem"]] + toks
             ws = self.words(toks, self.st_comm)
@@ -1149,37 +1178,43 @@ class Book:
         return lo
 
     def text_lines(self, a, b, width_at, y0=0.0):
-        """Lines of the Rif words a..b laid out with width_at(y), from y0 down."""
-        out, y = [], y0
-        u0, u1 = self.unit_at(a), self.unit_at(max(a, b - 1))
-        for k in range(u0, u1 + 1):
+        """Lines of the Rif words a..b laid out with width_at(y), from y0 down: one run of
+        text, a passage going on in the line where the one before it ended. Each line
+        knows its first passage (unit) and all the passages in it (refs)."""
+        words, owner = [], []
+        for k in range(self.unit_at(a), self.unit_at(max(a, b - 1)) + 1):
             u = self.units[k]
             s = max(a, self.off[k]) - self.off[k]
             e = min(b, self.off[k] + len(u.words)) - self.off[k]
-            ws = u.words[s:e]
-            if not ws:
-                continue
-            if u.kind == "p":
-                ls = break_lines(ws, self.st_rif, self.lh_rif, width_at, y)
-                if e < len(u.words):
-                    ls[-1].last = False
-                    ls[-1].cut = True
-            else:
-                ls = break_lines(ws, ws[0].style, self.lh_rif * 1.35, width_at, y, "center")
-            for l in ls:
-                l.unit = u
-            out.extend(ls)
-            y = out[-1].y + out[-1].h
-        return out, y
+            words += u.words[s:e]
+            owner += [k] * max(0, e - s)
+        if not words:
+            return [], y0
+        out = break_lines(words, self.st_rif, self.lh_rif, width_at, y0)
+        i = 0
+        for l in out:
+            n = len(l.words)
+            l.unit = self.units[owner[i]]
+            l.refs = [self.units[k].ref for k in sorted(set(owner[i:i + n]))]
+            i += n
+        if b < self.total:
+            out[-1].last = False
+            out[-1].cut = True
+        return out, out[-1].y + out[-1].h
 
-    def take_cols(self, words, width_at, H, y0=0.0):
+    def take_cols(self, words, width_at, H, y0=0.0, band=None):
         """Fill the right column and then the left one, from y0 down; width_at(y) ->
-        (right, width)."""
+        (right, width). band (y1, y2): no lines there (the Rif across the page); a column
+        goes on under it."""
         cols, i, n = [], 0, len(words)
         sp = space(self.st_comm)
         for _ in range(2):
             col, y = [], y0
-            while i < n and y + self.lh_comm <= H + EPS:
+            while i < n:
+                if band and band[0] - EPS <= y < band[1] - EPS:
+                    y = band[1]
+                if y + self.lh_comm > H + EPS:
+                    break
                 right, w = width_at(y)
                 cur, nat, j = [words[i]], words[i].w, i + 1
                 while j < n and nat + sp + words[j].w <= w + 0.01:
@@ -1256,6 +1291,7 @@ class Book:
             if fit is not None:
                 cols, hc, T2 = fit
                 mode = "short"
+                r["T"] = T2
                 t02 = T2 + self.vgap / 2 if T2 else 0.0
                 lim2 = hc + self.vgap if hc > T2 else 0.0
                 wa = lambda y: (self.cw + self.gap, Wt) if y < lim2 else (0.0, self.W)
@@ -1282,7 +1318,7 @@ class Book:
             if alt is not None:
                 cols, hc, text, th2, t02 = alt
                 r.update(text=text, th=th2, cols=cols, n=req - cptr, mode="short", total=th2, req=req, avail=avail,
-                         hc=hc, t0=t02)
+                         hc=hc, t0=t02, T=max(0.0, t02 - self.vgap / 2))
                 r["cnext"] = req
                 r["fits"] = th2 <= self.H + EPS
                 return r
@@ -1390,27 +1426,28 @@ class Book:
 
     def fill_below(self, r):
         """A page where the Rif widened under a short commentary and ended (at the end of a
-        passage) with room left at the bottom: the commentary that comes next goes on
-        under the Rif in its two columns, as on a page of the Gemara."""
+        passage) with room left at the bottom: the commentary goes on under the Rif in its
+        two columns, as on a page of the Gemara (each column: the top block, beside the
+        Rif, and on under it)."""
         if r["mode"] != "short" or r["at_end"] or not r["text"]:
             return r
         y0 = r["th"] + self.vgap
         rows = int((self.H - y0 + EPS) // self.lh_comm)
-        more = self.cwords[r["cnext"]:r["avail"]]
-        if rows < 2 or not more:
+        if rows < 2 or r["avail"] <= r["cnext"]:
             return r
-        cs, k = self.take_cols(more, full_width(self.wide), y0 + rows * self.lh_comm, y0)
-        if k == 0:
+        hc, T = r.get("hc", 0.0), r.get("T", 0.0)
+        top = self.around(T, self.H + 1)
+        width_at = lambda y: top(y) if y < hc - EPS else (0.0, self.wide)
+        words = self.cwords[r["cptr"]:r["avail"]]
+        cs, k = self.take_cols(words, width_at, y0 + rows * self.lh_comm, 0.0, (hc, y0))
+        if k <= r["cnext"] - r["cptr"]:
             return r
-        hc = r.get("hc", 0.0)
-        for c, extra in zip(r["cols"], cs):
-            # what was beside the Rif keeps its place; the rest goes under it
+        for c in cs:
             for l in c:
-                l.keep = True
-            c.extend(extra)
-        r["cnext"] += k
+                l.keep = l.y < hc - EPS
+        r["cols"] = cs
+        r["cnext"] = r["cptr"] + k
         r["below"] = y0
-        r["hc"] = hc
         return r
 
     def full(self, q):
@@ -1456,16 +1493,18 @@ class Book:
             for c in r["cols"]:
                 stretch(c, self.H, self.lh_comm * 1.5)
         elif r["mode"] == "short" and "below" in r:
+            T = r.get("T", 0.0)
             for c in r["cols"]:
-                top = [l for l in c if getattr(l, "keep", False)]
+                # the top block stays as it is: only the lines beside the Rif open
+                side = [l for l in c if getattr(l, "keep", False) and l.y >= T - EPS]
                 under = [l for l in c if not getattr(l, "keep", False)]
-                stretch(top, r.get("hc", 0.0), self.lh_comm * 1.5)
+                stretch(side, r.get("hc", 0.0), self.lh_comm * 1.5)
                 stretch(under, self.H, self.lh_comm * 1.5)
             stretch(r["text"], r["below"] - self.vgap, self.lh_rif * 0.25 * max(1, len(r["text"])))
         elif r["mode"] == "short":
-            hc = r.get("hc", 0.0)
+            hc, T = r.get("hc", 0.0), r.get("T", 0.0)
             for c in r["cols"]:
-                stretch(c, hc, self.lh_comm * 1.5)
+                stretch([l for l in c if l.y >= T - EPS], hc, self.lh_comm * 1.5)
             if not last:
                 stretch(r["text"], self.H, self.lh_rif * 0.25 * max(1, len(r["text"])))
         else:
@@ -1506,6 +1545,20 @@ class Book:
                             x = R + self.m / 2 if k == 0 else L - self.m / 2
                             page.marks.append((x, top + l.y + l.h * 0.72, " ".join(labels), mst))
             else:
+                # where a day begins: in the margin beside the line, of the Rif on the right,
+                # of the commentary on its column's side
+                page.marks = []
+                mst = Style("Frank Ruhl Libre", 7.5, True)
+                sides = [(pg["text"], R + self.m / 2)]
+                if pg["cols"]:
+                    sides.append((pg["cols"][0], R + self.m / 2))
+                if len(pg["cols"]) > 1:
+                    sides.append((pg["cols"][1], L - self.m / 2))
+                for lines, x in sides:
+                    for l in lines:
+                        labels = [w.ref for w in l.words if isinstance(w.ref, str)]
+                        if labels:
+                            page.marks.append((x, top + l.y + l.h * 0.72, " ".join(labels), mst))
                 if pg["text"]:
                     page.frames.append(Frame(pg["text"], R, top))
                 cols = pg["cols"]
@@ -1586,6 +1639,21 @@ def day_plan(root):
     return days, first
 
 
+def plain_refs(toks):
+    """A reference in round brackets ("(סנהדרין פו.)", "(דף ב.)") is not part of a
+    quotation: never bold."""
+    for k, t in enumerate(toks):
+        if not t[0].startswith("("):
+            continue
+        # to the closing bracket, if it comes within a few words (a reference is short)
+        e = next((q for q in range(k, min(len(toks), k + 6)) if toks[q][0].endswith(")")), None)
+        if e is None:
+            continue
+        for q in range(k, e + 1):
+            if toks[q][1] in (True, "rashi"):
+                toks[q][1] = False
+
+
 def load_masechet(root, m, found=None):
     s = sources(root, m)
     rosh = parse_rosh(read(s["rosh"])) if s["rosh"] else []
@@ -1632,6 +1700,11 @@ def load_masechet(root, m, found=None):
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
             report.append(f"ב{s['comm_name']} {comm_gemara_marks(comm, amudim, gtoks, gamud)} סימני דפי הגמרא")
         report.append(f"ב{s['comm_name']} {mishna_openers(comm, rif)} פתיחות של משנה")
+    for x in rosh:
+        for p in x["paras"]:
+            plain_refs(p)
+    for e in comm:
+        plain_refs(e["tokens"])
     return rosh, rif, comm, s["comm_name"], report
 
 
@@ -1814,6 +1887,53 @@ def check_layout(book, rosh_pages, rif_pages):
             out.append({"kind": "hole", "page": off + n + 1, "detail": "חלל בתחתית העמוד"})
         if not pg["text"]:
             out.append({"kind": "comm_only", "page": off + n + 1, "detail": "עמוד של מפרש בלבד"})
+        # no line of the Rif on a line of the commentary
+        R, cw = book.W, book.wide
+        boxes = [(R - l.right - l.width, R - l.right, l.y, l.y + l.h) for l in pg["text"]]
+        for k, col in enumerate(pg["cols"]):
+            for l in col:
+                if k == 0:
+                    x1, x2 = R - l.width, R
+                else:
+                    right = (cw - l.width) if l.width < cw - 0.5 else 0.0
+                    x2 = cw - right
+                    x1 = x2 - l.width
+                for a1, a2, b1, b2 in boxes:
+                    if a1 < x2 - 1 and x1 + 1 < a2 and b1 < l.y + l.h - 1 and l.y + 1 < b2:
+                        out.append({"kind": "overlap", "page": off + n + 1, "detail": "שורת רי\"ף על שורת מפרש"})
+                        break
+                else:
+                    continue
+                break
+    # every word on the pages once, in its order: the Rosh, the Rif, the commentary
+    def same(name, laid, src):
+        if [id(w) for w in laid] != [id(w) for w in src]:
+            lost = len({id(w) for w in src} - {id(w) for w in laid})
+            twice = len(laid) - len({id(w) for w in laid})
+            out.append({"kind": "words", "page": 0,
+                        "detail": f"{name}: {lost} מילים חסרות, {twice} כפולות, או סדר שונה"})
+    # every day marked once in the Rosh, and (where there is a Rif) once in the Rif and once
+    # in the commentary
+    def days_in(words):
+        return [w.ref for w in words if isinstance(w.ref, str) and w.ref.startswith("יום ")]
+    rosh_days = [" ".join(w.text for w in l.words) for pg in rosh_pages for c in pg["cols"] for l in c
+                 if l.unit.kind == "d"]
+    parts = [("הרא\"ש", rosh_days)]
+    if rif_pages:
+        parts.append(("הרי\"ף", days_in(w for pg in rif_pages for l in pg["text"] for w in l.words)))
+        if book.cwords:
+            parts.append(("המפרש", days_in(w for pg in rif_pages for c in pg["cols"] for l in c for w in l.words)))
+    for name, got in parts:
+        if len(got) != len(set(got)) or (len(parts) > 1 and len(got) != len(parts[0][1])):
+            out.append({"kind": "days", "page": 0,
+                        "detail": f"{name}: {len(got)} סימוני ימים ({len(set(got))} שונים) מול {len(parts[0][1])} ברא\"ש"})
+    if rosh_pages:
+        same("הרא\"ש", [w for pg in rosh_pages for c in pg["cols"] for l in c if l.unit.kind == "p" for w in l.words],
+             [w for u in book.rosh_units_list if u.kind == "p" for w in u.words])
+    if rif_pages:
+        same("הרי\"ף", [w for pg in rif_pages for l in pg["text"] for w in l.words],
+             [w for u in book.units for w in u.words])
+        same("המפרש", [w for pg in rif_pages for c in pg["cols"] for l in c for w in l.words], book.cwords)
     return out
 
 
@@ -1851,8 +1971,8 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     off = len(rosh_pages) + len(pad)
     for n, pg in enumerate(rif_pages):
         for l in pg["text"]:
-            if l.unit.kind == "p" and l.unit.ref not in para_page:
-                para_page[l.unit.ref] = off + n
+            for ref in getattr(l, "refs", [l.unit.ref]):
+                para_page.setdefault(ref, off + n)
     xref, amud = [], None
     for n, pg in enumerate(rosh_pages):
         refs = [l.unit.ref for col in pg["cols"] for l in col if l.unit.kind == "p"]
