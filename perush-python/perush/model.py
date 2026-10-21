@@ -204,7 +204,8 @@ def parse_main(text):
 
     '# …' is a heading; a heading starting with פרשת/פרשה names the parasha for the
     running head. '## …' opens a section with no commentary (a haftara) until the next
-    '# …'. '[label] text' gives a verse its own label.
+    '# …'. '#+ שני' marks the next verse as the start of an aliyah (it is not a heading
+    and the verses run on). '[label] text' gives a verse its own label.
     """
     items = []
     verses = 0
@@ -212,9 +213,13 @@ def parse_main(text):
     chapter = ""
     parasha = ""
     no_comm = False
+    aliyah = ""
     for line in text.replace("\r", "").split("\n"):
         t = line.strip()
         if not t:
+            continue
+        if t.startswith("#+"):
+            aliyah = t[2:].strip()
             continue
         if t.startswith("#"):
             # '###' is a heading inside the current section (a chapter within a haftara)
@@ -234,8 +239,9 @@ def parse_main(text):
             label, body = m.group(1), m.group(2)
         items.append({
             "type": "v", "idx": -1 if no_comm else verses, "label": label, "words": tokenize(body),
-            "plain": body, "chapter": chapter, "parasha": parasha, "noComm": no_comm,
+            "plain": body, "chapter": chapter, "parasha": parasha, "noComm": no_comm, "aliyah": aliyah,
         })
+        aliyah = ""
         if not no_comm:
             verses += 1
     return items, verses

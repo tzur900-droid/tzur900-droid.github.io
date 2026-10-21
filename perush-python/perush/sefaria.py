@@ -165,6 +165,8 @@ def kind_of(lines):
     h1 = clean(lines[0]) if lines else ""
     if h1 in NAVI:
         return "navi:" + h1
+    if h1.startswith("פרשת ") and any(re.match(r"\s*<h2>", l) for l in lines[:5]):
+        return "aliyot:" + h1[5:].strip()
     if h1 in TORAH and any(re.match(r"\s*<h3>\{", l) for l in lines[:20]):
         return "otz_torah"
     if "רלב" in h1:
@@ -180,9 +182,17 @@ def kind_of(lines):
 
 OTZ_NAMES = {"אונקלוס": "onkelos", "רש\"י": "rashi", "רמב\"ן": "ramban", "אור החיים": "orhachaim"}
 NAMES = {"onkelos": "אונקלוס", "rashi": "רש\"י", "ramban": "רמב\"ן", "orhachaim": "אור החיים",
-         "ralbag_milot": "רלב\"ג - ביאור המלות", "ralbag": "רלב\"ג - ביאור דברי הסיפור והתועלות"}
+         "ralbag_milot": "רלב\"ג - ביאור המלות", "ralbag": "רלב\"ג - ביאור דברי הסיפור", "ralbag_toalot": "רלב\"ג - התועלות",
+         "ralbag_navi": "רלב\"ג"}
+# the commentaries on the haftarot (from the books of Nevi'im in Otzaria): layer -> the
+# commentator's name there; asked for with 'haftara' in the kinds
+NAVI_COMMS = {"rashi": "רש\"י", "ralbag_navi": "רלב\"ג"}
 # commentaries that come in files of their own from Otzaria, beside the Torah file
 OTZ_OWN_FILES = ("ralbag_milot", "ralbag")
+# Ralbag's lessons: a paragraph that begins with one of them, and those after it, until
+# the explanation goes on (a heading or a root of a mitzva)
+TOALOT = re.compile(r"^(והנה|ואולם)?\s*ו?התועל(ת|ות)")
+NOT_TOALOT = re.compile(r"^\*\*\s*(השרש|ביאור|באור)")
 # the commentaries a book gets unless asked otherwise
 DEFAULT_KINDS = ("onkelos", "rashi", "ramban")
 
@@ -274,6 +284,23 @@ def parse_otzaria_comm(lines, book):
     return out
 
 
+def split_toalot(comm):
+    """Ralbag on the Torah -> (the explanation of the story, the lessons)."""
+    story, toalot = {}, {}
+    for key, paras in comm.items():
+        mode = False
+        for t in paras:
+            plain = t.replace("**", "").strip()
+            # 'התועלת הראשון…', 'והנה התועלת…', or a short line that opens them:
+            # 'ואולם התועלות המגיעות מזה הספור הם תשעה:'
+            if TOALOT.match(plain) or (len(plain) < 200 and "התועל" in plain and plain.endswith(":")):
+                mode = True
+            elif NOT_TOALOT.match(t):
+                mode = False
+            (toalot if mode else story).setdefault(key, []).append(t)
+    return story, toalot
+
+
 def parse_navi(lines):
     """A book of Nevi'im from Otzaria: '<h2>… פרק-X</h2>', '<h3>{Y}</h3>', then the verse
     (with te'amim, ketiv/qere as '(ketiv) [qere]') and commentaries, which are skipped."""
@@ -297,9 +324,88 @@ def parse_navi(lines):
     return out
 
 
-def haftara_part(title, parts, navi, end_mark=None, start_mark=None):
+def parse_navi_comms(lines):
+    """The commentaries under each verse of a book of Nevi'im from Otzaria (Rashi, Ralbag…):
+    {(chapter, verse): {name: [paragraphs]}}. A commentator's first line is marked
+    '<b style="color: gray;">name</b>'; lines after it without a mark are his too."""
+    out = {}
+    ch = v = 0
+    expect = False
+    cur = None
+    for l in lines:
+        m = re.match(r"\s*<h2>.*?פרק[-\s]+(\S+?)\s*</h2>", l)
+        if m:
+            ch, v, cur = gematria(m.group(1)), 0, None
+            continue
+        m = re.match(r"\s*<h3>\{(\S+?)\}</h3>", l)
+        if m:
+            v, expect, cur = gematria(m.group(1)), True, None
+            continue
+        if not l.strip() or not (ch and v):
+            continue
+        if expect:
+            expect = False      # the verse itself
+            continue
+        m = re.match(r'\s*<b style="color: gray;">(.*?)</b>\s*(.*)$', l)
+        if m:
+            cur = clean(m.group(1))
+            l = m.group(2)
+        if cur:
+            t = clean(l, keep_bold=True).replace("''", '"')
+            t = re.sub(r"\s+([.:,;])", r"\1", t)            # 'זקן .' -> 'זקן.'
+            t = re.sub(r"\*\*\s*([.:,;])", r"\1**", t)
+            if t:
+                out.setdefault((ch, v), {}).setdefault(cur, []).append(t)
+    return out
+
+
+def parse_aliyot(lines):
+    """A parasha from Otzaria ('תורה לפי פרשיות'): '<h2>שני</h2>' before the verse that
+    begins each aliyah, '<h3>{X}</h3>' before every verse (with no chapters: a verse number
+    lower than the one before begins the next chapter). Returns [(aliyah, chapters after
+    the parasha's first, verse)]."""
+    out, ch, last, name = [], 0, 0, None
+    for l in lines:
+        m = re.match(r"\s*<h2>(.*?)</h2>", l)
+        if m:
+            name = clean(m.group(1))
+            continue
+        m = re.match(r"\s*<h3>\{(\S+?)\}</h3>", l)
+        if m:
+            v = gematria(m.group(1))
+            if v < last:
+                ch += 1
+            last = v
+            if name:
+                out.append((name, ch, v))
+                name = None
+    return out
+
+
+# names Otzaria gives some parashot
+PARASHA_ALIASES = {"שלח לך": "שלח", "בהעלותך": "בהעלתך", "פנחס": "פינחס", "אחרי": "אחרי מות", "בחוקתי": "בחקתי"}
+
+
+def aliyah_marks(aliyot, name, verses, a, b):
+    """{index in verses: aliyah} for the parasha verses[a:b], or None when the aliyot don't
+    fit its verses."""
+    first_ch = verses[a][0]
+    index = {(verses[n][0], verses[n][1]): n for n in range(a, b)}
+    marks = {}
+    for al_name, dch, v in aliyot.get(name, []):
+        n = index.get((first_ch + dch, v))
+        if n is None:
+            return None
+        if n > a:
+            marks[n] = al_name
+    return marks or None
+
+
+def haftara_part(title, parts, navi, end_mark=None, start_mark=None, slots=None):
+    """slots: when the haftara gets commentaries, a list that each verse's
+    (book, chapter, verse) is added to; the haftara is then a section with commentary."""
     book0, c0 = parts[0][0], parts[0][1]
-    out = [f"## {title} ({book0} {heb(c0)})"]
+    out = [f"{'#' if slots is not None else '##'} {title} ({book0} {heb(c0)})"]
     cur = c0
     for book, c1, v1, c2, v2 in parts:
         verses = sorted(k for k in navi[book] if (c1, v1) <= k <= (c2, v2))
@@ -313,23 +419,25 @@ def haftara_part(title, parts, navi, end_mark=None, start_mark=None):
             if start_mark and (book, ch, v) == start_mark:
                 text = "**(כאן מתחילים הספרדים)** " + text
             out.append(f"[{heb(v)}] {text}")
+            if slots is not None:
+                slots.append((book, ch, v))
     return out
 
 
-def haftara_lines(name, navi):
+def haftara_lines(name, navi, slots=None):
     """The haftara of a parasha as main-text lines ('## הפטרת …', verses, '### פרק' when
     the chapter changes): the Ashkenazi custom, with the Sephardi custom where it differs.
-    [] when a book it needs isn't loaded."""
+    [] when a book it needs isn't loaded. slots: see haftara_part."""
     parts = HAFTAROT.get(name)
     if not parts or any(b not in navi for b, *_ in parts):
         return []
     sef = HAFTAROT_SEFARAD.get(name)
     if sef and sef[0] == "own" and all(b in navi for b, *_ in sef[1]):
-        return (haftara_part(f"הפטרת {name} לאשכנזים", parts, navi)
-                + haftara_part(f"הפטרת {name} לספרדים", sef[1], navi))
+        return (haftara_part(f"הפטרת {name} לאשכנזים", parts, navi, slots=slots)
+                + haftara_part(f"הפטרת {name} לספרדים", sef[1], navi, slots=slots))
     end_mark = tuple(sef[1:]) if sef and sef[0] == "end" else None
     start_mark = tuple(sef[1:]) if sef and sef[0] == "start" else None
-    return haftara_part(f"הפטרת {name}", parts, navi, end_mark, start_mark)
+    return haftara_part(f"הפטרת {name}", parts, navi, end_mark, start_mark, slots)
 
 
 def parse_torah(lines):
@@ -397,33 +505,39 @@ def heb(n):
     return s
 
 
-def comm_lines(entries, verses):
-    lines = []
-    for n, (ch, v, _, _) in enumerate(verses, 1):
-        for t in entries.get((ch, v), []):
-            lines.append(f"@{n} {t}")
-    return "\n".join(lines)
-
-
-def build(book, verses, comms, parashot, navi=None):
+def build(book, verses, comms, parashot, navi=None, aliyot=None, hcomms=None):
     """parashot: [(name, first index, end index)] within verses. Each parasha is followed
-    by its haftara when the books of Nevi'im are given."""
+    by its haftara when the books of Nevi'im are given. aliyot: {parasha: ([(aliyah,
+    offset)], number of verses)}. hcomms: {book of Nevi'im: commentaries} when the
+    haftarot get commentaries."""
     main = []
+    slots = []          # what each verse with commentary is: ("t", ch, v) or (book, ch, v)
     cur_ch = None
     starts = {a: name for name, a, _ in parashot}
     ends = {b: name for name, _, b in parashot}
+    marks = {}
+    for name, a, b in parashot:
+        marks.update(aliyah_marks(aliyot or {}, name, verses, a, b) or {})
+    hslots = slots if hcomms is not None else None
+
+    def haftara(name):
+        main.extend(haftara_lines(name, navi, hslots))
+
     for n, (ch, v, label, text) in enumerate(verses):
         if n in ends and navi:
-            main.extend(haftara_lines(ends[n], navi))
+            haftara(ends[n])
         if n in starts:
             main.append(f"# פרשת {starts[n]}")
             cur_ch = None
         if ch != cur_ch:
             main.append(f"# פרק {heb(ch)}")
             cur_ch = ch
+        if n in marks:
+            main.append(f"#+ {marks[n]}")
         main.append(f"[{label}] {text}")
+        slots.append(("t", ch, v))
     if len(verses) in ends and navi:
-        main.extend(haftara_lines(ends[len(verses)], navi))
+        haftara(ends[len(verses)])
     project = {
         "title": book,
         "main": "\n".join(main),
@@ -434,15 +548,24 @@ def build(book, verses, comms, parashot, navi=None):
     }
     styles = {
         "onkelos": {"name": "אונקלוס", "place": "side", "side": "left", "font": "Noto Serif Hebrew", "size": 10.5, "width": 34, "autoW": True, "cols": 2},
-        "rashi": {"name": "רש\"י", "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9.5, "width": 30, "autoW": True, "cols": 2},
+        "rashi": {"name": "רש\"י", "place": "bottom", "side": "left", "font": "Frank Ruhl Libre", "size": 9.5, "width": 30, "autoW": True, "cols": 2},
         "ramban": {"name": "רמב\"ן", "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9, "width": 30, "autoW": True, "cols": 2},
         "orhachaim": {"name": "אור החיים", "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9.5, "width": 30, "autoW": True, "cols": 2},
-        "ralbag_milot": {"name": NAMES["ralbag_milot"], "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9, "width": 30, "autoW": True, "cols": 2},
-        "ralbag": {"name": NAMES["ralbag"], "place": "bottom", "side": "left", "font": "Noto Rashi Hebrew", "size": 9, "width": 30, "autoW": True, "cols": 2},
+        "ralbag_milot": {"name": NAMES["ralbag_milot"], "place": "bottom", "side": "left", "font": "David Libre", "size": 10, "width": 30, "autoW": True, "cols": 2},
+        "ralbag": {"name": NAMES["ralbag"], "place": "bottom", "side": "left", "font": "David Libre", "size": 10, "width": 30, "autoW": True, "cols": 2},
+        "ralbag_toalot": {"name": NAMES["ralbag_toalot"], "place": "bottom", "side": "left", "font": "David Libre", "size": 10, "width": 30, "autoW": True, "cols": 2},
+        "ralbag_navi": {"name": NAMES["ralbag_navi"], "place": "bottom", "side": "left", "font": "David Libre", "size": 10, "width": 30, "autoW": True, "cols": 2},
     }
     for kind in NAMES:
-        if kind in comms:
-            project["comms"].append(dict(styles[kind], text=comm_lines(comms[kind], verses)))
+        lines = []
+        for n, (src, ch, v) in enumerate(slots, 1):
+            if src == "t":
+                got = comms.get(kind, {}).get((ch, v), [])
+            else:
+                got = (hcomms or {}).get(src, {}).get((ch, v), {}).get(NAVI_COMMS.get(kind), [])
+            lines += [f"@{n} {t}" for t in got]
+        if kind in comms or lines:
+            project["comms"].append(dict(styles[kind], text="\n".join(lines)))
     return project
 
 
@@ -454,13 +577,26 @@ def convert(paths, out_dir, kinds=DEFAULT_KINDS):
         lines = read(p)
         files[kind_of(lines)] = lines
     navi = {k[5:]: parse_navi(v) for k, v in files.items() if k.startswith("navi:")}
+    aliyot = {PARASHA_ALIASES.get(k[7:], k[7:]): parse_aliyot(v) for k, v in files.items() if k.startswith("aliyot:")}
+    hcomms = None
+    if "haftara" in kinds:
+        # Rashi on the haftarot when Rashi is asked for, Ralbag when Ralbag is
+        want = {k for k in NAVI_COMMS if k in kinds or (k == "ralbag_navi" and any(x.startswith("ralbag") for x in kinds))}
+        hcomms = {}
+        for k, v in files.items():
+            if k.startswith("navi:"):
+                hc = parse_navi_comms(v)
+                hcomms[k[5:]] = {key: {name: t for name, t in d.items() if name in {NAVI_COMMS[w] for w in want}}
+                                 for key, d in hc.items()}
     if "otz_torah" in files:
         book, verses, comms = parse_otzaria_torah(files["otz_torah"])
         comms = {k: c for k, c in comms.items() if k in kinds}
         for k in OTZ_OWN_FILES:
             if k in files and k in kinds:
                 comms[k] = parse_otzaria_comm(files[k], book)
-        return write_book(book, verses, comms, navi, out_dir)
+        if "ralbag" in comms:
+            comms["ralbag"], comms["ralbag_toalot"] = split_toalot(comms["ralbag"])
+        return write_book(book, verses, comms, navi, out_dir, aliyot, hcomms)
     if "torah" not in files:
         raise ValueError("לא נמצא קובץ של הפסוקים (קובץ שהשורה הראשונה שלו היא שם הספר).")
     book, verses = parse_torah(files["torah"])
@@ -470,10 +606,10 @@ def convert(paths, out_dir, kinds=DEFAULT_KINDS):
     for k in ("rashi", "ramban"):
         if k in files and k in kinds:
             comms[k] = parse_by_verse(files[k], keep_bold=True)
-    return write_book(book, verses, comms, navi, out_dir)
+    return write_book(book, verses, comms, navi, out_dir, aliyot, hcomms)
 
 
-def write_book(book, verses, comms, navi, out_dir):
+def write_book(book, verses, comms, navi, out_dir, aliyot=None, hcomms=None):
     if not verses:
         raise ValueError("לא נמצאו פסוקים בקובץ הפסוקים.")
     index = {(ch, v): n for n, (ch, v, _, _) in enumerate(verses)}
@@ -490,13 +626,18 @@ def write_book(book, verses, comms, navi, out_dir):
 
     for k, (name, a, b) in enumerate(parashot, 1):
         part = verses[a:b]
-        dump(build(book, part, comms, [(name, 0, len(part))], navi), f"{book} {k:02d} - פרשת {name}.json")
-    dump(build(book, verses, comms, parashot, navi), f"{book} - כל הספר.json")
+        dump(build(book, part, comms, [(name, 0, len(part))], navi, aliyot, hcomms), f"{book} {k:02d} - פרשת {name}.json")
+    dump(build(book, verses, comms, parashot, navi, aliyot, hcomms), f"{book} - כל הספר.json")
     report = [f"{book}: {len(verses)} פסוקים, {len(parashot)} פרשות."]
     for k, c in comms.items():
         lost = sum(1 for key in c if key not in index)
         report.append(f"{NAMES[k]}: {sum(len(x) for x in c.values())} קטעים על {len(c)} פסוקים"
                       + (f" — {lost} לא שויכו לפסוק!" if lost else "."))
+    if aliyot:
+        ok = [name for name, a, b in parashot if aliyah_marks(aliyot, name, verses, a, b)]
+        bad = [name for name, a, b in parashot if name not in ok]
+        report.append(f"עליות: {len(ok)} מתוך {len(parashot)} פרשות"
+                      + (f" (חסר: {', '.join(bad)})" if bad else "."))
     if navi:
         got = [name for name, _, _ in parashot if haftara_lines(name, navi)]
         missing = [name for name, _, _ in parashot if not haftara_lines(name, navi)]

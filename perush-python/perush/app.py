@@ -750,7 +750,7 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
         try:
-            export_pdf(self.pages, path, self.project["title"])
+            export_pdf(self.pages, path, self.project["title"], book=self.project.get("bookMode", False))
         except Exception as e:
             QMessageBox.warning(self, APP_NAME, f"הייצוא נכשל:\n{e}")
             return

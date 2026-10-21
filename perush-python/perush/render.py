@@ -1,5 +1,7 @@
 """Drawing laid-out pages: on screen (preview images) and into a PDF file."""
-from PySide6.QtCore import QMarginsF, QPointF, QSizeF, Qt
+import re
+
+from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt
 from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen
 
 from .textlayout import PT_PER_MM, metrics, qfont, space
@@ -85,19 +87,100 @@ def page_image(page, zoom=1.0):
     return img
 
 
-def export_pdf(pages, path, title=""):
-    if not pages:
-        raise ValueError("אין עמודים לייצוא")
-    w, h = pages[0].width, pages[0].height
+def new_writer(path, w, h, title):
     writer = QPdfWriter(path)
     writer.setResolution(72)
     writer.setTitle(title or "עימוד פירושים")
     writer.setCreator("עימוד פירושים")
     size = QPageSize(QSizeF(w / PT_PER_MM, h / PT_PER_MM), QPageSize.Millimeter, "custom", QPageSize.ExactMatch)
     writer.setPageLayout(QPageLayout(size, QPageLayout.Portrait, QMarginsF(0, 0, 0, 0), QPageLayout.Millimeter))
+    return writer
+
+
+def export_pdf(pages, path, title="", book=False, cover=None):
+    """book: the PDF opens as a book bound on the right (pages side by side from right to
+    left, the first alone), so the inner side of each page faces the spine.
+    cover: the cover's words (cover.book_info): the PDF begins with the front cover, its
+    blank inside, a title page and its blank back, and ends with the back cover, so the
+    first page of the text is still a left-hand page."""
+    if not pages:
+        raise ValueError("אין עמודים לייצוא")
+    w, h = pages[0].width, pages[0].height
+    writer = new_writer(path, w, h, title)
     p = QPainter(writer)
-    for n, page in enumerate(pages):
-        if n:
+    p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+    rect = QRectF(0, 0, w, h)
+    first = [True]
+
+    def new_page():
+        if not first[0]:
             writer.newPage()
+        first[0] = False
+
+    if cover:
+        from .cover import draw_front
+        new_page()
+        draw_front(p, rect, cover)
+        new_page()
+        new_page()
+        draw_front(p, rect, cover, gilt=False)
+        new_page()
+    for page in pages:
+        new_page()
         draw_page(p, page)
+    if cover:
+        from .cover import draw_back
+        if len(pages) % 2:
+            new_page()          # the inside of the back cover
+        new_page()
+        draw_back(p, rect, cover)
     p.end()
+    if book or cover:
+        right_to_left(path)
+
+
+def export_cover(path, w, h, n_pages, cover):
+    """The whole cover for printing, laid flat: front, spine (as thick as n_pages make it)
+    and back, with bleed all round."""
+    from .cover import BLEED_MM, draw_wrap, spine_mm
+    bleed = BLEED_MM * PT_PER_MM
+    spine = spine_mm(n_pages) * PT_PER_MM
+    W, H = 2 * w + spine + 2 * bleed, h + 2 * bleed
+    writer = new_writer(path, W, H, cover.get("title", ""))
+    p = QPainter(writer)
+    p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+    draw_wrap(p, QRectF(0, 0, W, H), cover, spine, bleed)
+    p.end()
+    return spine / PT_PER_MM
+
+
+def right_to_left(path):
+    """Tell PDF viewers that the pages are a book read from right to left, shown two by two
+    with the first page alone: an incremental update that adds this to the catalog."""
+    with open(path, "rb") as f:
+        data = f.read()
+    at = data.find(b"/Type /Catalog")
+    start = max(data.rfind(b"\nendobj", 0, at), 0)
+    m = re.compile(rb"\s*(\d+) 0 obj\s*<<(.*?)>>\s*endobj", re.S).match(data, start + len(b"\nendobj") if start else 0)
+    if at < 0 or not m or b"/Type /Catalog" not in m.group(2) or b"<<" in m.group(2):
+        return
+    t = re.search(rb"trailer\s*<<(.*?)>>\s*startxref\s*(\d+)", data[data.rfind(b"trailer"):], re.S)
+    if not m or not t or b"/ViewerPreferences" in m.group(2):
+        return
+    num, body = int(m.group(1)), m.group(2)
+    trailer, prev = t.group(1), int(t.group(2))
+    size = re.search(rb"/Size\s+(\d+)", trailer)
+    info = re.search(rb"/Info\s+\d+\s+0\s+R", trailer)
+    if not size:
+        return
+    obj = (b"%d 0 obj\n<<" % num + body.rstrip() +
+           b"\n/ViewerPreferences << /Direction /R2L >>\n/PageLayout /TwoPageRight\n>>\nendobj\n")
+    if not data.endswith(b"\n"):
+        data += b"\n"
+    off = len(data)
+    xref = off + len(obj)
+    tail = (b"xref\n0 1\n0000000000 65535 f \n%d 1\n%010d 00000 n \n" % (num, off) +
+            b"trailer\n<<\n/Size " + size.group(1) + b"\n" + (info.group(0) + b"\n" if info else b"") +
+            b"/Root %d 0 R\n/Prev %d\n>>\nstartxref\n%d\n%%%%EOF\n" % (num, prev, xref))
+    with open(path, "wb") as f:
+        f.write(data + obj + tail)

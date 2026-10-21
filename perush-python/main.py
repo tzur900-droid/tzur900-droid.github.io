@@ -2,6 +2,8 @@
 
     python main.py                       open the window
     python main.py project.json out.pdf  lay out a project straight to PDF (no window)
+        (--cover adds a front cover, a title page and a back cover, and writes the
+        whole cover for printing beside it)
     python main.py --import OUT_DIR files…  convert Sefaria text files into project files
         (--comms onkelos,orhachaim chooses the commentaries; default onkelos,rashi,ramban)
 """
@@ -76,15 +78,21 @@ def main():
 
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     if len(args) == 2:
+        from perush.cover import book_info
         from perush.engine import layout_project
         from perush.model import load_project
-        from perush.render import export_pdf
+        from perush.render import export_cover, export_pdf
         project = load_project(args[0])
         pages, warnings = layout_project(project)
         for w in warnings:
             print("⚠", w)
-        export_pdf(pages, args[1], project["title"])
+        cover = book_info(project) if "--cover" in sys.argv else None
+        export_pdf(pages, args[1], project["title"], book=project.get("bookMode", False), cover=cover)
         print(f"{len(pages)} עמודים נשמרו ב־{args[1]}")
+        if cover:
+            out = os.path.splitext(args[1])[0] + " - כריכה לדפוס.pdf"
+            spine = export_cover(out, pages[0].width, pages[0].height, len(pages) + 4, cover)
+            print(f"כריכה (קדמית, שדרה {spine:.1f} מ\"מ, אחורית) נשמרה ב־{out}")
         return 0
 
     from perush.app import MainWindow

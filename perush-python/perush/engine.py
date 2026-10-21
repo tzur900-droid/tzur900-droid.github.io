@@ -199,6 +199,11 @@ class Engine:
                 mt = 1 * PT_PER_MM if it["noComm"] else 0.0
                 specs.append(Spec(hw, st, st.size * self.lh_k, "center", mt, 0.6 * PT_PER_MM if it["noComm"] else 0.0, kind="h"))
                 continue
+            if it.get("aliyah") and frm == 0:
+                # the aliyah that begins with this verse, small and bold before its letter
+                st = self.main.scaled(0.8, bold=True)
+                t = f"({it['aliyah']})"
+                para.append(Word(t, st, width(st, t), ("l", i)))
             if P["numbers"] and frm == 0:
                 para.append(Word(it["label"], bold, width(bold, it["label"]), ("l", i)))
             para.extend(words_of(it["words"][frm:to], self.main, lambda k, i=i, frm=frm: (i, frm + k)))
