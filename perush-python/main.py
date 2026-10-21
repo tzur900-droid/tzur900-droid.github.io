@@ -5,11 +5,12 @@
         (--cover adds a front cover, a title page and a back cover, and writes beside it
         the whole cover for printing and the inside of the book for printing;
         --paper 70 sets the weight of the paper, which sets the width of the spine;
-        --size B5 sets the page size and fits the fonts and margins to it)
+        --size B5 or --size 165x235 (mm) sets the page size and fits the fonts and margins to it)
     python main.py --import OUT_DIR files…  convert Sefaria text files into project files
         (--comms onkelos,orhachaim chooses the commentaries; default onkelos,rashi,ramban)
 """
 import os
+import re
 import sys
 import time
 import traceback
@@ -89,10 +90,15 @@ def main():
         if "--size" in sys.argv:
             from perush.model import PAGE_SIZES, fit_to_page
             size = sys.argv[sys.argv.index("--size") + 1]
-            if size not in PAGE_SIZES or size == "custom":
-                print("גודל לא מוכר:", size, "— אפשר:", ", ".join(k for k in PAGE_SIZES if k != "custom"))
+            m = re.match(r"^(\d+(?:\.\d+)?)[x*×](\d+(?:\.\d+)?)$", size)
+            if m:       # width x height in mm: 165x235
+                project.update(pageSize="custom", pageW=float(m.group(1)), pageH=float(m.group(2)))
+            elif size in PAGE_SIZES and size != "custom":
+                project["pageSize"] = size
+            else:
+                print("גודל לא מוכר:", size, "— אפשר רוחב x גובה במ\"מ (165x235) או:",
+                      ", ".join(k for k in PAGE_SIZES if k != "custom"))
                 return 1
-            project["pageSize"] = size
             fit_to_page(project)
         pages, warnings = layout_project(project)
         for w in warnings:
