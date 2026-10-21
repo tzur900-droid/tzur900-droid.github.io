@@ -97,7 +97,7 @@ def new_writer(path, w, h, title):
     return writer
 
 
-def export_pdf(pages, path, title="", book=False, cover=None, outer=True):
+def export_pdf(pages, path, title="", book=False, cover=None, outer=True, style=None):
     """book: the PDF opens as a book bound on the right (pages side by side from right to
     left, the first alone), so the inner side of each page faces the spine.
     cover: the cover's words (cover.book_info): the PDF begins with the front cover, its
@@ -123,10 +123,10 @@ def export_pdf(pages, path, title="", book=False, cover=None, outer=True):
         from .cover import draw_front
         if outer:
             new_page()
-            draw_front(p, rect, cover)
+            draw_front(p, rect, cover, style=style)
             new_page()
         new_page()
-        draw_front(p, rect, cover, gilt=False)
+        draw_front(p, rect, cover, gilt=False, style=style)
         new_page()
     for page in pages:
         new_page()
@@ -140,14 +140,14 @@ def export_pdf(pages, path, title="", book=False, cover=None, outer=True):
             inside += 1
         if outer:
             new_page()
-            draw_back(p, rect, cover)
+            draw_back(p, rect, cover, style)
     p.end()
     if book or cover:
         right_to_left(path)
     return inside
 
 
-def export_cover(path, w, h, n_pages, cover, grams=80):
+def export_cover(path, w, h, n_pages, cover, grams=80, style=None):
     """The whole cover for printing, laid flat: front, spine (as thick as n_pages make it)
     and back, with bleed all round."""
     from .cover import BLEED_MM, draw_wrap, spine_mm
@@ -157,9 +157,22 @@ def export_cover(path, w, h, n_pages, cover, grams=80):
     writer = new_writer(path, W, H, cover.get("title", ""))
     p = QPainter(writer)
     p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
-    draw_wrap(p, QRectF(0, 0, W, H), cover, spine, bleed)
+    draw_wrap(p, QRectF(0, 0, W, H), cover, spine, bleed, style)
     p.end()
     return spine / PT_PER_MM
+
+
+def export_cover_samples(path, w, h, cover):
+    """The front cover in every style (cover.STYLES), a page each, in their order."""
+    from .cover import STYLES, draw_front
+    writer = new_writer(path, w, h, "כריכות")
+    p = QPainter(writer)
+    p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+    for n, style in enumerate(STYLES):
+        if n:
+            writer.newPage()
+        draw_front(p, QRectF(0, 0, w, h), cover, style=style)
+    p.end()
 
 
 def right_to_left(path):

@@ -5,7 +5,9 @@
         (--cover adds a front cover, a title page and a back cover, and writes beside it
         the whole cover for printing and the inside of the book for printing;
         --paper 70 sets the weight of the paper, which sets the width of the spine;
-        --size B5 or --size 165x235 (mm) sets the page size and fits the fonts and margins to it)
+        --size B5 or --size 165x235 (mm) sets the page size and fits the fonts and margins to it;
+        --cover-style 3 picks the style of the cover (1-10, see cover.STYLES);
+        --cover-samples writes the front cover in every style beside the PDF)
     python main.py --import OUT_DIR files…  convert Sefaria text files into project files
         (--comms onkelos,orhachaim chooses the commentaries; default onkelos,rashi,ramban)
 """
@@ -80,7 +82,7 @@ def main():
         return 0
 
     # the files: what isn't an option or the value of one
-    args = [a for k, a in enumerate(sys.argv[1:], 1) if not a.startswith("-") and sys.argv[k - 1] not in ("--paper", "--size")]
+    args = [a for k, a in enumerate(sys.argv[1:], 1) if not a.startswith("-") and sys.argv[k - 1] not in ("--paper", "--size", "--cover-style")]
     if len(args) == 2:
         from perush.cover import book_info
         from perush.engine import layout_project
@@ -105,15 +107,23 @@ def main():
             print("⚠", w)
         cover = book_info(project) if "--cover" in sys.argv else None
         grams = int(sys.argv[sys.argv.index("--paper") + 1]) if "--paper" in sys.argv else 80
-        export_pdf(pages, args[1], project["title"], book=project.get("bookMode", False), cover=cover)
+        from perush.cover import STYLES, style_of
+        style = style_of(int(sys.argv[sys.argv.index("--cover-style") + 1])) if "--cover-style" in sys.argv else None
+        if "--cover-samples" in sys.argv:
+            from perush.render import export_cover_samples
+            out = os.path.splitext(args[1])[0] + " - דוגמאות כריכה.pdf"
+            export_cover_samples(out, pages[0].width, pages[0].height, book_info(project))
+            print(f"{len(STYLES)} סגנונות כריכה נשמרו ב־{out}:",
+                  " · ".join(f"{n} {s['name']}" for n, s in enumerate(STYLES, 1)))
+        export_pdf(pages, args[1], project["title"], book=project.get("bookMode", False), cover=cover, style=style)
         print(f"{len(pages)} עמודים נשמרו ב־{args[1]}")
         if cover:
             base = os.path.splitext(args[1])[0]
             inside = export_pdf(pages, base + " - פנים הספר לדפוס.pdf", project["title"], book=True,
-                                cover=cover, outer=False)
+                                cover=cover, outer=False, style=style)
             print(f"פנים הספר בלי כריכה ({inside} עמודים) נשמר ב־{base} - פנים הספר לדפוס.pdf")
             out = base + " - כריכה לדפוס.pdf"
-            spine = export_cover(out, pages[0].width, pages[0].height, inside, cover, grams)
+            spine = export_cover(out, pages[0].width, pages[0].height, inside, cover, grams, style)
             print(f"כריכה (קדמית, שדרה {spine:.1f} מ\"מ לנייר {grams} גרם, אחורית) נשמרה ב־{out}")
         return 0
 

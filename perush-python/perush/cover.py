@@ -21,6 +21,30 @@ GOLD = ("#7a5a17", "#e9cf7a", "#a8802a", "#f6e5a3", "#8c6a1e", "#d9b964", "#7a5a
 INK = "#1a1a1a"
 
 TORAH = {"בראשית", "שמות", "ויקרא", "במדבר", "דברים"}
+SILVER = ("#6f7378", "#e6e9ec", "#9da2a8", "#f7f8f9", "#80858b", "#cfd3d7", "#6f7378")
+
+# The styles of cover, from the heaviest to the lightest. bg: (material, colours) — leather
+# (grain), cloth (a fine weave) or paper (plain, light). ink: gold, silver or a colour.
+# frame: ornate (a band of lozenges and rosettes), double, single or none; corners: scrolls
+# inside the frame; gate: an arch over the title; cartouche: the verse in an oval frame
+# (otherwise in plain letters); divider: scroll or line.
+STYLES = [
+    dict(name="בורדו מלכותי", bg=("leather", LEATHER), ink="gold", frame="ornate", corners=True, gate=True, cartouche=True),
+    dict(name="שחור וזהב", bg=("leather", ("#2b2a28", "#171615", "#060605")), ink="gold", frame="ornate", corners=True, gate=True, cartouche=True),
+    dict(name="כחול לילה וזהב", bg=("leather", ("#1e2e5a", "#121d3d", "#070e22")), ink="gold", frame="ornate", corners=True, gate=False, cartouche=True),
+    dict(name="ירוק בקבוק", bg=("leather", ("#1f4a33", "#133222", "#07190f")), ink="gold", frame="double", corners=True, gate=True, cartouche=True),
+    dict(name="חום עתיק", bg=("leather", ("#6e4624", "#4a2e17", "#25160a")), ink="gold", frame="double", corners=True, gate=False, cartouche=True),
+    dict(name="אפור וכסף", bg=("leather", ("#4b4e53", "#2f3236", "#141618")), ink="silver", frame="double", corners=False, gate=False, cartouche=True),
+    dict(name="בד כחול קלאסי", bg=("cloth", ("#2f4f84", "#223b64", "#152846")), ink="gold", frame="single", corners=False, gate=False, cartouche=False),
+    dict(name="שמנת ובורדו", bg=("paper", ("#f6eedb", "#e6d8b8")), ink="#6b1a1f", frame="double", corners=True, gate=False, cartouche=True),
+    dict(name="לבן וכחול", bg=("paper", ("#ffffff", "#e9f0f9")), ink="#1f3c73", frame="single", corners=False, gate=False, cartouche=False, divider="line"),
+    dict(name="ברסלב", bg=("paper", ("#ffffff", "#cfe3f6")), ink="#123a7a", frame="none", corners=False, gate=False, cartouche=False, divider="line", title_font=TEXT_FONT),
+]
+
+
+def style_of(n):
+    """Style number n (from 1), or the first."""
+    return STYLES[n - 1] if isinstance(n, int) and 1 <= n <= len(STYLES) else STYLES[0]
 
 
 def book_info(project):
@@ -68,12 +92,30 @@ def gold(rect):
     return QBrush(g)
 
 
-class Ink:
-    """What the ornaments and letters are drawn with: gold (the cover) or black (the title page)."""
+def metal(rect, stops):
+    g = QLinearGradient(rect.topLeft(), rect.bottomRight())
+    for k, c in enumerate(stops):
+        g.setColorAt(k / (len(stops) - 1), QColor(c))
+    return QBrush(g)
 
-    def __init__(self, rect, gilt):
-        self.gilt = gilt
-        self.brush = gold(rect) if gilt else QBrush(QColor(INK))
+
+class Ink:
+    """What the ornaments and letters are drawn with: gold or silver (pressed into the
+    cover, with a shadow), or a plain colour. ground: the colour under them, for the
+    squares the rosettes of the frame sit in."""
+
+    def __init__(self, rect, gilt, style=None):
+        style = style or STYLES[0]
+        kind = style["ink"] if gilt else INK
+        self.gilt = gilt and kind in ("gold", "silver")
+        if kind == "gold":
+            self.brush = gold(rect)
+        elif kind == "silver":
+            self.brush = metal(rect, SILVER)
+        else:
+            self.brush = QBrush(QColor(kind))
+        material, colours = style["bg"]
+        self.ground = QColor(colours[1] if material != "paper" else colours[0]) if gilt else QColor("white")
 
     def pen(self, w):
         pen = QPen(self.brush, w)
@@ -82,11 +124,43 @@ class Ink:
         return pen
 
 
-def leather(p, rect, seed=7):
+def background(p, rect, style, seed=7):
+    material, colours = style["bg"]
+    if material == "leather":
+        leather(p, rect, seed, colours)
+    elif material == "cloth":
+        cloth(p, rect, colours)
+    else:
+        g = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        g.setColorAt(0.0, QColor(colours[0]))
+        g.setColorAt(1.0, QColor(colours[1]))
+        p.fillRect(rect, QBrush(g))
+
+
+def cloth(p, rect, colours):
+    """Book cloth: an even colour, a little lighter in the middle, with a fine weave."""
+    g = QRadialGradient(rect.center(), max(rect.width(), rect.height()) * 0.8)
+    for k, c in enumerate(colours):
+        g.setColorAt(k / (len(colours) - 1), QColor(c))
+    p.fillRect(rect, QBrush(g))
+    pen = QPen(QColor(255, 255, 255, 6), 0.3)
+    p.setPen(pen)
+    y = rect.top()
+    while y < rect.bottom():
+        p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+        y += 0.9
+    p.setPen(QPen(QColor(0, 0, 0, 8), 0.3))
+    x = rect.left()
+    while x < rect.right():
+        p.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+        x += 0.9
+
+
+def leather(p, rect, seed=7, colours=LEATHER):
     g = QRadialGradient(rect.center(), max(rect.width(), rect.height()) * 0.75)
-    g.setColorAt(0.0, QColor(LEATHER[0]))
-    g.setColorAt(0.6, QColor(LEATHER[1]))
-    g.setColorAt(1.0, QColor(LEATHER[2]))
+    g.setColorAt(0.0, QColor(colours[0]))
+    g.setColorAt(0.6, QColor(colours[1]))
+    g.setColorAt(1.0, QColor(colours[2]))
     p.fillRect(rect, QBrush(g))
     # the grain of the leather: fine specks, a little lighter and a little darker
     rnd = random.Random(seed)
@@ -221,8 +295,24 @@ def scroll(p, ink, c, w, flip=1, up=1):
         p.drawPath(leaf)
 
 
-def divider(p, ink, cx, y, w):
-    """A line of ornament under a title: two scrolls from a lozenge in the middle."""
+def divider(p, ink, cx, y, w, kind="scroll"):
+    """A line of ornament under a title: two scrolls from a lozenge in the middle, or (line)
+    a thin line broken by a small lozenge."""
+    if kind == "line":
+        s = max(2.0, w * 0.03)
+        p.setPen(ink.pen(max(0.5, w * 0.004)))
+        p.drawLine(QPointF(cx - w / 2, y), QPointF(cx - s * 2, y))
+        p.drawLine(QPointF(cx + s * 2, y), QPointF(cx + w / 2, y))
+        path = QPainterPath()
+        path.moveTo(cx, y - s)
+        path.lineTo(cx + s, y)
+        path.lineTo(cx, y + s)
+        path.lineTo(cx - s, y)
+        path.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(ink.brush)
+        p.drawPath(path)
+        return
     scroll(p, ink, QPointF(cx - w * 0.06, y), w * 0.44, flip=-1)
     scroll(p, ink, QPointF(cx + w * 0.06, y), w * 0.44, flip=1)
     path = QPainterPath()
@@ -249,9 +339,27 @@ def corner(p, ink, c, size, sx, sy):
     p.restore()
 
 
-def frame(p, ink, rect, k):
-    """The frame of the cover: a heavy outer line, a band of lozenges between double lines,
-    rosettes and scrolls in the corners. k scales the ornament to the page."""
+def frame(p, ink, rect, k, kind="ornate", corners=True):
+    """The frame of the cover. ornate: a heavy outer line, a band of lozenges between double
+    lines, rosettes in its corners; double: a heavy line and a thin one; single: a thin line;
+    none: nothing. corners: scrolls in the inner corners. k scales the ornament to the page.
+    Returns the room inside the frame."""
+    if kind != "ornate":
+        inner = rect.adjusted(26 * k, 26 * k, -26 * k, -26 * k)
+        p.setBrush(Qt.NoBrush)
+        if kind == "double":
+            p.setPen(ink.pen(2.0 * k))
+            p.drawRect(rect.adjusted(18 * k, 18 * k, -18 * k, -18 * k))
+            p.setPen(ink.pen(0.7 * k))
+            p.drawRect(inner)
+        elif kind == "single":
+            p.setPen(ink.pen(0.9 * k))
+            p.drawRect(inner)
+        else:
+            return rect.adjusted(34 * k, 34 * k, -34 * k, -34 * k)
+        if corners:
+            corner_scrolls(p, ink, inner, k)
+        return inner
     m1 = rect.adjusted(14 * k, 14 * k, -14 * k, -14 * k)
     p.setBrush(Qt.NoBrush)
     p.setPen(ink.pen(2.4 * k))
@@ -273,20 +381,24 @@ def frame(p, ink, rect, k):
                      QPointF(b.x() - ux * band, b.y() - uy * band), band * 0.36, band * 1.1)
     for pt in pts:
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor(LEATHER[1])) if ink.gilt else QBrush(QColor("white")))
+        p.setBrush(QBrush(ink.ground))
         p.drawRect(QRectF(pt.x() - band / 2, pt.y() - band / 2, band, band))
         rosette(p, ink, pt, band * 0.42)
     m4 = m3.adjusted(4 * k, 4 * k, -4 * k, -4 * k)
     p.setBrush(Qt.NoBrush)
     p.setPen(ink.pen(1.3 * k))
     p.drawRect(m4)
-    # scrolls in the inner corners
+    if corners:
+        corner_scrolls(p, ink, m4, k)
+    return m4
+
+
+def corner_scrolls(p, ink, box, k):
     s = 26 * k
-    for (cx, cy, sx, sy) in ((m4.left(), m4.top(), 1, 1), (m4.right(), m4.top(), -1, 1),
-                             (m4.right(), m4.bottom(), -1, -1), (m4.left(), m4.bottom(), 1, -1)):
+    for (cx, cy, sx, sy) in ((box.left(), box.top(), 1, 1), (box.right(), box.top(), -1, 1),
+                             (box.right(), box.bottom(), -1, -1), (box.left(), box.bottom(), 1, -1)):
         c = QPointF(cx + sx * s * 0.55, cy + sy * s * 0.55)
         corner(p, ink, c, s, sx, sy)
-    return m4
 
 
 def gate(p, ink, inner, k):
@@ -322,8 +434,12 @@ def gate(p, ink, inner, k):
     return QRectF(left + 14 * k, spring - 20 * k, right - left - 28 * k, bottom - spring), top, bottom
 
 
-def cartouche(p, ink, rect, text, k):
-    """An oval frame with a verse in it."""
+def cartouche(p, ink, rect, text, k, framed=True):
+    """An oval frame with a verse in it (framed=False: the verse alone)."""
+    if not framed:
+        f = fit_font(TEXT_FONT, 14 * k, text, rect.width())
+        draw_text(p, ink, text, f, rect.center().x(), rect.center().y() + f.pointSizeF() * 0.35)
+        return
     p.setBrush(Qt.NoBrush)
     p.setPen(ink.pen(1.2 * k))
     p.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
@@ -337,27 +453,36 @@ def cartouche(p, ink, rect, text, k):
 
 # ---------------------------------------------------------------- pages
 
-def draw_front(p, rect, info, gilt=True):
-    """The front cover (gilt on leather), or the title page (gilt=False, black on white)."""
+def draw_front(p, rect, info, gilt=True, style=None):
+    """The front cover in a style (STYLES), or the title page (gilt=False: the same in black
+    on white)."""
+    style = style or STYLES[0]
     k = min(rect.width() / 595.0, rect.height() / 842.0)
     if gilt:
-        leather(p, rect)
+        background(p, rect, style)
     else:
         p.fillRect(rect, QColor("white"))
-    ink = Ink(rect, gilt)
-    inner = frame(p, ink, rect, k)
-    box, top, bottom = gate(p, ink, inner, k)
+    ink = Ink(rect, gilt, style)
+    title_font = style.get("title_font", TITLE_FONT)
+    div = style.get("divider", "scroll")
+    inner = frame(p, ink, rect, k, style["frame"], style["corners"])
+    if style["gate"]:
+        box, top, bottom = gate(p, ink, inner, k)
+    else:
+        # no gate: the title stands in the upper two thirds of the frame
+        bottom = inner.top() + inner.height() * 0.7
+        box = QRectF(inner.left() + 24 * k, inner.top() + 40 * k, inner.width() - 48 * k, bottom - inner.top() - 40 * k)
     cx = box.center().x()
     # the block of the title, measured first and then set in the middle of the gate:
     # (what, font or width, the room it takes)
     steps = []
     if info.get("top"):
-        f = fit_font(TITLE_FONT, 24 * k, info["top"], box.width() * 0.8)
+        f = fit_font(title_font, 24 * k, info["top"], box.width() * 0.8)
         steps += [("text", info["top"], f, f.pointSizeF() * 1.0, 0), ("div", 0.5, 16 * k, 14 * k)]
-    f = fit_font(TITLE_FONT, 64 * k, info["title"], box.width() * 0.92)
+    f = fit_font(title_font, (64 if style["gate"] else 70) * k, info["title"], box.width() * 0.92)
     steps += [("text", info["title"], f, f.pointSizeF() * 0.95, 0), ("div", 0.62, 22 * k, 20 * k)]
     for n, line in enumerate(info.get("lines", [])):
-        f = fit_font(TITLE_FONT, (20 if n == 0 else 23) * k, line, box.width() * 0.95)
+        f = fit_font(title_font, (20 if n == 0 else 23) * k, line, box.width() * 0.95)
         steps.append(("text", line, f, f.pointSizeF() * 1.4, 0))
     if info.get("details"):
         f = fit_font(TEXT_FONT, 14 * k, info["details"], box.width() * 0.95, bold=False)
@@ -374,7 +499,7 @@ def draw_front(p, rect, info, gilt=True):
             draw_text(p, ink, st[1], st[2], cx, y)
         else:
             y += st[2]
-            divider(p, ink, cx, y, box.width() * st[1])
+            divider(p, ink, cx, y, box.width() * st[1], div)
             y += st[3]
     # the verse at the foot, under the gate
     h = 40 * k
@@ -382,28 +507,33 @@ def draw_front(p, rect, info, gilt=True):
     room = inner.bottom() - 34 * k - room_top
     cy = room_top + room / 2
     w = inner.width() * 0.66
-    cartouche(p, ink, QRectF(inner.center().x() - w / 2, cy - h / 2, w, h), info.get("verse", ""), k)
+    cartouche(p, ink, QRectF(inner.center().x() - w / 2, cy - h / 2, w, h), info.get("verse", ""), k,
+              style["cartouche"])
 
 
-def draw_back(p, rect, info):
+def draw_back(p, rect, info, style=None):
+    style = style or STYLES[0]
     k = min(rect.width() / 595.0, rect.height() / 842.0)
-    leather(p, rect, seed=11)
-    ink = Ink(rect, True)
-    inner = frame(p, ink, rect, k)
+    background(p, rect, style, seed=11)
+    ink = Ink(rect, True, style)
+    inner = frame(p, ink, rect, k, style["frame"], style["corners"])
     c = inner.center()
-    rosette(p, ink, QPointF(c.x(), c.y() - 70 * k), 22 * k, petals=16)
+    if style["frame"] == "ornate" or style["corners"]:
+        rosette(p, ink, QPointF(c.x(), c.y() - 70 * k), 22 * k, petals=16)
     w = inner.width() * 0.7
-    cartouche(p, ink, QRectF(c.x() - w / 2, c.y() - 20 * k, w, 40 * k), info.get("back", ""), k)
-    divider(p, ink, c.x(), c.y() + 60 * k, inner.width() * 0.5)
+    cartouche(p, ink, QRectF(c.x() - w / 2, c.y() - 20 * k, w, 40 * k), info.get("back", ""), k, style["cartouche"])
+    divider(p, ink, c.x(), c.y() + 60 * k, inner.width() * 0.5, style.get("divider", "scroll"))
 
 
-def draw_spine(p, rect, info):
-    """The spine: bands of gold at head and foot, the title running along it."""
-    leather(p, rect, seed=3)
-    ink = Ink(rect, True)
+def draw_spine(p, rect, info, style=None):
+    """The spine: bands at head and foot, the title running along it."""
+    style = style or STYLES[0]
+    background(p, rect, style, seed=3)
+    ink = Ink(rect, True, style)
     w = rect.width()
     k = rect.height() / 842.0
-    for y0, d in ((rect.top() + 30 * k, 1), (rect.bottom() - 30 * k, -1)):
+    bands = style["frame"] in ("ornate", "double")
+    for y0, d in ((rect.top() + 30 * k, 1), (rect.bottom() - 30 * k, -1)) if bands else ():
         for off, lw in ((0, 1.6), (4 * k, 0.6), (40 * k, 0.6), (44 * k, 1.6)):
             y = y0 + d * off
             p.setPen(ink.pen(lw))
@@ -414,7 +544,7 @@ def draw_spine(p, rect, info):
     size = min(w * 0.55, 20 * k)
     if size < 4:
         return
-    f = fit_font(TITLE_FONT, size, text, rect.height() - 200 * k)
+    f = fit_font(style.get("title_font", TITLE_FONT), size, text, rect.height() - 200 * k)
     p.save()
     p.translate(rect.center())
     p.rotate(90)
@@ -422,24 +552,25 @@ def draw_spine(p, rect, info):
     p.restore()
 
 
-def draw_wrap(p, rect, info, spine_w, bleed):
+def draw_wrap(p, rect, info, spine_w, bleed, style=None):
     """The whole cover laid flat, outside up, for a book bound on the right: the front on
     the left, then the spine, then the back. bleed: extra all round, to be trimmed."""
     pw = (rect.width() - spine_w - 2 * bleed) / 2
     front = QRectF(rect.left(), rect.top(), pw + bleed, rect.height())
     spine = QRectF(front.right(), rect.top(), spine_w, rect.height())
     back = QRectF(spine.right(), rect.top(), pw + bleed, rect.height())
-    leather(p, rect)
-    # the ornament is drawn on the trimmed pages: the bleed is leather only
+    style = style or STYLES[0]
+    background(p, rect, style)
+    # the ornament is drawn on the trimmed pages: the bleed is the background only
     p.save()
     p.setClipRect(front)
-    draw_front(p, QRectF(front.left() + bleed, front.top() + bleed, pw, rect.height() - 2 * bleed), info)
+    draw_front(p, QRectF(front.left() + bleed, front.top() + bleed, pw, rect.height() - 2 * bleed), info, style=style)
     p.restore()
     p.save()
     p.setClipRect(back)
-    draw_back(p, QRectF(back.left(), back.top() + bleed, pw, rect.height() - 2 * bleed), info)
+    draw_back(p, QRectF(back.left(), back.top() + bleed, pw, rect.height() - 2 * bleed), info, style)
     p.restore()
-    draw_spine(p, QRectF(spine.left(), spine.top() + bleed, spine.width(), rect.height() - 2 * bleed), info)
+    draw_spine(p, QRectF(spine.left(), spine.top() + bleed, spine.width(), rect.height() - 2 * bleed), info, style)
 
 
 # the thickness of a sheet of ordinary uncoated book paper, by its weight (g/m²), in mm
