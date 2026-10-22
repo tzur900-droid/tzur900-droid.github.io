@@ -159,8 +159,9 @@ class Engine:
                 if i in self.sides:
                     st.append({"v": v, "label": labels[v], "tokens": [t for r in raws for t in entry_tokens(r)], "note": False})
                 else:
-                    for r in raws:
-                        st.append({"v": v, "label": f"({labels[v]})", "tokens": entry_tokens(r), "note": True})
+                    for k, r in enumerate(raws):
+                        # the verse's letter only before its first passage, not before each one
+                        st.append({"v": v, "label": f"({labels[v]})" if k == 0 else "", "tokens": entry_tokens(r), "note": True})
             self.streams[i], self.first_idx[i] = st, first
         self.ptrs = {i: (0, 0) for i in self.streams}
         self.sec_end = {}
@@ -261,12 +262,13 @@ class Engine:
                 base = self.style[c]
                 bold = base.with_bold(True)
                 j = e["j"]
-                ws = [Word(e["label"], bold, width(bold, e["label"]), ("L", j))]
+                ws = [Word(e["label"], bold, width(bold, e["label"]), ("L", j))] if e["label"] else []
                 for k, (t, b) in enumerate(e["tokens"]):
                     st = bold if b else base
                     ws.append(Word(t, st, width(st, t), (j, k)))
                 self.ew_cache[key] = ws
-            words.extend(ws[1 + e["start"]:] if e["cont"] else ws)
+            skip = 1 if e["label"] else 0
+            words.extend(ws[skip + e["start"]:] if e["cont"] else ws)
         return words
 
     def advance(self, ptr, words, n_taken, n_entries):
@@ -296,9 +298,12 @@ class Engine:
         n = sum(len(l.words) for l in lines)
         # find where the entry that is cut began
         k = n - 1
-        while k >= 0 and words[k].ref[0] != "L":
+        while k >= 0 and words[k].ref[0] != "L" and words[k].ref[1] != 0:
             k -= 1
-        if k >= 0 and 0 < n - k - 1 < 3:
+        if k > 0 and words[k].ref[0] != "L" and words[k - 1].ref == ("L", words[k].ref[0]):
+            k -= 1      # the entry's letter goes with it
+        taken = n - k - (1 if k >= 0 and words[k].ref[0] == "L" else 0)
+        if k >= 0 and 0 < taken < 3:
             lines = break_lines(words[:k], base, lh, full_width(w), tight=tight)
             n = k
         if lines:
