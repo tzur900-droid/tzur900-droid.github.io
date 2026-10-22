@@ -1,8 +1,8 @@
 """The whole Shas of the Rosh and the Rif: every masechet laid out (several at a time),
 checked (shas_check), and put together into files of 300 to 500 pages.
 
-  * In a file: a title page, then each masechet: the Rosh with its own title page and the
-    Rif with its own, each from a left-hand page (in a Hebrew book the first page is on
+  * In a file (no title page of its own): each masechet: the Rosh with its own title page
+    and the Rif with its own, each from a left-hand page (in a Hebrew book the first page is on
     the left). Blank pages where needed for that.
   * The pages keep the masechet's own numbers in letters at the head; at the foot of
     each page, small, its number in the file.
@@ -76,7 +76,7 @@ def group(books):
     one when it fits. -> [[masechet]]"""
     names = list(books)
     size = [block_size(books[m][2]) for m in names]
-    if 2 + sum(size) <= HI:
+    if sum(size) <= HI:
         return [names]
     n = len(names)
     INF = float("inf")
@@ -85,7 +85,7 @@ def group(books):
     best[0] = 0.0
     for e in range(1, n + 1):
         for s in range(e):
-            pages = 2 + sum(size[s:e])
+            pages = sum(size[s:e])
             if pages > HI and e - s > 1:
                 continue
             cost = 0.0 if pages >= LO or e - s == n else (LO - pages) * 2.0
@@ -154,16 +154,10 @@ def name_items(ms, size=17, rosh=1.0):
     return items
 
 
-def file_title(pw, ph, ms, books):
-    first = books[ms[0]][2]["first_day"]
-    last = books[ms[-1]][2]["last_day"]
-    return gate(pw, ph, name_items(ms), "ימי הלימוד", [(f"{heb(first)}–{heb(last)}", 15)])
-
-
 def assemble(ms, books, page=B5, margin=SIZES["margin"]):
     """The pages of a file, with the numbers at their feet."""
     pw, ph = page[0] * PT_PER_MM, page[1] * PT_PER_MM
-    out = [file_title(pw, ph, ms, books), blank(pw, ph)]
+    out = []
     for m in ms:
         pages, _, info = books[m]
         # a title page for the Rosh and one for the Rif, each on a left-hand page with a
