@@ -1,11 +1,13 @@
 """Title pages and covers drawn in lines, as in the old printings.
 
-  * title(pw, ph, lines): a title page in the manner of the Vilna Shas: a gate of two
-    columns on their bases under an arch, the beam across their capitals and a crown above
-    it; the name in the arch, the rest of the lines under it, between the columns.
+  * title(pw, ph, lines, style): a title page in the manner of the Vilna Shas, all in
+    round lines: a gate of two columns under a round arch with a dome (1) or a medallion
+    (2) over its beam, or a rounded frame with garlands (3); the name in the opening.
   * cover(...): a whole cover for printing (back, spine and front, with the bleed): a
-    ground of one colour, gold lines and ornaments, the name on the front and the
-    masechtot of the volume one under another on the spine; the back left plain.
+    light ground, ornaments in a dark ink and gold (a border of interlaced waves, a
+    rounded frame, fleurons, garlands, medallions), the name under a lobed arch, the
+    masechtot of the volume in a cartouche and one under another on the spine; the back
+    left plain.
 
 Everything is drawn with a QPainter, in points, as a page's paint (see render.draw_page).
 """
@@ -19,13 +21,13 @@ from .textlayout import PT_PER_MM, Style, qfont, width
 TITLE_FONT = "Drugulin CLM"
 TEXT_FONT = "Frank Ruhl Libre"
 
-# the colours a cover can have: (name, ground, gold)
+# the colours a cover can have: name -> (ground, ink, gold)
 COLOURS = {
-    "כחול": ("#13233f", "#c9a54c"),
-    "בורדו": ("#4a1420", "#c9a54c"),
-    "שחור": ("#151515", "#c9a54c"),
-    "חום": ("#3b2416", "#c9a54c"),
-    "ירוק": ("#14301f", "#c9a54c"),
+    "תכלת": ("#cfe4f2", "#1b355c", "#b08433"),
+    "תכלת עמוק": ("#a9cfe8", "#13294b", "#a87a22"),
+    "תכלת אפרפר": ("#d6e0e8", "#23374d", "#a8802e"),
+    "שמנת": ("#f1e8d4", "#3a2a1a", "#a8802e"),
+    "מנטה": ("#d3eadf", "#1c3b2e", "#a8802e"),
 }
 
 
@@ -146,101 +148,229 @@ def column(p, x, y1, y2, cwid, colour):
     return top, bot
 
 
+def guilloche(p, x1, y1, x2, y2, h, colour, w=0.5):
+    """a band of interlaced waves between two lines, from (x1, y1) to (x2, y2) (along a
+    side: horizontal or vertical)."""
+    horiz = abs(y2 - y1) < abs(x2 - x1)
+    L = abs(x2 - x1) if horiz else abs(y2 - y1)
+    n = max(2, int(L / (h * 1.6)))
+    step = L / n
+    p.setPen(pen(colour, w))
+    p.setBrush(Qt.NoBrush)
+
+    def pt(u, v):          # u along the band, v across it (0..h)
+        return QPointF(x1 + u, y1 + v) if horiz else QPointF(x1 + v, y1 + u)
+    p.drawLine(pt(0, 0), pt(L, 0))
+    p.drawLine(pt(0, h), pt(L, h))
+    for sign in (1, -1):
+        path = QPainterPath()
+        path.moveTo(pt(0, h / 2))
+        for k in range(n):
+            u = k * step
+            c = h / 2 + sign * h * 0.42
+            path.cubicTo(pt(u + step * 0.25, c), pt(u + step * 0.25, c), pt(u + step * 0.5, h / 2))
+            c = h / 2 - sign * h * 0.42
+            path.cubicTo(pt(u + step * 0.75, c), pt(u + step * 0.75, c), pt(u + step, h / 2))
+        p.drawPath(path)
+    for k in range(n):
+        p.drawEllipse(pt(step * (k + 0.25), h / 2), h * 0.08, h * 0.08)
+        p.drawEllipse(pt(step * (k + 0.75), h / 2), h * 0.08, h * 0.08)
+
+
+def fleuron(p, x, y, s, colour, w=0.6, angle=0.0):
+    """a corner ornament: a leaf between two scrolls, pointing at angle (degrees; 0 = up)."""
+    p.save()
+    p.translate(x, y)
+    p.rotate(angle)
+    p.setPen(pen(colour, w))
+    p.setBrush(Qt.NoBrush)
+    leaf = QPainterPath()
+    leaf.moveTo(0, 0)
+    leaf.cubicTo(QPointF(-s * 0.35, -s * 0.35), QPointF(-s * 0.2, -s * 0.8), QPointF(0, -s))
+    leaf.cubicTo(QPointF(s * 0.2, -s * 0.8), QPointF(s * 0.35, -s * 0.35), QPointF(0, 0))
+    p.drawPath(leaf)
+    p.drawLine(QPointF(0, -s * 0.1), QPointF(0, -s * 0.85))
+    for f in (1, -1):
+        path = QPainterPath()
+        path.moveTo(0, 0)
+        path.cubicTo(QPointF(f * s * 0.5, s * 0.05), QPointF(f * s * 0.9, -s * 0.2), QPointF(f * s * 0.75, -s * 0.5))
+        p.drawPath(path)
+        scroll(p, f * s * 0.62, -s * 0.5, s * 0.14, colour, w, -f)
+    p.restore()
+
+
+def garland(p, x1, x2, y, sag, colour, w=0.6):
+    """a hanging garland of leaves from x1 to x2 at y."""
+    p.setPen(pen(colour, w))
+    p.setBrush(Qt.NoBrush)
+    path = QPainterPath()
+    path.moveTo(x1, y)
+    path.quadTo(QPointF((x1 + x2) / 2, y + sag * 2), QPointF(x2, y))
+    p.drawPath(path)
+    n = max(4, int(abs(x2 - x1) / 9))
+    for k in range(1, n):
+        t = k / n
+        bx = (1 - t) ** 2 * x1 + 2 * t * (1 - t) * (x1 + x2) / 2 + t * t * x2
+        by = (1 - t) ** 2 * y + 2 * t * (1 - t) * (y + sag * 2) + t * t * y
+        r = sag * 0.18 * (1 - abs(0.5 - t))
+        p.drawEllipse(QPointF(bx, by), r * 1.3, r * 0.8)
+    p.drawEllipse(QPointF(x1, y), 2.2, 2.2)
+    p.drawEllipse(QPointF(x2, y), 2.2, 2.2)
+
+
+def round_frame(p, r, rad, colour, w):
+    p.setPen(pen(colour, w))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(r, rad, rad)
+
+
+def lobed_arch(p, x1, x2, spring, rise, colour, w=0.6, lobes=7):
+    """the inner edge of an arch made of small round lobes."""
+    p.setPen(pen(colour, w))
+    rx = (x2 - x1) / 2
+    mx = (x1 + x2) / 2
+    pts = []
+    for k in range(lobes + 1):
+        a = math.pi * k / lobes
+        pts.append((mx - rx * math.cos(a), spring - rise * math.sin(a)))
+    path = QPainterPath()
+    path.moveTo(*pts[0])
+    for k in range(lobes):
+        (ax, ay), (bx, by) = pts[k], pts[k + 1]
+        cx, cy = (ax + bx) / 2, (ay + by) / 2
+        # bulge towards the centre of the arch
+        dx, dy = mx - cx, spring - cy
+        d = math.hypot(dx, dy) or 1
+        bulge = math.hypot(bx - ax, by - ay) * 0.35
+        path.quadTo(QPointF(cx + dx / d * bulge, cy + dy / d * bulge), QPointF(bx, by))
+    p.drawPath(path)
+
+
 # ------------------------------------------------------------------ title page
-def title(pw, ph, lines, colour="black"):
+def title(pw, ph, lines, colour="black", style=1):
     """The paint of a title page: lines = [(text, size, bold)], the first is the name
-    (in the arch), the rest under it."""
+    (in the arch), the rest under it. style: 1 a gate under a dome, 2 a gate with a
+    lobed arch and a medallion, 3 a round frame with garlands."""
     def paint(p):
         p.save()
         p.setRenderHint(p.RenderHint.Antialiasing, True)
         m = 30.0
-        # the border: a thick line and a thin one inside it
-        p.setPen(pen(colour, 1.6))
-        p.drawRect(QRectF(m, m, pw - 2 * m, ph - 2 * m))
-        p.setPen(pen(colour, 0.5))
-        p.drawRect(QRectF(m + 4, m + 4, pw - 2 * m - 8, ph - 2 * m - 8))
-        for cx, cy in ((m + 4, m + 4), (pw - m - 4, m + 4), (m + 4, ph - m - 4), (pw - m - 4, ph - m - 4)):
-            rosette(p, cx, cy, 7, colour, 0.5)
+        mid = pw / 2
+        # the border: rounded, a thick line and a thin one inside it
+        round_frame(p, QRectF(m, m, pw - 2 * m, ph - 2 * m), 14, colour, 1.6)
+        round_frame(p, QRectF(m + 4, m + 4, pw - 2 * m - 8, ph - 2 * m - 8), 11, colour, 0.5)
         L, R = m + 18, pw - m - 18
         cw = 30.0
         xl, xr = L + cw * 0.75, R - cw * 0.75
-        beam = ph * 0.2            # the beam's top
-        beam_h = 34.0
-        cap_top = beam + beam_h
         foot = ph - m - 60
-        # the crown above the beam: a pediment with a rosette, and scrolls at its ends
-        p.setPen(pen(colour, 0.9))
-        mid = pw / 2
-        ped = QPainterPath()
-        ped.moveTo(L + 10, beam)
-        ped.lineTo(mid, m + 30)
-        ped.lineTo(R - 10, beam)
-        p.drawPath(ped)
-        ped2 = QPainterPath()
-        ped2.moveTo(L + 26, beam - 4)
-        ped2.lineTo(mid, m + 38)
-        ped2.lineTo(R - 26, beam - 4)
-        p.setPen(pen(colour, 0.45))
-        p.drawPath(ped2)
-        rosette(p, mid, beam - (beam - m - 30) * 0.45, 13, colour, 0.6, 10)
-        scroll(p, L + 22, beam - 12, 9, colour, 0.6, -1)
-        scroll(p, R - 22, beam - 12, 9, colour, 0.6, 1)
-        # the beam: mouldings, dentils and a band of leaves
-        p.setPen(pen(colour, 1.0))
-        p.drawRect(QRectF(L, beam, R - L, beam_h))
-        p.setPen(pen(colour, 0.5))
-        p.drawLine(QPointF(L, beam + 4), QPointF(R, beam + 4))
-        dentils(p, L, R, beam + 7, 8, colour, 0.45)
-        leaf_band(p, L + 4, R - 4, beam + 19, 11, colour, 0.45)
-        # the columns
-        column(p, xl, cap_top, foot, cw, colour)
-        column(p, xr, cap_top, foot, cw, colour)
-        # the arch between them, its keystone and its stones
-        ix1, ix2 = xl + cw * 0.8, xr - cw * 0.8
-        rx = (ix2 - ix1) / 2
-        spring = cap_top + 70
-        ry = min(rx * 0.55, spring - cap_top - 6)
-        for k, w in ((0, 1.0), (9, 0.5)):
-            path = QPainterPath()
-            path.moveTo(ix1 + k, foot - 52)
-            path.lineTo(ix1 + k, spring)
-            path.arcTo(QRectF(ix1 + k, spring - (ry - k), 2 * (rx - k), 2 * (ry - k)), 180, -180)
-            path.lineTo(ix2 - k, foot - 52)
-            p.setPen(pen(colour, w))
-            p.drawPath(path)
-        p.setPen(pen(colour, 0.45))
-        for k in range(1, 12):
-            a = math.pi * k / 12
-            c, s = math.cos(a), math.sin(a)
-            x1_, y1_ = mid - c * rx, spring - s * ry
-            x2_, y2_ = mid - c * (rx - 9), spring - s * (ry - 9)
-            p.drawLine(QPointF(x1_, y1_), QPointF(x2_, y2_))
-        kw = 14
-        key = QPainterPath()
-        key.moveTo(mid - kw / 2, spring - ry - 3)
-        key.lineTo(mid + kw / 2, spring - ry - 3)
-        key.lineTo(mid + kw * 0.35, spring - ry + 12)
-        key.lineTo(mid - kw * 0.35, spring - ry + 12)
-        key.closeSubpath()
-        p.setBrush(QBrush(QColor("white")))
-        p.setPen(pen(colour, 0.8))
-        p.drawPath(key)
-        p.setBrush(Qt.NoBrush)
-        # spandrels: a rosette in each corner between the arch and the beam
-        rosette(p, ix1 + 14, cap_top + 16, 9, colour, 0.5)
-        rosette(p, ix2 - 14, cap_top + 16, 9, colour, 0.5)
+        if style in (1, 2):
+            beam = ph * 0.22
+            beam_h = 30.0
+            cap_top = beam + beam_h
+            if style == 1:
+                # a dome over the beam, with a rosette and two scrolls at its feet
+                dw = (R - L) * 0.62
+                for k, lw in ((0, 1.0), (7, 0.45)):
+                    path = QPainterPath()
+                    path.moveTo(mid - dw / 2 + k, beam)
+                    dh = beam - m - 26 - k
+                    path.arcTo(QRectF(mid - dw / 2 + k, beam - dh, dw - 2 * k, 2 * dh), 180, -180)
+                    p.setPen(pen(colour, lw))
+                    p.drawPath(path)
+                rosette(p, mid, beam - (beam - m - 26) * 0.5, 15, colour, 0.6, 12)
+                for f in (1, -1):
+                    scroll(p, mid - f * (dw / 2 + 16), beam - 10, 10, colour, 0.6, f)
+                    path = QPainterPath()
+                    path.moveTo(mid - f * (dw / 2 + 16), beam - 20)
+                    path.quadTo(QPointF(mid - f * (dw / 2 + 4), beam - 22), QPointF(mid - f * dw / 2, beam - 6))
+                    p.drawPath(path)
+                    p.drawEllipse(QPointF(mid - f * (R - L) * 0.44, beam - 7), 5, 5)
+            else:
+                # a round medallion over the beam, in a wreath of leaves
+                cy = beam - (beam - m - 20) * 0.5
+                rr = (beam - m - 26) * 0.5
+                p.setPen(pen(colour, 1.0))
+                p.drawEllipse(QPointF(mid, cy), rr, rr)
+                p.setPen(pen(colour, 0.45))
+                p.drawEllipse(QPointF(mid, cy), rr - 5, rr - 5)
+                rosette(p, mid, cy, rr - 10, colour, 0.5, 12)
+                for f in (1, -1):
+                    garland(p, mid - f * (rr + 2), mid - f * (R - L) * 0.45, beam - 14, 7, colour, 0.5)
+                    fleuron(p, mid - f * (rr + 22), beam - 2, 14, colour, 0.5, 0)
+            # the beam: rounded ends, dentils and a band of leaves
+            p.setPen(pen(colour, 1.0))
+            p.drawRoundedRect(QRectF(L, beam, R - L, beam_h), 6, 6)
+            dentils(p, L + 6, R - 6, beam + 4, 7, colour, 0.45)
+            guilloche(p, L + 6, beam + 15, R - 6, beam + 15, 11, colour, 0.45)
+            column(p, xl, cap_top, foot, cw, colour)
+            column(p, xr, cap_top, foot, cw, colour)
+            ix1, ix2 = xl + cw * 0.8, xr - cw * 0.8
+            rx = (ix2 - ix1) / 2
+            # a round arch: a half circle as wide as the opening (as high as it allows)
+            ry = min(rx, (foot - cap_top) * 0.42)
+            spring = cap_top + ry + 6
+            for k, w in ((0, 1.0), (9, 0.5)):
+                path = QPainterPath()
+                path.moveTo(ix1 + k, foot - 52)
+                path.lineTo(ix1 + k, spring)
+                path.arcTo(QRectF(ix1 + k, spring - (ry - k), 2 * (rx - k), 2 * (ry - k)), 180, -180)
+                path.lineTo(ix2 - k, foot - 52)
+                p.setPen(pen(colour, w))
+                p.drawPath(path)
+            if style == 2:
+                lobed_arch(p, ix1 + 9, ix2 - 9, spring, ry - 9, colour, 0.5, 9)
+            else:
+                p.setPen(pen(colour, 0.45))
+                for k in range(1, 14):
+                    a = math.pi * k / 14
+                    c, s_ = math.cos(a), math.sin(a)
+                    p.drawLine(QPointF(mid - c * rx, spring - s_ * ry), QPointF(mid - c * (rx - 9), spring - s_ * (ry - 9)))
+            # the keystone: a small round medallion
+            p.setBrush(QBrush(QColor("white")))
+            p.setPen(pen(colour, 0.8))
+            p.drawEllipse(QPointF(mid, spring - ry + 4), 8, 8)
+            p.setBrush(Qt.NoBrush)
+            rosette(p, mid, spring - ry + 4, 6, colour, 0.4, 6)
+            for f in (1, -1):
+                fleuron(p, mid - f * (rx - 10), cap_top + 18, 13, colour, 0.5, f * -45)
+            top_text = spring - ry * 0.55
+        else:
+            # a round frame with garlands and fleurons, no columns
+            r = QRectF(L, m + 30, R - L, foot - m - 30)
+            round_frame(p, r, 40, colour, 1.2)
+            round_frame(p, r.adjusted(7, 7, -7, -7), 34, colour, 0.5)
+            guilloche(p, r.left() + 40, r.top() + 14, r.right() - 40, r.top() + 14, 10, colour, 0.45)
+            # an oval medallion at the head
+            p.setBrush(QBrush(QColor("white")))
+            p.setPen(pen(colour, 1.0))
+            p.drawEllipse(QPointF(mid, r.top()), 40, 26)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(pen(colour, 0.45))
+            p.drawEllipse(QPointF(mid, r.top()), 34, 20)
+            rosette(p, mid, r.top(), 16, colour, 0.5, 12)
+            for f in (1, -1):
+                garland(p, mid - f * 44, mid - f * (r.width() / 2 - 30), r.top() + 34, 14, colour, 0.5)
+                fleuron(p, mid - f * (r.width() / 2 - 22), r.top() + 50, 16, colour, 0.5, f * -40)
+                fleuron(p, mid - f * (r.width() / 2 - 22), r.bottom() - 22, 16, colour, 0.5, 180 + f * 40)
+            # a lobed arch inside the frame
+            ix1, ix2 = r.left() + 30, r.right() - 30
+            lobed_arch(p, ix1, ix2, r.top() + 150, 70, colour, 0.6, 9)
+            p.setPen(pen(colour, 0.6))
+            p.drawLine(QPointF(ix1, r.top() + 150), QPointF(ix1, r.bottom() - 40))
+            p.drawLine(QPointF(ix2, r.top() + 150), QPointF(ix2, r.bottom() - 40))
+            top_text = r.top() + 130
         # the step under the gate, with a band across it
         p.setPen(pen(colour, 1.0))
-        p.drawRect(QRectF(L, foot, R - L, ph - m - 18 - foot))
-        leaf_band(p, L + 4, R - 4, foot + 6, 10, colour, 0.45)
-        # the lines: the name in the arch, the rest under it, between the columns
-        inner = ix2 - ix1 - 30
+        p.drawRoundedRect(QRectF(L, foot, R - L, ph - m - 18 - foot), 8, 8)
+        guilloche(p, L + 10, foot + 6, R - 10, foot + 6, 10, colour, 0.45)
+        # the lines: the name, the rest under it, between the columns
+        inner = R - L - 2 * cw * 1.6 - 20
         name, *rest = lines
         st = fit(Style(TITLE_FONT, name[1], True), name[0], inner)
-        # the block of lines, its height, centred in the opening of the gate
-        body_h = st.size * 0.6 + 16 + sum((size if not text else size * 1.25)
-                                          for text, size, _ in rest if not text.startswith("ימי"))
-        y = (spring - ry * 0.4 + foot - 52) / 2 - (st.size + body_h) / 2 + st.size
+        body = list(rest)
+        foot_line = body.pop() if body and body[-1][0].startswith("ימי") else None
+        body_h = st.size * 0.6 + 16 + sum((size if not text else size * 1.25) for text, size, _ in body)
+        y = (top_text + foot - 52) / 2 - (st.size + body_h) / 2 + st.size
         text_c(p, mid, y, name[0], st, colour)
         # a little ornament under the name
         y += st.size * 0.6
@@ -249,10 +379,6 @@ def title(pw, ph, lines, colour="black"):
         p.drawLine(QPointF(mid + 8, y), QPointF(mid + 50, y))
         rosette(p, mid, y, 5, colour, 0.4, 6)
         y += 16
-        body = [x for x in rest]
-        foot_line = None
-        if body and body[-1][0].startswith("ימי"):
-            foot_line = body.pop()
         for text, size, bold in body:
             if not text:
                 y += size
@@ -278,7 +404,7 @@ def cover(trim, pages, name_lines, masechtot, volume, colours, bleed=3.0, leaf=0
     """-> (width, height, paint) of the whole cover in points: the back on the left, the
     spine, the front on the right (a book read from right to left is opened on its
     right side), with the bleed all round."""
-    ground, gold = colours
+    ground, ink, gold = colours
     tw, th = trim[0] * PT_PER_MM, trim[1] * PT_PER_MM
     sw = spine_width(pages, leaf) * PT_PER_MM
     b = bleed * PT_PER_MM
@@ -288,102 +414,142 @@ def cover(trim, pages, name_lines, masechtot, volume, colours, bleed=3.0, leaf=0
         p.save()
         p.setRenderHint(p.RenderHint.Antialiasing, True)
         p.fillRect(QRectF(0, 0, W, H), QColor(ground))
-        # the front: on the right
-        fx = b + tw + sw
-        front(p, fx, b, tw, th, name_lines, masechtot, volume, gold)
-        # the spine
-        spine(p, b + tw, b, sw, th, masechtot, volume, gold)
+        front(p, b + tw + sw, b, tw, th, name_lines, masechtot, volume, ground, ink, gold)
+        spine(p, b + tw, b, sw, th, masechtot, volume, ground, ink, gold)
         p.restore()
     return W, H, paint
 
 
-def front(p, x0, y0, w, h, name_lines, masechtot, volume, gold):
-    m = 14 * PT_PER_MM
-    r = QRectF(x0 + m, y0 + m, w - 2 * m, h - 2 * m)
-    p.setPen(pen(gold, 2.2))
-    p.setBrush(Qt.NoBrush)
-    p.drawRect(r)
-    p.setPen(pen(gold, 0.7))
-    p.drawRect(r.adjusted(6, 6, -6, -6))
-    for cx, cy in ((r.left(), r.top()), (r.right(), r.top()), (r.left(), r.bottom()), (r.right(), r.bottom())):
-        rosette(p, cx, cy, 11, gold, 0.8, 8)
+def front(p, x0, y0, w, h, name_lines, masechtot, volume, ground, ink, gold):
     mid = x0 + w / 2
-    # a gate: an arch on two thin pillars, the name under the arch
-    aw = r.width() - 70
-    top = r.top() + 40
-    ah = 90
-    gx1, gx2 = mid - aw / 2, mid + aw / 2
-    gy2 = r.top() + r.height() * 0.62
-    for k, lw in ((0, 1.4), (6, 0.6)):
-        path = QPainterPath()
-        path.moveTo(gx1 + k, gy2)
-        path.lineTo(gx1 + k, top + ah / 2)
-        path.arcTo(QRectF(gx1 + k, top + k, aw - 2 * k, ah - 2 * k), 180, -180)
-        path.lineTo(gx2 - k, gy2)
-        p.setPen(pen(gold, lw))
-        p.drawPath(path)
-    p.setPen(pen(gold, 1.0))
-    p.drawLine(QPointF(gx1 - 8, gy2), QPointF(gx2 + 8, gy2))
-    p.drawLine(QPointF(gx1 - 8, gy2 + 4), QPointF(gx2 + 8, gy2 + 4))
-    rosette(p, mid, top - 14, 10, gold, 0.8, 10)
-    scroll(p, gx1 + 20, top + ah * 0.55, 8, gold, 0.7, 1)
-    scroll(p, gx2 - 20, top + ah * 0.55, 8, gold, 0.7, -1)
-    y = top + ah * 0.75
+    # a border of interlaced waves all round, and a rounded frame inside it
+    o = QRectF(x0 + 22, y0 + 22, w - 44, h - 44)
+    p.setPen(pen(gold, 1.6))
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(o)
+    bh = 13
+    guilloche(p, o.left() + 4, o.top() + 4, o.right() - 4, o.top() + 4, bh, ink, 0.55)
+    guilloche(p, o.left() + 4, o.bottom() - 4 - bh, o.right() - 4, o.bottom() - 4 - bh, bh, ink, 0.55)
+    guilloche(p, o.left() + 4, o.top() + 4 + bh, o.left() + 4, o.bottom() - 4 - bh, bh, ink, 0.55)
+    guilloche(p, o.right() - 4 - bh, o.top() + 4 + bh, o.right() - 4 - bh, o.bottom() - 4 - bh, bh, ink, 0.55)
+    r = o.adjusted(bh + 12, bh + 12, -bh - 12, -bh - 12)
+    round_frame(p, r, 22, gold, 2.0)
+    round_frame(p, r.adjusted(5, 5, -5, -5), 18, ink, 0.6)
+    for cx, cy, a in ((r.left() + 22, r.top() + 22, -45), (r.right() - 22, r.top() + 22, 45),
+                      (r.left() + 22, r.bottom() - 22, -135), (r.right() - 22, r.bottom() - 22, 135)):
+        fleuron(p, cx, cy, 18, ink, 0.7, a)
+    # a medallion at the head, with garlands to the sides
+    cy = r.top() + 50
+    p.setBrush(QBrush(QColor(ground)))
+    p.setPen(pen(gold, 1.6))
+    p.drawEllipse(QPointF(mid, cy), 26, 26)
+    p.setBrush(Qt.NoBrush)
+    p.setPen(pen(ink, 0.6))
+    p.drawEllipse(QPointF(mid, cy), 21, 21)
+    rosette(p, mid, cy, 17, ink, 0.6, 12)
+    for f in (1, -1):
+        garland(p, mid - f * 30, mid - f * (r.width() / 2 - 40), cy - 6, 10, gold, 0.8)
+    # a lobed arch over the name
+    ax1, ax2 = r.left() + 34, r.right() - 34
+    spring = r.top() + 150
+    p.setPen(pen(gold, 1.4))
+    path = QPainterPath()
+    path.moveTo(ax1, spring + 120)
+    path.lineTo(ax1, spring)
+    path.arcTo(QRectF(ax1, spring - 66, ax2 - ax1, 132), 180, -180)
+    path.lineTo(ax2, spring + 120)
+    p.drawPath(path)
+    lobed_arch(p, ax1 + 7, ax2 - 7, spring, 59, ink, 0.6, 11)
+    y = spring - 6
     for text, size in name_lines:
-        st = fit(Style(TITLE_FONT, size, True), text, aw - 40)
-        y += st.size * 1.35
-        text_c(p, mid, y, text, st, gold)
-    y += 26
-    p.setPen(pen(gold, 0.8))
+        st = fit(Style(TITLE_FONT, size, True), text, ax2 - ax1 - 30)
+        y += st.size * 1.3
+        text_c(p, mid, y, text, st, ink)
+    y += 20
+    p.setPen(pen(gold, 0.9))
     p.drawLine(QPointF(mid - 70, y), QPointF(mid - 12, y))
     p.drawLine(QPointF(mid + 12, y), QPointF(mid + 70, y))
-    rosette(p, mid, y, 7, gold, 0.7, 6)
-    # the masechtot of the volume, under the gate
-    y = gy2 + 20
+    rosette(p, mid, y, 7, gold, 0.8, 6)
+    # the masechtot of the volume, in a rounded cartouche
     rows, row = [], []
     for ms in masechtot:
-        if row and width(Style(TITLE_FONT, 18, True), " · ".join(row + [ms])) > r.width() - 60:
+        if row and width(Style(TITLE_FONT, 17, True), " · ".join(row + [ms])) > r.width() - 90:
             rows.append(row)
             row = []
         row.append(ms)
     rows.append(row)
     if len(masechtot) == 1:
         rows = [["מסכת " + masechtot[0]]]
+    ch = 26 * len(rows) + 22
+    c = QRectF(r.left() + 30, spring + 150, r.width() - 60, ch)
+    p.setBrush(QBrush(QColor(ground)))
+    round_frame(p, c, ch / 2, gold, 1.4)
+    p.setBrush(Qt.NoBrush)
+    round_frame(p, c.adjusted(4, 4, -4, -4), ch / 2 - 4, ink, 0.5)
+    yy = c.top() + 11
     for row in rows:
         t = " · ".join(row)
-        st = fit(Style(TITLE_FONT, 18, True), t, r.width() - 60)
-        y += st.size * 1.45
-        text_c(p, mid, y, t, st, gold)
-    # a band and the volume at the foot
-    leaf_band(p, r.left() + 20, r.right() - 20, r.bottom() - 62, 12, gold, 0.7)
-    text_c(p, mid, r.bottom() - 24, volume, Style(TITLE_FONT, 16, True), gold)
+        st = fit(Style(TITLE_FONT, 17, True), t, c.width() - 50)
+        yy += 26
+        text_c(p, mid, yy - 7, t, st, ink)
+    # a great medallion between the cartouche and the foot
+    top_m, bot_m = c.bottom() + 16, r.bottom() - 82
+    if bot_m - top_m > 60:
+        cy = (top_m + bot_m) / 2
+        rr = min((bot_m - top_m) / 2, r.width() * 0.3)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(pen(gold, 1.6))
+        p.drawEllipse(QPointF(mid, cy), rr, rr)
+        p.setPen(pen(ink, 0.6))
+        p.drawEllipse(QPointF(mid, cy), rr - 5, rr - 5)
+        p.drawEllipse(QPointF(mid, cy), rr - 16, rr - 16)
+        n = int(2 * math.pi * (rr - 10.5) / 9)
+        for k in range(n):
+            a = 2 * math.pi * k / n
+            p.drawEllipse(QPointF(mid + math.cos(a) * (rr - 10.5), cy + math.sin(a) * (rr - 10.5)), 2.2, 2.2)
+        rosette(p, mid, cy, rr - 24, gold, 0.8, 16)
+        rosette(p, mid, cy, (rr - 24) * 0.45, ink, 0.6, 8)
+        for f in (1, -1):
+            fleuron(p, mid - f * (rr + 26), cy, 18, gold, 0.8, f * -90)
+    # garlands under it and the volume in an oval at the foot
+    for f in (1, -1):
+        fleuron(p, mid - f * 60, r.bottom() - 52, 16, gold, 0.8, f * -90)
+    p.setBrush(QBrush(QColor(ground)))
+    p.setPen(pen(gold, 1.4))
+    p.drawEllipse(QPointF(mid, r.bottom() - 52), 36, 18)
+    p.setBrush(Qt.NoBrush)
+    p.setPen(pen(ink, 0.5))
+    p.drawEllipse(QPointF(mid, r.bottom() - 52), 32, 14)
+    text_c(p, mid, r.bottom() - 47, volume, Style(TITLE_FONT, 14, True), ink)
 
 
-def spine(p, x0, y0, w, h, masechtot, volume, gold):
+def spine(p, x0, y0, w, h, masechtot, volume, ground, ink, gold):
     mid = x0 + w / 2
-    # bands at the head and the foot, as on a bound book
-    for yy in (y0 + 28, y0 + 40, y0 + h - 40, y0 + h - 28):
-        p.setPen(pen(gold, 1.2))
-        p.drawLine(QPointF(x0 + 3, yy), QPointF(x0 + w - 3, yy))
-    p.setPen(pen(gold, 0.5))
-    p.drawLine(QPointF(x0 + 3, y0 + 34), QPointF(x0 + w - 3, y0 + 34))
-    p.drawLine(QPointF(x0 + 3, y0 + h - 34), QPointF(x0 + w - 3, y0 + h - 34))
     inner = w - 8
-    y = y0 + 70
-    for text, size in (("רא\"ש", 13), ("ורי\"ף", 13)):
-        st = fit(Style(TITLE_FONT, size, True), text, inner)
+    # bands at the head and the foot, as on a bound book, with panels between them
+    for yy in (y0 + 24, y0 + 36, y0 + h - 36, y0 + h - 24):
+        p.setPen(pen(gold, 1.6))
+        p.drawLine(QPointF(x0 + 2, yy), QPointF(x0 + w - 2, yy))
+    for yy in (y0 + 30, y0 + h - 30):
+        p.setPen(pen(ink, 0.6))
+        p.drawLine(QPointF(x0 + 2, yy), QPointF(x0 + w - 2, yy))
+    panel = QRectF(x0 + 4, y0 + 46, w - 8, h - 92)
+    p.setPen(pen(ink, 0.6))
+    p.drawRoundedRect(panel, 4, 4)
+    y = panel.top() + 12
+    for text in ("רא\"ש", "ורי\"ף"):
+        st = fit(Style(TITLE_FONT, 13, True), text, inner - 4)
         y += st.size * 1.2
-        text_c(p, mid, y, text, st, gold)
-    y += 10
-    rosette(p, mid, y, min(6, inner / 2), gold, 0.6, 6)
-    y += 14
+        text_c(p, mid, y, text, st, ink)
+    y += 12
+    rosette(p, mid, y, min(6, inner / 2 - 1), gold, 0.7, 6)
     # the masechtot one under another, in the middle of the spine
-    sts = [fit(Style(TITLE_FONT, 11, True), m, inner) for m in masechtot]
+    sts = [fit(Style(TITLE_FONT, 11, True), m, inner - 4) for m in masechtot]
     size = min(st.size for st in sts)
-    lh = size * 1.55
-    top = max(y + 10, y0 + h / 2 - lh * len(masechtot) / 2)
+    lh = size * 1.6
+    top = max(y + 14, y0 + h / 2 - lh * len(masechtot) / 2)
     for k, m in enumerate(masechtot):
-        text_c(p, mid, top + lh * (k + 1) - lh * 0.3, m, Style(TITLE_FONT, size, True), gold)
-    rosette(p, mid, y0 + h - 70, min(6, inner / 2), gold, 0.6, 6)
-    st = fit(Style(TITLE_FONT, 12, True), volume, inner)
-    text_c(p, mid, y0 + h - 50, volume, st, gold)
+        text_c(p, mid, top + lh * (k + 1) - lh * 0.3, m, Style(TITLE_FONT, size, True), ink)
+    rosette(p, mid, panel.bottom() - 48, min(6, inner / 2 - 1), gold, 0.7, 6)
+    st = fit(Style(TITLE_FONT, 12, True), volume, inner - 4)
+    text_c(p, mid, panel.bottom() - 20, volume, st, ink)

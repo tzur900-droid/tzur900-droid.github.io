@@ -30,7 +30,8 @@ SEDARIM = [("זרעים", ["ברכות"]),
            ("טהרות", ["נידה"])]
 SEDER_OF = {m: s for s, ms in SEDARIM for m in ms}
 LO, HI = 300, 500
-COVER = "כחול"           # the colour of the covers (design.COLOURS)
+COVER = "תכלת"           # the colour of the covers (design.COLOURS)
+TITLE_STYLE = 1          # the drawing of the title pages (design.title)
 
 
 def _init(fonts):
@@ -118,12 +119,12 @@ def blank(pw, ph):
     return Page(pw, ph)
 
 
-def title_page(pw, ph, lines):
+def title_page(pw, ph, lines, style=None):
     """A title page drawn as a gate, as in the Vilna Shas (design.title): lines of
     (text, size, bold), the first in the arch."""
     from . import design
     p = Page(pw, ph)
-    p.paint = [design.title(pw, ph, lines)]
+    p.paint = [design.title(pw, ph, lines, style=style or TITLE_STYLE)]
     return p
 
 
