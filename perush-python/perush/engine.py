@@ -28,6 +28,8 @@ from .model import entry_tokens, heb, page_mm, parse_comm, parse_main
 from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width, words_of
 
 EPS = 0.01
+# an automatic-width translation column: its share of the line stays within these (%)
+AUTO_MIN, AUTO_MAX = 20.0, 40.0
 
 
 class Cancelled(Exception):
@@ -366,7 +368,7 @@ class Engine:
                 continue
             sw = words_of(toks, self.style[c])
             others = sum(self.col_w[o] for o in self.sides if o != c)
-            lo, hi = 10.0, min(60.0, 90.0 - others)
+            lo, hi = AUTO_MIN, min(AUTO_MAX, 90.0 - others)
             for _ in range(9):
                 w = (lo + hi) / 2
                 _, h_main = layout_specs(specs, full_width(self.W * (100 - others - w) / 100))
@@ -891,7 +893,8 @@ class Engine:
                     sign = 1 if lag > 1 else -1
                     for step in (1.5, 3):
                         for c in self.sides:
-                            self.col_w[c] = min(60.0, max(12.0, base[c] + sign * step))
+                            top = AUTO_MAX if self.comms[c]["autoW"] else 60.0
+                            self.col_w[c] = min(top, max(12.0, base[c] + sign * step))
                         cand = self.search_page(pos, pre)
                         lag2 = self.page_lag(cand)
                         ok = (cand["col_full"] or cand["at_end"]) and (cand["start_ok"] or not best["start_ok"])
@@ -1188,7 +1191,7 @@ class Engine:
         """Put a page's content (everything under the running head) on page from y down."""
         if r.get("col_w"):
             self.col_w = dict(r["col_w"])
-        L, R = self.m, self.page_w - self.m
+        L, R = self.m + self.gutter, self.page_w - self.m     # the text area (the binding margin on the left)
         pre = r.get("pre")
         if pre and "r" in pre:
             y = self.place_body(pre["r"], page, y) + self.sgap + 3 * PT_PER_MM
