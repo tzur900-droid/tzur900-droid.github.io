@@ -237,6 +237,8 @@ class MainWindow(QMainWindow):
         books.setStyleSheet("font-weight:bold;")
         tb.addWidget(books)
         act("דוגמה", self.load_example)
+        prep = act("הכנת טקסט…", self.open_prepare)
+        tb.widgetForAction(prep).setStyleSheet("font-weight:bold;")
         act("ייבוא מספריא…", self.import_sefaria)
         act("בדיקת התאמה", self.show_check)
         tb.addSeparator()
@@ -447,8 +449,6 @@ class MainWindow(QMainWindow):
         lay.addStretch(1)
         area.setWidget(w)
         side.addTab(area, "עימוד")
-        side.addTab(self.build_prepare(), "הכנת טקסט")
-        side.currentChanged.connect(lambda i: self.prep_targets() if side.widget(i) is self.prep_box else None)
         # the mouse wheel scrolls the settings, it doesn't change a number or a choice it
         # happens to pass over (only one that was clicked first)
         self.wheel_guard = WheelGuard(self)
@@ -469,12 +469,25 @@ class MainWindow(QMainWindow):
         self.title_sub.textChanged.connect(self.changed)
         return side
 
+    def open_prepare(self):
+        """The window for preparing text (it keeps what was pasted while it is closed)."""
+        if getattr(self, "prep_dlg", None) is None:
+            self.prep_dlg = QDialog(self)
+            self.prep_dlg.setWindowTitle("הכנת טקסט")
+            self.prep_dlg.resize(900, 760)
+            QVBoxLayout(self.prep_dlg).addWidget(self.build_prepare())
+        self.prep_targets()
+        self.prep_dlg.show()
+        self.prep_dlg.raise_()
+        self.prep_dlg.activateWindow()
+
     def build_prepare(self):
-        """A tab for text as it comes (running text, copied from a site or a PDF): it is
-        made ready for the program and put into the main text or a commentary."""
+        """Text as it comes (running text, copied from a site or a PDF) made ready for the
+        program and put into the main text or a commentary."""
         box = QWidget()
         self.prep_box = box
         lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(hint(
             "הדביקו כאן טקסט בכל צורה (מלל רץ, העתקה מאתר או מ־PDF) ולחצו <b>הכן</b>. "
             "<b>טקסט עיקרי:</b> כל פסוק לשורה (לפי הנקודתיים שבסוף פסוק, או לפי מספרי פסוקים כמו (א) {א} [א]), "
@@ -509,7 +522,6 @@ class MainWindow(QMainWindow):
         row.addWidget(b1)
         row.addWidget(b2)
         lay.addLayout(row)
-        self.prep_targets()
         return box
 
     def prep_targets(self):
@@ -549,6 +561,7 @@ class MainWindow(QMainWindow):
         if target == -1 and getattr(self, "prep_title", None) and not self.title.text().strip():
             self.title.setText(self.prep_title)
         self.prep_report.setText("הוכנס. לחצו על עימוד מחדש כדי לראות את התוצאה.")
+        self.prep_dlg.hide()
 
     def build_preview(self):
         w = QWidget()
