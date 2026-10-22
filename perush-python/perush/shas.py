@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 from .engine import Frame, Page
 from .abbrev import expand
-from .model import heb
+from .model import DEDICATION, heb
 from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width
 
 EPS = 0.01
@@ -533,6 +533,9 @@ class Book:
         self.lh_rif = rif_size * 1.34
         self.lh_comm = comm_size * 1.26
         self.head_style = Style("Frank Ruhl Libre", 9)
+        self.ded_lines = DEDICATION.split("\n")   # at the foot of the book's first page
+        self.ded_lh = 8.5 * 1.45
+        self.ded_h = len(self.ded_lines) * self.ded_lh + 4 * PT_PER_MM
         self.cw = self.W * 0.25            # a commentary column beside the Rif
         self.wide = (self.W - self.gap) / 2  # a commentary column under it
 
@@ -603,9 +606,10 @@ class Book:
         pages, i, n = [], 0, len(lines)
         while i < n:
             cols = []
+            H = self.H
             for _ in range(2):
                 col, h = [], 0.0
-                while i < n and h + lines[i].h <= self.H + EPS:
+                while i < n and h + lines[i].h <= H + EPS:
                     col.append(lines[i])
                     h += lines[i].h
                     i += 1
@@ -617,7 +621,7 @@ class Book:
             last = i >= n
             for col in cols:
                 tot = sum(l.h for l in col)
-                spare = self.H - tot
+                spare = H - tot
                 if col and not last and 0 < spare < self.lh_rosh * 2.5:
                     for l in col:
                         l.h += spare / len(col)
@@ -1153,5 +1157,13 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297)):
             xref.append(comm_name)
     title_rif = f"רי\"ף ו{comm_name}" if comm_name else "רי\"ף"
     pages = book.render(rosh_pages, rif_pages, xref, "פסקי הרא\"ש", title_rif)
+    # the title page and the blank page behind it (the text begins on a left-hand page)
+    from .titlepage import blank_page, title_page
+    lines = ["פסקי הרא\"ש ורי\"ף" if rif else "פסקי הרא\"ש"]
+    if comm_name:
+        lines.append(f"עם {comm_name}")
+    lines.append("בחלוקה ללימוד יומי · כל הש\"ס בשנה")
+    pages = [title_page(book.pw, book.ph, book.m, "Frank Ruhl Libre", f"מסכת {m}", lines, book.ded_lines),
+             blank_page(book.pw, book.ph)] + pages
     report.append(f"{m}: {len(rosh_pages)} עמודי רא\"ש, {len(rif_pages)} עמודי רי\"ף, ימים {heb(first_day)}–{heb(first_day + len(starts) - 1)}")
     return pages, report

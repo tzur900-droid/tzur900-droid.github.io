@@ -90,6 +90,11 @@ def main():
         from perush.model import load_project
         from perush.render import export_cover, export_pdf
         project = load_project(args[0])
+        dedication = project.get("dedication")
+        if "--cover" in sys.argv:
+            # the cover's own title page comes instead, with the dedication at its foot
+            project["titlePage"] = False
+            project["dedication"] = ""
         if "--size" in sys.argv:
             from perush.model import PAGE_SIZES, fit_to_page
             size = sys.argv[sys.argv.index("--size") + 1]
@@ -106,7 +111,7 @@ def main():
         pages, warnings = layout_project(project)
         for w in warnings:
             print("⚠", w)
-        cover = book_info(project) if "--cover" in sys.argv else None
+        cover = book_info(dict(project, dedication=dedication)) if "--cover" in sys.argv else None
         grams = int(sys.argv[sys.argv.index("--paper") + 1]) if "--paper" in sys.argv else 80
         from perush.cover import STYLES, style_of
         style = style_of(int(sys.argv[sys.argv.index("--cover-style") + 1])) if "--cover-style" in sys.argv else None

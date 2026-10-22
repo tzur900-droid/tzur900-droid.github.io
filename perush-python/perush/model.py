@@ -50,6 +50,8 @@ def fit_to_page(p):
         c["size"] = round(max(6.0, c["size"] * k) * 2) / 2
 
 
+DEDICATION = "הספר עומד ועוצב בסיוע ובמימון אבנר אליאסיאן\nלימוד התורה יעמוד לזכות לו ולבני משפחתו"
+
 DEFAULTS = {
     "title": "",
     "main": "",
@@ -71,6 +73,10 @@ DEFAULTS = {
     "names": True,
     "inlineChapters": False,
     "bookMode": False,
+    # printed small at the foot of the first page; a line break ("\n") starts a new line
+    "dedication": DEDICATION,
+    "titlePage": True,       # a title page at the start: the name of the book, what is in it, the dedication
+    "titleSub": "",          # the line under the name on the title page ("" = made from the commentaries)
 }
 
 COMM_DEFAULTS = {

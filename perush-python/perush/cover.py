@@ -91,6 +91,8 @@ def book_info(project):
         "extra": ("הפטרות עם פירוש " + " ו".join(bases)) if haftara and bases else ("והפטרות" if haftara else ""),
         "verse": "תּוֹרָה צִוָּה לָנוּ מֹשֶׁה מוֹרָשָׁה קְהִלַּת יַעֲקֹב",
         "back": "עֵץ חַיִּים הִיא לַמַּחֲזִיקִים בָּהּ וְתֹמְכֶיהָ מְאֻשָּׁר",
+        # at the foot of the title page, a line each
+        "dedication": [l.strip() for l in str(project.get("dedication") or "").split("\n") if l.strip()],
     }
 
 
@@ -708,9 +710,18 @@ def draw_front(p, rect, info, gilt=True, style=None, bleed=0.0):
     k = min(rect.width() / 595.0, rect.height() / 842.0)
     lay = style["layout"]
     if not gilt:
-        # the title page: the same design as the cover, in its colour on white paper
+        # the title page: the same design as the cover, in its colour on white paper, and
+        # the dedication at its foot
         p.fillRect(rect, QColor("white"))
-        draw_front(p, rect, info, True, title_style(style))
+        ts = title_style(style)
+        draw_front(p, rect, info, True, ts)
+        ded = info.get("dedication") or []
+        if ded:
+            ink = Ink(rect, True, ts)
+            lh = 15 * k
+            y = rect.top() + rect.height() * 0.93 - (len(ded) - 1) * lh
+            for n, line in enumerate(ded):
+                plain_text(p, ink, line, rect.center().x(), y + n * lh, k, rect.width() * 0.62, 11)
         return
     ground(p, rect.adjusted(-bleed, -bleed, bleed, bleed), style, k)
     ink = Ink(rect, True, style)
