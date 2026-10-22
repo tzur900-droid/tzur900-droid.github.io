@@ -118,11 +118,16 @@ def blank(pw, ph):
     return Page(pw, ph)
 
 
+DEDICATION = ("הספר עומד ועוצב בסיוע ומימון", "אבנר ובנו צור אליאסיאן",
+              "זכות התורה תעמוד להם ולבני משפחותיהם עד עולם")
+
+
 def gate(pw, ph, items, foot_title="", foot_lines=()):
-    """A title page drawn after the gate of the Oz Vehadar Shas (design.gate_page)."""
+    """A title page drawn after the gate of the Oz Vehadar Shas (design.gate_page), with
+    the dedication at its foot."""
     from . import design
     p = Page(pw, ph)
-    p.paint = [design.gate_page(pw, ph, items, foot_title, list(foot_lines))]
+    p.paint = [design.gate_page(pw, ph, items, foot_title, list(foot_lines), dedication=DEDICATION)]
     return p
 
 

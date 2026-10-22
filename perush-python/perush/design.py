@@ -1118,13 +1118,13 @@ PALETTES = {
 
 
 def gate_page(w, h, items, foot_title, foot_lines, pal=GREY, sides=(("אמונת", "עתיך", "חוסן"), ("ישועות", "חכמת", "ודעת")),
-              feet=(("זרעים", "מועד", "נשים"), ("נזיקין", "קדשים", "טהרות")), margin=24.0):
+              feet=(("זרעים", "מועד", "נשים"), ("נזיקין", "קדשים", "טהרות")), margin=24.0, dedication=()):
     """The gate of the Oz Vehadar Shas, w by h points from (0, 0): a frame of filigree, a
     great round arch, pillars on both sides with the words of the verse at the head, a
     vine down them and the sedarim at the foot, and a little gate of twisted columns and
     flames at the foot with foot_title along its arch and foot_lines in it. items, in the
     arch, one block in its middle: ("shaded", text, size) great shaded letters, ("text",
-    text, size), ("div",) an ornament."""
+    text, size), ("div",) an ornament. dedication: lines, small, at the foot of the arch."""
     def paint(p):
         PAPER[0] = pal["paper"]
         line, leaf, tint, ink = pal["line"], pal["leaf"], pal["tint"], pal["ink"]
@@ -1274,7 +1274,18 @@ def gate_page(w, h, items, foot_title, foot_lines, pal=GREY, sides=(("אמונת
                 y += 18
                 ops.append(("div", y - 4, None, None))
                 y += 4
-        top, bot = spring - rx * 0.45, panel_bot - 16
+        # the dedication at the foot of the opening, under an ornament
+        ded_h = 0.0
+        if dedication:
+            dst = [fit(Style(TEXT_FONT, 9.5), t, w_in) for t in dedication]
+            ded_h = sum(st.size * 1.45 for st in dst) + 14
+            yy = panel_bot - 10 - ded_h + 4
+            divider(p, mid, yy, 26, line)
+            yy += 6
+            for t, st in zip(dedication, dst):
+                yy += st.size * 1.45
+                text_c(p, mid, yy, t, st, ink)
+        top, bot = spring - rx * 0.45, panel_bot - 16 - ded_h
         y0 = top + max(0.0, (bot - top - y) / 2) - 10
         for kind, yy, text, st in ops:
             if kind == "shaded":
