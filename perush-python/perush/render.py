@@ -36,8 +36,8 @@ def draw_page(p, page):
     p.setLayoutDirection(Qt.RightToLeft)
     if page.head:
         right, center, left, st, base = page.head
-        m = page.rules[0][0] if page.rules else 0
-        R = page.width - m
+        # the head spans the rule under it (the text area, which a binding margin may shift)
+        m, R = (page.rules[0][0], page.rules[0][2]) if page.rules else (0, page.width)
         bold = st.with_bold(True)
         from .textlayout import width
         if right:
@@ -45,7 +45,7 @@ def draw_page(p, page):
             p.drawText(QPointF(R - width(bold, right), base), right)
         if center:
             p.setFont(qfont(st))
-            p.drawText(QPointF(page.width / 2 - width(st, center) / 2, base), center)
+            p.drawText(QPointF((m + R) / 2 - width(st, center) / 2, base), center)
         if left:
             p.setFont(qfont(bold))
             p.drawText(QPointF(m, base), left)
@@ -91,6 +91,10 @@ def export_pdf(pages, path, title=""):
     w, h = pages[0].width, pages[0].height
     writer = QPdfWriter(path)
     writer.setResolution(72)
+    if hasattr(writer, "setColorModel"):
+        # black ink only: black text in RGB is printed with all four inks, and small letters
+        # come out blurred if the plates are a hair out of register
+        writer.setColorModel(QPdfWriter.ColorModel.Grayscale)
     writer.setTitle(title or "עימוד פירושים")
     writer.setCreator("עימוד פירושים")
     size = QPageSize(QSizeF(w / PT_PER_MM, h / PT_PER_MM), QPageSize.Millimeter, "custom", QPageSize.ExactMatch)

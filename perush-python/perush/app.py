@@ -399,6 +399,7 @@ class MainWindow(QMainWindow):
             "firstPage": ispin(1, 5000),
             "pageW": dspin(50, 500, 1, " מ\"מ"),
             "pageH": dspin(50, 700, 1, " מ\"מ"),
+            "gutter": dspin(0, 30, 1, " מ\"מ"),
         }
         form.addRow("גודל עמוד:", self.page_size)
         dims = QHBoxLayout()
@@ -412,6 +413,8 @@ class MainWindow(QMainWindow):
         fit.clicked.connect(self.fit_to_page)
         form.addRow(fit)
         form.addRow("שוליים:", self.sp["margin"])
+        self.sp["gutter"].setToolTip("בצורת ספר: תוספת לשוליים בצד הפנימי, שנבלע בכריכה")
+        form.addRow("תוספת לשוליים הפנימיים (כריכה):", self.sp["gutter"])
         form.addRow("גופן הטקסט:", self.main_font)
         form.addRow("גודל הטקסט:", self.sp["mainSize"])
         form.addRow("מרווח שורות:", self.sp["lineHeight"])

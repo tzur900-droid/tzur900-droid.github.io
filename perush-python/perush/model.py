@@ -62,7 +62,8 @@ DEFAULTS = {
     # printed small at the foot of the first page; a line break ("\n") starts a new line
     "dedication": DEDICATION,
     "titlePage": True,       # a title page at the start: the name of the book, what is in it, the dedication
-    "titleSub": "",          # the line under the name on the title page ("" = made from the commentaries)
+    "titleSub": "",
+    "gutter": 0,             # extra margin on the inner side, for the binding (mm; book form only)          # the line under the name on the title page ("" = made from the commentaries)
 }
 
 COMM_DEFAULTS = {

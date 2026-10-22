@@ -111,7 +111,9 @@ class Engine:
         self.page_w = wmm * PT_PER_MM
         self.page_h = hmm * PT_PER_MM
         self.m = P["margin"] * PT_PER_MM
-        self.W = self.page_w - 2 * self.m
+        # a book is bound on its inner side: extra margin there (the pages alternate)
+        self.gutter = float(P.get("gutter") or 0) * PT_PER_MM if P.get("bookMode") else 0.0
+        self.W = self.page_w - 2 * self.m - self.gutter
         self.body_h = self.page_h - 2 * self.m
         # the dedication at the foot of the first page
         self.ded_style = Style(P["mainFont"], 8.5)
@@ -1278,7 +1280,7 @@ class Engine:
         if r.get("col_w"):
             self.col_w = dict(r["col_w"])
         P = self.P
-        L, R, T = self.m, self.page_w - self.m, self.m
+        L, R, T = self.m + self.gutter, self.page_w - self.m, self.m
         page = Page(self.page_w, self.page_h)
         y = T
         if P["header"]:
@@ -1307,6 +1309,11 @@ class Engine:
                 lines.extend(ln)
             page.frames.append(Frame(lines, R, T + self.body_h - len(self.ded_lines) * self.ded_lh))
         self.finalizing = None
+        if self.gutter and index % 2 == 0:
+            # a left-hand page: its inner side, the binding, is on the right
+            for fr in page.frames:
+                fr.x_right -= self.gutter
+            page.rules = [(x1 - self.gutter, y, x2 - self.gutter) for x1, y, x2 in page.rules]
         return page
 
 
