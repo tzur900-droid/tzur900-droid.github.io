@@ -143,10 +143,10 @@ def masechet_title(pw, ph, m, info, part):
     return gate(pw, ph, items, "ימי הלימוד", [(days, 16)])
 
 
-def name_items(ms, size=17):
-    """the name of the work (the Rif, an ornament, the Rosh) and the masechtot, a few to a
-    line."""
-    items = [("shaded", "הלכות רב אלפס", 52), ("div",), ("shaded", "פסקי הרא״ש", 52), ("div",)]
+def name_items(ms, size=17, rosh=1.0):
+    """the name of the work (the Rif, an ornament, the Rosh: rosh of the Rif's size) and
+    the masechtot, a few to a line."""
+    items = [("shaded", "הלכות רב אלפס", 52), ("div",), ("shaded", "פסקי הרא״ש", 52, rosh), ("div",)]
     rows = [ms[k:k + 3] for k in range(0, len(ms), 3)]
     if len(ms) == 1:
         rows = [["מסכת " + ms[0]]]
@@ -189,7 +189,7 @@ def assemble(ms, books, page=B5, margin=SIZES["margin"]):
 def cover_page(ms, n_pages, volume, colour=COVER, page=B5):
     """The whole cover of a file (front, spine and back) as one page."""
     from . import design
-    W, H, paint = design.gate_cover(page, n_pages, name_items(ms, 18), ["הלכות", "רב אלפס", "div", "פסקי", "הרא״ש"],
+    W, H, paint = design.gate_cover(page, n_pages, name_items(ms, 18, rosh=0.78), ["הלכות", "רב אלפס", "div", ("פסקי", 0.8), ("הרא״ש", 0.8)],
                                     ms, "כרך " + heb(volume), design.PALETTES[colour])
     p = Page(W, H)
     p.paint = [paint]

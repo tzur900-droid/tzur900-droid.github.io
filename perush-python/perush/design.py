@@ -1248,10 +1248,17 @@ def gate_page(w, h, items, foot_title, foot_lines, pal=GREY, sides=(("אמונת
             text_c(p, mid, yy, text, st, ink)
         # the block of lines in the arch
         w_in = 2 * (rx - band) - 30
-        ops, y = [], 0.0
+        ops, y, last_shaded = [], 0.0, 0.0
         for it in items:
             if it[0] == "shaded":
-                st = Style(TITLE_FONT, it[2], True)
+                size = it[2]
+                if len(it) > 3:
+                    # a part (it[3]) of the great letters before it, as they came out
+                    size = last_shaded * it[3]
+                st = Style(TITLE_FONT, size, True)
+                r = text_path(0, 0, it[1], st).boundingRect()
+                last_shaded = size * min(1.0, (w_in - 10) / r.width())
+                st = Style(TITLE_FONT, last_shaded, True)
                 y += st.size * (0.75 if not ops else 1.0)
                 ops.append(("shaded", y, it[1], st))
                 y += st.size * 0.25
@@ -1318,6 +1325,7 @@ def gate_spine(p, x0, y0, w, h, spine_lines, masechtot, volume, pal):
     p.drawRoundedRect(top, (w - 12) / 2, (w - 12) / 2)
     p.setBrush(Qt.NoBrush)
     y = top.top() + 30
+    rif_size = 99.0
     for k, it in enumerate(spine_lines):
         if it == "div":
             y += 6
@@ -1335,9 +1343,15 @@ def gate_spine(p, x0, y0, w, h, spine_lines, masechtot, volume, pal):
             p.setBrush(Qt.NoBrush)
             y += 8
             continue
-        st = fit(Style(TITLE_FONT, 13, True), it, inner - 6)
+        text, part = it if isinstance(it, tuple) else (it, 1.0)
+        st = fit(Style(TITLE_FONT, 13, True), text, inner - 6)
+        if part == 1.0:
+            rif_size = min(rif_size, st.size)
+        else:
+            # a part of the lines before it (the Rosh after the Rif)
+            st = Style(TITLE_FONT, min(st.size, rif_size * part), True)
         y += st.size * 1.2
-        text_c(p, mid, y, it, st, ink)
+        text_c(p, mid, y, text, st, ink)
     n = len(masechtot)
     sts = [fit(Style(TITLE_FONT, 11, True), m, inner - 8) for m in masechtot]
     size = min(st.size for st in sts)
