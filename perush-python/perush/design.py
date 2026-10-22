@@ -19,6 +19,7 @@ from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen
 from .textlayout import PT_PER_MM, Style, qfont, width
 
 TITLE_FONT = "Drugulin CLM"
+PAPER = ["white"]          # the colour inside the drawings (white, or a light one on a cover)
 TEXT_FONT = "Frank Ruhl Libre"
 
 # the colours a cover can have: name -> (ground, ink, gold)
@@ -129,7 +130,7 @@ def column(p, x, y1, y2, cwid, colour):
         fx = x - cwid / 2 + cwid * k / 5
         p.drawLine(QPointF(fx, top + 4), QPointF(fx, bot - 4))
     ring = bot - (bot - top) / 3
-    p.setBrush(QBrush(QColor("white")))
+    p.setBrush(QBrush(QColor(PAPER[0])))
     p.drawRect(QRectF(x - cwid * 0.56, ring - 4, cwid * 1.12, 8))
     p.setBrush(Qt.NoBrush)
     p.drawLine(QPointF(x - cwid * 0.56, ring), QPointF(x + cwid * 0.56, ring))
@@ -326,7 +327,7 @@ def title(pw, ph, lines, colour="black", style=1):
                     c, s_ = math.cos(a), math.sin(a)
                     p.drawLine(QPointF(mid - c * rx, spring - s_ * ry), QPointF(mid - c * (rx - 9), spring - s_ * (ry - 9)))
             # the keystone: a small round medallion
-            p.setBrush(QBrush(QColor("white")))
+            p.setBrush(QBrush(QColor(PAPER[0])))
             p.setPen(pen(colour, 0.8))
             p.drawEllipse(QPointF(mid, spring - ry + 4), 8, 8)
             p.setBrush(Qt.NoBrush)
@@ -341,7 +342,7 @@ def title(pw, ph, lines, colour="black", style=1):
             round_frame(p, r.adjusted(7, 7, -7, -7), 34, colour, 0.5)
             guilloche(p, r.left() + 40, r.top() + 14, r.right() - 40, r.top() + 14, 10, colour, 0.45)
             # an oval medallion at the head
-            p.setBrush(QBrush(QColor("white")))
+            p.setBrush(QBrush(QColor(PAPER[0])))
             p.setPen(pen(colour, 1.0))
             p.drawEllipse(QPointF(mid, r.top()), 40, 26)
             p.setBrush(Qt.NoBrush)
@@ -580,7 +581,7 @@ def crown(p, x, y, w, colour, lw=0.7):
     """a crown of the Torah, its foot at y, w wide."""
     h = w * 0.62
     p.setPen(pen(colour, lw))
-    p.setBrush(QBrush(QColor("white")))
+    p.setBrush(QBrush(QColor(PAPER[0])))
     # the band, with jewels
     band = QRectF(x - w / 2, y - h * 0.24, w, h * 0.24)
     p.drawRoundedRect(band, 2, 2)
@@ -616,7 +617,7 @@ def crown(p, x, y, w, colour, lw=0.7):
         path.quadTo(QPointF(tx + w * 0.06, top - (top - ty) * 0.3), QPointF((tx + nx) / 2 if k < 4 else nx, top - (top - ty) * 0.15 if k < 4 else top))
     p.drawPath(path)
     for tx, ty in tips:
-        p.setBrush(QBrush(QColor("white")))
+        p.setBrush(QBrush(QColor(PAPER[0])))
         p.drawEllipse(QPointF(tx, ty - h * 0.05), h * 0.05, h * 0.05)
         p.setBrush(Qt.NoBrush)
         p.drawLine(QPointF(tx, ty), QPointF(tx, top - 1))
@@ -699,12 +700,12 @@ def twisted_column(p, x, y1, y2, cw, colour, vine=True):
             leaf.moveTo(x + side * cw * 0.3, yy)
             leaf.cubicTo(QPointF(lx, yy - cw * 0.35), QPointF(lx + side * cw * 0.3, yy - cw * 0.1), QPointF(lx + side * cw * 0.2, yy + cw * 0.15))
             leaf.cubicTo(QPointF(lx, yy + cw * 0.2), QPointF(x + side * cw * 0.4, yy + cw * 0.1), QPointF(x + side * cw * 0.3, yy))
-            p.setBrush(QBrush(QColor("white")))
+            p.setBrush(QBrush(QColor(PAPER[0])))
             p.drawPath(leaf)
             p.setBrush(Qt.NoBrush)
             gx, gy = x - side * cw * 0.35, yy + period * 0.45
             for gi, (dx, dy) in enumerate(((0, 0), (-2.4, 2.6), (2.4, 2.6), (0, 5.2), (-2.4, 7.8 - 2.6), (2.4, 7.8 - 2.6), (0, 9.5))):
-                p.setBrush(QBrush(QColor("white")))
+                p.setBrush(QBrush(QColor(PAPER[0])))
                 p.drawEllipse(QPointF(gx + dx, gy + dy), 1.5, 1.5)
             p.setBrush(Qt.NoBrush)
 
@@ -783,7 +784,7 @@ def gate(pw, ph, name, masechet, sub, foot_text, colour="black", style=4):
         b = QRectF(m + 3 + rh + 3, m + 3 + rh + 3, pw - 2 * (m + rh + 6), ph - 2 * (m + rh + 6))
         p.drawRect(b)
         for cx, cy in ((b.left(), b.top()), (b.right(), b.top()), (b.left(), b.bottom()), (b.right(), b.bottom())):
-            p.setBrush(QBrush(QColor("white")))
+            p.setBrush(QBrush(QColor(PAPER[0])))
             p.drawRect(QRectF(cx - 9, cy - 9, 18, 18))
             p.setBrush(Qt.NoBrush)
             rosette(p, cx, cy, 7, colour, 0.45, 8)
@@ -847,7 +848,7 @@ def gate(pw, ph, name, masechet, sub, foot_text, colour="black", style=4):
                     scroll(p, mid - f * 36, ent - 50, 9, colour, 0.8, f)
                     garland(p, mid - f * 22, mid - f * (R - L) * 0.4, ent - 6, 9, colour, 0.5)
                 p.setPen(pen(colour, 0.9))
-                p.setBrush(QBrush(QColor("white")))
+                p.setBrush(QBrush(QColor(PAPER[0])))
                 p.drawRect(QRectF(mid - 18, ent - 30, 36, 30))
                 p.setBrush(Qt.NoBrush)
                 rosette(p, mid, ent - 15, 10, colour, 0.45, 8)
@@ -871,7 +872,7 @@ def gate(pw, ph, name, masechet, sub, foot_text, colour="black", style=4):
                 p.drawLine(QPointF(mid - math.cos(a) * rx, spring - math.sin(a) * ry),
                            QPointF(mid - math.cos(a) * (rx - 8), spring - math.sin(a) * (ry - 8)))
             p.setPen(pen(colour, 0.8))
-            p.setBrush(QBrush(QColor("white")))
+            p.setBrush(QBrush(QColor(PAPER[0])))
             key = QPainterPath()
             key.moveTo(mid - 8, spring - ry - 1)
             key.lineTo(mid + 8, spring - ry - 1)
@@ -911,7 +912,7 @@ def gate(pw, ph, name, masechet, sub, foot_text, colour="black", style=4):
                     yy += 12
             oy = b.top() + 40
             p.setPen(pen(colour, 1.0))
-            p.setBrush(QBrush(QColor("white")))
+            p.setBrush(QBrush(QColor(PAPER[0])))
             p.drawEllipse(QPointF(mid, oy + 10), 46, 30)
             p.setBrush(Qt.NoBrush)
             p.setPen(pen(colour, 0.4))
@@ -966,7 +967,7 @@ def acanthus(p, x, y, s, angle, colour, w=0.5):
     p.translate(x, y)
     p.rotate(angle)
     p.setPen(pen(colour, w))
-    p.setBrush(QBrush(QColor("white")))
+    p.setBrush(QBrush(QColor(PAPER[0])))
     path = QPainterPath()
     path.moveTo(0, 0)
     path.cubicTo(QPointF(s * 0.3, -s * 0.45), QPointF(s * 0.8, -s * 0.4), QPointF(s, -s * 0.05))
@@ -1028,21 +1029,21 @@ def text_path(x, y, text, st, maxw=None):
     return t.map(path)
 
 
-def shaded(p, x, y, text, st, line=GREY_LINE, maxw=None):
+def shaded(p, x, y, text, st, line=GREY_LINE, maxw=None, shade=("#f6f6f6", "#c4c4c4"), shadow="#9a9a9a"):
     """great letters as in the gate of Oz Vehadar: shaded light grey within a dark outline,
     with a shadow; centred on x, the baseline at y."""
     from PySide6.QtGui import QLinearGradient
     path = text_path(x, y, text, st, maxw)
     p.save()
     p.setPen(Qt.NoPen)
-    p.setBrush(QBrush(QColor("#9a9a9a")))
+    p.setBrush(QBrush(QColor(shadow)))
     p.drawPath(path.translated(1.6, 1.6))
     r = path.boundingRect()
     g = QLinearGradient(QPointF(0, r.top()), QPointF(0, r.bottom()))
-    g.setColorAt(0, QColor("#f6f6f6"))
-    g.setColorAt(1, QColor("#c4c4c4"))
+    g.setColorAt(0, QColor(shade[0]))
+    g.setColorAt(1, QColor(shade[1]))
     p.setBrush(QBrush(g))
-    p.setPen(pen("#3a3a3a", 0.8))
+    p.setPen(pen(line, 0.8))
     p.drawPath(path)
     p.restore()
 
@@ -1086,13 +1087,13 @@ def divider(p, x, y, half, colour=GREY_LINE):
         scroll(p, x + f * (half + 4), y - 2, 3.5, colour, 0.5, -f)
 
 
-def flame(p, x, y, s, colour=GREY_LINE):
+def flame(p, x, y, s, colour=GREY_LINE, fill="#d8d8d8"):
     path = QPainterPath()
     path.moveTo(x, y)
     path.cubicTo(QPointF(x - s * 0.6, y - s * 0.3), QPointF(x - s * 0.2, y - s * 0.8), QPointF(x, y - s * 1.2))
     path.cubicTo(QPointF(x + s * 0.25, y - s * 0.75), QPointF(x + s * 0.6, y - s * 0.3), QPointF(x, y))
     p.setPen(pen(colour, 0.6))
-    p.setBrush(QBrush(QColor("#d8d8d8")))
+    p.setBrush(QBrush(QColor(fill)))
     p.drawPath(path)
     p.setBrush(Qt.NoBrush)
 
@@ -1100,30 +1101,47 @@ def flame(p, x, y, s, colour=GREY_LINE):
 SEDARIM_SIDES = (("אמונת", "עתיך", "חוסן"), ("ישועות", "חכמת", "ודעת"))
 
 
-def oz_gate(pw, ph, main, masechet, lines, foot_title, foot_lines, arc_line, right_list, left_list,
-            current=None, right_foot=("זרעים", "מועד", "נשים"), left_foot=("נזיקין", "קדשים", "טהרות")):
-    """A title page after the gate of the Oz Vehadar Shas: a frame of grey filigree, a
-    great round arch with a line along it, the name in great shaded letters, the masechet
-    and the lines under them; pillars on both sides with the masechtot (the current one
-    marked), the words of the verse over them and the sedarim under them; and at the foot
-    a little gate of twisted columns and flames, with the days in it."""
+# the colours of a gate: lines, leaves, the ground of the filigree, ink, the inside of the
+# panels, the shading of the great letters, their shadow, the ground of a cover
+GREY = dict(line=GREY_LINE, leaf=GREY_LEAF, tint=GREY_TINT, ink=INK, paper="white",
+            shade=("#f6f6f6", "#c4c4c4"), shadow="#9a9a9a", ground=None)
+PALETTES = {
+    "תכלת": dict(line="#1f3d66", leaf="#6d90b8", tint="#cfe2f1", ink="#14284a", paper="#f1f7fc",
+                 shade=("#ffffff", "#b3cbe3"), shadow="#7e9bb9", ground="#cfe2f1"),
+    "תכלת עמוק": dict(line="#173156", leaf="#5a82ae", tint="#a9cbe6", ink="#0f2242", paper="#e6f0f9",
+                      shade=("#ffffff", "#a3c0de"), shadow="#6b8bb0", ground="#a9cbe6"),
+    "שמנת": dict(line="#5b4123", leaf="#a88a5c", tint="#efe3c8", ink="#3a2814", paper="#fbf6ea",
+                 shade=("#fffaf0", "#e0c99a"), shadow="#b39a6e", ground="#efe3c8"),
+}
+
+
+def gate_page(w, h, items, foot_title, foot_lines, pal=GREY, sides=(("אמונת", "עתיך", "חוסן"), ("ישועות", "חכמת", "ודעת")),
+              feet=(("זרעים", "מועד", "נשים"), ("נזיקין", "קדשים", "טהרות")), margin=24.0):
+    """The gate of the Oz Vehadar Shas, w by h points from (0, 0): a frame of filigree, a
+    great round arch, pillars on both sides with the words of the verse at the head, a
+    vine down them and the sedarim at the foot, and a little gate of twisted columns and
+    flames at the foot with foot_title along its arch and foot_lines in it. items, in the
+    arch, one block in its middle: ("shaded", text, size) great shaded letters, ("text",
+    text, size), ("div",) an ornament."""
     def paint(p):
+        PAPER[0] = pal["paper"]
+        line, leaf, tint, ink = pal["line"], pal["leaf"], pal["tint"], pal["ink"]
         p.save()
         p.setRenderHint(p.RenderHint.Antialiasing, True)
-        m = 24.0
-        O = QRectF(m, m, pw - 2 * m, ph - 2 * m)
+        m = margin
+        O = QRectF(m, m, w - 2 * m, h - 2 * m)
         I = O.adjusted(7, 7, -7, -7)
-        filigree(p, I, seed=7, cell=22)
-        p.setPen(pen(GREY_LINE, 1.6))
+        filigree(p, I, leaf, tint, seed=7, cell=22)
+        p.setPen(pen(line, 1.6))
+        p.setBrush(Qt.NoBrush)
         p.drawRect(O)
-        p.setPen(pen(GREY_LINE, 0.6))
+        p.setPen(pen(line, 0.6))
         p.drawRect(O.adjusted(3, 3, -3, -3))
         p.drawRect(I)
-        mid = pw / 2
+        mid = w / 2
         pil = 74.0
         xr1, xl1 = I.right() - pil, I.left() + pil
         panel_bot = I.top() + I.height() * 0.80
-        # the arch and the panel under it
         ax1, ax2 = xl1 + 4, xr1 - 4
         rx = (ax2 - ax1) / 2
         spring = I.top() + 22 + rx
@@ -1134,121 +1152,210 @@ def oz_gate(pw, ph, main, masechet, lines, foot_title, foot_lines, arc_line, rig
         outer.arcTo(QRectF(ax1, spring - rx, 2 * rx, 2 * rx), 180, -180)
         outer.lineTo(ax2, panel_bot)
         outer.closeSubpath()
-        p.setBrush(QBrush(QColor(GREY_TINT)))
-        p.setPen(pen(GREY_LINE, 1.0))
-        p.drawPath(outer)
         inner = QPainterPath()
         inner.moveTo(ax1 + band, panel_bot)
         inner.lineTo(ax1 + band, spring)
         inner.arcTo(QRectF(ax1 + band, spring - rx + band, 2 * (rx - band), 2 * (rx - band)), 180, -180)
         inner.lineTo(ax2 - band, panel_bot)
         inner.closeSubpath()
-        # the band of the arch: a ring of leaves
         p.save()
         p.setClipPath(outer.subtracted(inner))
-        filigree(p, QRectF(ax1, spring - rx, 2 * rx, panel_bot - spring + rx), seed=3, cell=11)
+        filigree(p, QRectF(ax1, spring - rx, 2 * rx, panel_bot - spring + rx), leaf, tint, seed=3, cell=11)
         p.restore()
-        p.setBrush(QBrush(QColor("white")))
-        p.setPen(pen(GREY_LINE, 0.8))
+        p.setBrush(QBrush(QColor(pal["paper"])))
+        p.setPen(pen(line, 0.8))
         p.drawPath(inner)
         p.setBrush(Qt.NoBrush)
-        p.setPen(pen(GREY_LINE, 1.0))
+        p.setPen(pen(line, 1.0))
         p.drawPath(outer)
-        # the pillars: the verse at the head, the masechtot, the sedarim at the foot
-        for x0, words, names, foot in ((xr1, SEDARIM_SIDES[0], right_list, right_foot),
-                                       (I.left(), SEDARIM_SIDES[1], left_list, left_foot)):
+        # the pillars
+        for x0, words, foot in ((xr1, sides[0], feet[0]), (I.left(), sides[1], feet[1])):
             px1, px2 = x0 + 7, x0 + pil - 7
             pc = (px1 + px2) / 2
             top_r = QRectF(px1, spring - 6, px2 - px1, 66)
-            list_r = QRectF(px1, top_r.bottom() + 16, px2 - px1, panel_bot - top_r.bottom() - 30)
+            mid_r = QRectF(px1 + 6, top_r.bottom() + 16, px2 - px1 - 12, panel_bot - top_r.bottom() - 30)
             foot_r = QRectF(px1, panel_bot + 10, px2 - px1, I.bottom() - panel_bot - 18)
-            for rr in (top_r, list_r, foot_r):
-                p.setBrush(QBrush(QColor("white")))
-                p.setPen(pen(GREY_LINE, 0.9))
+            for rr in (top_r, mid_r, foot_r):
+                p.setBrush(QBrush(QColor(pal["paper"])))
+                p.setPen(pen(line, 0.9))
                 p.drawRect(rr)
                 p.setBrush(Qt.NoBrush)
-                p.setPen(pen(GREY_LINE, 0.4))
+                p.setPen(pen(line, 0.4))
                 p.drawRect(rr.adjusted(2.5, 2.5, -2.5, -2.5))
-            # mouldings between them, as the rings of a pillar
-            for yy in (top_r.bottom() + 4, list_r.bottom() + 3):
-                p.setPen(pen(GREY_LINE, 0.8))
-                p.setBrush(QBrush(QColor("white")))
+            for yy in (top_r.bottom() + 4, mid_r.bottom() + 3):
+                p.setPen(pen(line, 0.8))
+                p.setBrush(QBrush(QColor(pal["paper"])))
                 p.drawRect(QRectF(px1 - 4, yy, px2 - px1 + 8, 6))
                 p.setBrush(Qt.NoBrush)
+            # down the pillar: a vine, its leaves and rosettes
+            vt, vb = mid_r.top() + 14, mid_r.bottom() - 14
+            path = QPainterPath()
+            n = 120
+            for k in range(n + 1):
+                yy = vt + (vb - vt) * k / n
+                xx = pc + 8 * math.sin((yy - vt) / 26 * math.pi)
+                if k:
+                    path.lineTo(xx, yy)
+                else:
+                    path.moveTo(xx, yy)
+            p.setPen(pen(leaf, 0.7))
+            p.drawPath(path)
+            yy, k = vt + 13, 0
+            while yy < vb - 6:
+                f = 1 if k % 2 else -1
+                acanthus(p, pc + 8 * math.sin((yy - vt) / 26 * math.pi), yy, 13, 90 + f * 70, line, 0.45)
+                yy += 13
+                k += 1
+            rosette(p, pc, mid_r.top() + 9, 5, line, 0.45, 6)
+            rosette(p, pc, mid_r.bottom() - 9, 5, line, 0.45, 6)
             st = Style(TITLE_FONT, 13, True)
             for k, wd in enumerate(words):
-                text_c(p, pc, top_r.top() + 20 + k * 17, wd, st, "#555555")
-            n = len(names)
-            lh = min(14.5, (list_r.height() - 14) / max(1, n))
-            size = min(10.5, lh * 0.78)
-            for k, nm in enumerate(names):
-                bold = nm == current
-                s2 = fit(Style(TITLE_FONT if bold else TEXT_FONT, size + (1 if bold else 0), bold), nm, list_r.width() - 10)
-                text_c(p, pc, list_r.top() + 8 + lh * (k + 1) - lh * 0.25, nm, s2, INK)
+                text_c(p, pc, top_r.top() + 20 + k * 17, wd, st, line)
             for k, wd in enumerate(foot):
-                text_c(p, pc, foot_r.top() + foot_r.height() / 2 - 19 + k * 19 + 6, wd, Style(TITLE_FONT, 13, True), "#555555")
+                text_c(p, pc, foot_r.top() + foot_r.height() / 2 - 13 + k * 19, wd, st, line)
         # the little gate at the foot
         gw, gt = 132.0, panel_bot + 8
         gb = I.bottom() - 4
         gx1, gx2 = mid - gw / 2, mid + gw / 2
-        p.setBrush(QBrush(QColor("white")))
-        p.setPen(pen(GREY_LINE, 0.8))
-        gate_path = QPainterPath()
-        gate_path.moveTo(gx1 + 12, gb)
-        gate_path.lineTo(gx1 + 12, gt + 34)
-        gate_path.quadTo(QPointF(mid, gt - 6), QPointF(gx2 - 12, gt + 34))
-        gate_path.lineTo(gx2 - 12, gb)
-        gate_path.closeSubpath()
-        p.drawPath(gate_path)
+        p.setBrush(QBrush(QColor(pal["paper"])))
+        p.setPen(pen(line, 0.8))
+        gp = QPainterPath()
+        gp.moveTo(gx1 + 12, gb)
+        gp.lineTo(gx1 + 12, gt + 34)
+        gp.quadTo(QPointF(mid, gt - 6), QPointF(gx2 - 12, gt + 34))
+        gp.lineTo(gx2 - 12, gb)
+        gp.closeSubpath()
+        p.drawPath(gp)
         p.setBrush(Qt.NoBrush)
         for cx in (gx1 + 6, gx2 - 6):
-            twisted_column(p, cx, gt + 26, gb, 9, GREY_LINE, vine=False)
-            p.setPen(pen(GREY_LINE, 0.7))
-            p.setBrush(QBrush(QColor("white")))
+            twisted_column(p, cx, gt + 26, gb, 9, line, vine=False)
+            p.setPen(pen(line, 0.7))
+            p.setBrush(QBrush(QColor(pal["paper"])))
             p.drawRect(QRectF(cx - 7, gt + 18, 14, 8))
             p.setBrush(Qt.NoBrush)
-            flame(p, cx, gt + 17, 12)
-        # in it: the arched title and the days
-        arc_text(p, mid, gt + 64, 38, foot_title, Style(TEXT_FONT, 9.5), INK)
+            flame(p, cx, gt + 17, 12, line, pal["shade"][1])
+        if foot_title:
+            arc_text(p, mid, gt + 64, 38, foot_title, Style(TEXT_FONT, 9.5), ink)
         box = QRectF(mid - 34, gt + 44, 68, gb - gt - 52)
-        p.setPen(pen(GREY_LINE, 1.0))
+        p.setPen(pen(line, 1.0))
         p.drawRect(box)
-        p.setPen(pen(GREY_LINE, 0.4))
+        p.setPen(pen(line, 0.4))
         p.drawRect(box.adjusted(2.5, 2.5, -2.5, -2.5))
         yy = box.top() + 4
         for text, size in foot_lines:
             st = fit(Style(TITLE_FONT, size, True), text, box.width() - 10)
             yy += st.size * 1.25
-            text_c(p, mid, yy, text, st, INK)
-        # the lines in the arch
-        arc_text(p, mid, spring, rx - band - 20, arc_line, Style(TITLE_FONT, 14, True), INK)
+            text_c(p, mid, yy, text, st, ink)
+        # the block of lines in the arch
         w_in = 2 * (rx - band) - 30
-        # the lines in the opening, as one block in its middle
         ops, y = [], 0.0
-        st = Style(TITLE_FONT, 60, True)
-        y += st.size * 0.75
-        ops.append(("shaded", y, main, st))
-        y += 34
-        t = "מסכת " + masechet
-        ops.append(("text", y, t, fit(Style(TITLE_FONT, 28, True), t, w_in)))
-        y += 22
-        ops.append(("div", y, None, None))
-        for text in lines:
-            if text == "—":
+        for it in items:
+            if it[0] == "shaded":
+                st = Style(TITLE_FONT, it[2], True)
+                y += st.size * (0.75 if not ops else 1.0)
+                ops.append(("shaded", y, it[1], st))
+                y += st.size * 0.25
+            elif it[0] == "text":
+                st = fit(Style(TITLE_FONT, it[2], True), it[1], w_in)
+                y += st.size * 1.4
+                ops.append(("text", y, it[1], st))
+            else:
                 y += 18
                 ops.append(("div", y - 4, None, None))
-                continue
-            st2 = fit(Style(TITLE_FONT, 12.5, True), text, w_in)
-            y += st2.size * 1.55
-            ops.append(("text", y, text, st2))
+                y += 4
         top, bot = spring - rx * 0.45, panel_bot - 16
         y0 = top + max(0.0, (bot - top - y) / 2) - 10
-        for kind, yy, text, st2 in ops:
+        for kind, yy, text, st in ops:
             if kind == "shaded":
-                shaded(p, mid, y0 + yy, text, st2, maxw=w_in - 10)
+                shaded(p, mid, y0 + yy, text, st, line, maxw=w_in - 10, shade=pal["shade"], shadow=pal["shadow"])
             elif kind == "text":
-                text_c(p, mid, y0 + yy, text, st2, INK)
+                text_c(p, mid, y0 + yy, text, st, ink)
             else:
-                divider(p, mid, y0 + yy, 34)
+                divider(p, mid, y0 + yy, 40, line)
         p.restore()
+        PAPER[0] = "white"
     return paint
+
+
+def gate_cover(trim, pages, items, spine_lines, masechtot, volume, pal, bleed=3.0, leaf=0.1):
+    """-> (width, height, paint): a whole cover in the manner of the gate: the front on
+    the left (a Hebrew book: its spine is on the right of the front), the spine, the back
+    on the right, left plain; with the bleed all round."""
+    tw, th = trim[0] * PT_PER_MM, trim[1] * PT_PER_MM
+    sw = spine_width(pages, leaf) * PT_PER_MM
+    b = bleed * PT_PER_MM
+    W, H = 2 * tw + sw + 2 * b, th + 2 * b
+    front = gate_page(tw, th, items, "", [(volume, 15)], pal, margin=20.0)
+
+    def paint(p):
+        p.save()
+        p.fillRect(QRectF(0, 0, W, H), QColor(pal["ground"]))
+        p.translate(b, b)
+        front(p)
+        p.restore()
+        p.save()
+        p.setRenderHint(p.RenderHint.Antialiasing, True)
+        gate_spine(p, b + tw, b, sw, th, spine_lines, masechtot, volume, pal)
+        p.restore()
+    return W, H, paint
+
+
+def gate_spine(p, x0, y0, w, h, spine_lines, masechtot, volume, pal):
+    line, ink = pal["line"], pal["ink"]
+    mid = x0 + w / 2
+    inner = w - 10
+    PAPER[0] = pal["paper"]
+    # filigree down the spine, a frame, panels for the name and the masechtot
+    r = QRectF(x0 + 2, y0 + 20, w - 4, h - 40)
+    filigree(p, r, pal["leaf"], pal["tint"], seed=11, cell=14)
+    p.setPen(pen(line, 1.2))
+    p.drawRect(r)
+    p.setPen(pen(line, 0.5))
+    p.drawRect(r.adjusted(2.5, 2.5, -2.5, -2.5))
+    top = QRectF(x0 + 6, y0 + 40, w - 12, 118)
+    p.setBrush(QBrush(QColor(pal["paper"])))
+    p.setPen(pen(line, 0.9))
+    p.drawRoundedRect(top, (w - 12) / 2, (w - 12) / 2)
+    p.setBrush(Qt.NoBrush)
+    y = top.top() + 30
+    for k, it in enumerate(spine_lines):
+        if it == "div":
+            y += 6
+            p.setPen(pen(line, 0.6))
+            p.drawLine(QPointF(mid - inner / 2 + 4, y), QPointF(mid - 4, y))
+            p.drawLine(QPointF(mid + 4, y), QPointF(mid + inner / 2 - 4, y))
+            p.setBrush(QBrush(QColor(line)))
+            d = QPainterPath()
+            d.moveTo(mid - 3, y)
+            d.lineTo(mid, y - 2)
+            d.lineTo(mid + 3, y)
+            d.lineTo(mid, y + 2)
+            d.closeSubpath()
+            p.drawPath(d)
+            p.setBrush(Qt.NoBrush)
+            y += 8
+            continue
+        st = fit(Style(TITLE_FONT, 13, True), it, inner - 6)
+        y += st.size * 1.2
+        text_c(p, mid, y, it, st, ink)
+    n = len(masechtot)
+    sts = [fit(Style(TITLE_FONT, 11, True), m, inner - 8) for m in masechtot]
+    size = min(st.size for st in sts)
+    lh = size * 1.7
+    box = QRectF(x0 + 6, y0 + h / 2 - lh * n / 2 - 12, w - 12, lh * n + 24)
+    p.setBrush(QBrush(QColor(pal["paper"])))
+    p.setPen(pen(line, 0.9))
+    p.drawRect(box)
+    p.setBrush(Qt.NoBrush)
+    p.setPen(pen(line, 0.4))
+    p.drawRect(box.adjusted(2.5, 2.5, -2.5, -2.5))
+    for k, m in enumerate(masechtot):
+        text_c(p, mid, box.top() + 12 + lh * (k + 1) - lh * 0.3, m, Style(TITLE_FONT, size, True), ink)
+    vb = QRectF(x0 + 6, y0 + h - 100, w - 12, 50)
+    p.setBrush(QBrush(QColor(pal["paper"])))
+    p.setPen(pen(line, 0.9))
+    p.drawRoundedRect(vb, 8, 8)
+    p.setBrush(Qt.NoBrush)
+    st = fit(Style(TITLE_FONT, 12, True), volume, inner - 6)
+    text_c(p, mid, vb.center().y() + 4, volume, st, ink)
+    PAPER[0] = "white"

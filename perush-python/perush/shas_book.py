@@ -30,8 +30,7 @@ SEDARIM = [("זרעים", ["ברכות"]),
            ("טהרות", ["נידה"])]
 SEDER_OF = {m: s for s, ms in SEDARIM for m in ms}
 LO, HI = 300, 500
-COVER = "תכלת"           # the colour of the covers (design.COLOURS)
-TITLE_STYLE = 1          # the drawing of the title pages (design.title)
+COVER = "תכלת"           # the colours of the covers (design.PALETTES)
 
 
 def _init(fonts):
@@ -119,39 +118,46 @@ def blank(pw, ph):
     return Page(pw, ph)
 
 
-def title_page(pw, ph, lines, style=None):
-    """A title page drawn as a gate, as in the Vilna Shas (design.title): lines of
-    (text, size, bold), the first in the arch."""
+def gate(pw, ph, items, foot_title="", foot_lines=()):
+    """A title page drawn after the gate of the Oz Vehadar Shas (design.gate_page)."""
     from . import design
     p = Page(pw, ph)
-    p.paint = [design.title(pw, ph, lines, style=style or TITLE_STYLE)]
+    p.paint = [design.gate_page(pw, ph, items, foot_title, list(foot_lines))]
     return p
+
+
+def with_comm(comm):
+    comm = comm.replace('"', "״")
+    return "עם פירוש הר״ן" if comm == "ר״ן" else f"עם פירוש {comm}"
 
 
 def masechet_title(pw, ph, m, info, part):
-    """The title page of the Rosh of a masechet (part "rosh") or of its Rif ("rif"): a gate
-    after the one of the Oz Vehadar Shas (design.oz_gate)."""
-    from . import design
-    comm = info["comm_name"]
+    """The title page of the Rosh of a masechet (part "rosh") or of its Rif ("rif")."""
     days = f"{heb(info['first_day'])}–{heb(info['last_day'])}"
-    every = "מחולק לימי הלימוד, ללימוד כל הש״ס בשנה"
     if part == "rosh":
-        main, lines = "פסקי הרא״ש", ["ובהם לשון הרי״ף באותיות מודגשות", "—", every]
+        items = [("shaded", "פסקי הרא״ש", 60), ("text", "מסכת " + m, 28)]
     else:
-        main = "הלכות רב אלפס"
-        lines = ([f"עם {comm}", "ובו לשון רש״י באותיות מודגשות"] if comm else []) + ["—", every]
-    p = Page(pw, ph)
-    p.paint = [design.oz_gate(pw, ph, main, m, lines, "ימי הלימוד", [(days, 16)], "מהדורה מסודרת ללימוד יומי",
-                              shas.MASECHTOT[:16], shas.MASECHTOT[16:], current=m)]
-    return p
+        items = [("shaded", "הלכות רב אלפס", 60), ("text", "מסכת " + m, 28)]
+        if info["comm_name"]:
+            items += [("div",), ("text", with_comm(info["comm_name"]), 17)]
+    return gate(pw, ph, items, "ימי הלימוד", [(days, 16)])
+
+
+def name_items(ms, size=17):
+    """the name of the work (the Rif, an ornament, the Rosh) and the masechtot, a few to a
+    line."""
+    items = [("shaded", "הלכות רב אלפס", 52), ("div",), ("shaded", "פסקי הרא״ש", 52), ("div",)]
+    rows = [ms[k:k + 3] for k in range(0, len(ms), 3)]
+    if len(ms) == 1:
+        rows = [["מסכת " + ms[0]]]
+    items += [("text", " · ".join(r), size) for r in rows]
+    return items
 
 
 def file_title(pw, ph, ms, books):
-    lines = [("פסקי הרא\"ש", 36, True), ("והלכות רב אלפס", 22, True), ("", 14, False)]
-    for m in ms:
-        info = books[m][2]
-        lines.append((f"מסכת {m}  ·  ימים {heb(info['first_day'])}–{heb(info['last_day'])}", 12, False))
-    return title_page(pw, ph, lines)
+    first = books[ms[0]][2]["first_day"]
+    last = books[ms[-1]][2]["last_day"]
+    return gate(pw, ph, name_items(ms), "ימי הלימוד", [(f"{heb(first)}–{heb(last)}", 15)])
 
 
 def assemble(ms, books, page=B5, margin=SIZES["margin"]):
@@ -181,10 +187,10 @@ def assemble(ms, books, page=B5, margin=SIZES["margin"]):
 
 
 def cover_page(ms, n_pages, volume, colour=COVER, page=B5):
-    """The whole cover of a file (back, spine and front) as one page."""
+    """The whole cover of a file (front, spine and back) as one page."""
     from . import design
-    W, H, paint = design.cover(page, n_pages, [("פסקי הרא\"ש", 44), ("והלכות רב אלפס", 28)], ms,
-                               "כרך " + heb(volume), design.COLOURS[colour])
+    W, H, paint = design.gate_cover(page, n_pages, name_items(ms, 18), ["הלכות", "רב אלפס", "div", "פסקי", "הרא״ש"],
+                                    ms, "כרך " + heb(volume), design.PALETTES[colour])
     p = Page(W, H)
     p.paint = [paint]
     return p
