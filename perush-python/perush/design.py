@@ -553,3 +553,404 @@ def spine(p, x0, y0, w, h, masechtot, volume, ground, ink, gold):
     rosette(p, mid, panel.bottom() - 48, min(6, inner / 2 - 1), gold, 0.7, 6)
     st = fit(Style(TITLE_FONT, 12, True), volume, inner - 4)
     text_c(p, mid, panel.bottom() - 20, volume, st, ink)
+
+
+# ------------------------------------------------------------------ engraved gates (Vilna)
+def outlined(p, x, y, text, st, colour, hatch=1.3, w=0.6):
+    """big letters as in an engraving: their outline, and fine lines across them;
+    centred on x, the baseline at y."""
+    from PySide6.QtGui import QPainterPath as PP
+    path = PP()
+    path.addText(QPointF(x - width(st, text) / 2, y), qfont(st), text)
+    p.save()
+    p.setClipPath(path)
+    p.setPen(pen(colour, 0.35))
+    r = path.boundingRect()
+    yy = r.top()
+    while yy < r.bottom():
+        p.drawLine(QPointF(r.left(), yy), QPointF(r.right(), yy))
+        yy += hatch
+    p.restore()
+    p.setPen(pen(colour, w))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(path)
+
+
+def crown(p, x, y, w, colour, lw=0.7):
+    """a crown of the Torah, its foot at y, w wide."""
+    h = w * 0.62
+    p.setPen(pen(colour, lw))
+    p.setBrush(QBrush(QColor("white")))
+    # the band, with jewels
+    band = QRectF(x - w / 2, y - h * 0.24, w, h * 0.24)
+    p.drawRoundedRect(band, 2, 2)
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(QPointF(band.left(), band.top() + 2), QPointF(band.right(), band.top() + 2))
+    p.drawLine(QPointF(band.left(), band.bottom() - 2), QPointF(band.right(), band.bottom() - 2))
+    for k in range(5):
+        jx = band.left() + w * (k + 0.5) / 5
+        if k % 2:
+            p.drawEllipse(QPointF(jx, band.center().y()), h * 0.05, h * 0.05)
+        else:
+            d = QPainterPath()
+            d.moveTo(jx, band.top() + 3.5)
+            d.lineTo(jx + h * 0.06, band.center().y())
+            d.lineTo(jx, band.bottom() - 3.5)
+            d.lineTo(jx - h * 0.06, band.center().y())
+            d.closeSubpath()
+            p.drawPath(d)
+    # the points: five, the middle one highest, with balls, and leaves between them
+    top = band.top()
+    tips = []
+    for k in range(5):
+        t = (k - 2) / 2
+        tx = x + t * w * 0.42
+        ty = top - h * (0.62 - 0.18 * abs(t) ** 1.5)
+        tips.append((tx, ty))
+    path = QPainterPath()
+    path.moveTo(band.left(), top)
+    for k, (tx, ty) in enumerate(tips):
+        lx = band.left() + w * k / 5 if k else band.left()
+        path.quadTo(QPointF(tx - w * 0.06, top - (top - ty) * 0.3), QPointF(tx, ty))
+        nx = tips[k + 1][0] if k < 4 else band.right()
+        path.quadTo(QPointF(tx + w * 0.06, top - (top - ty) * 0.3), QPointF((tx + nx) / 2 if k < 4 else nx, top - (top - ty) * 0.15 if k < 4 else top))
+    p.drawPath(path)
+    for tx, ty in tips:
+        p.setBrush(QBrush(QColor("white")))
+        p.drawEllipse(QPointF(tx, ty - h * 0.05), h * 0.05, h * 0.05)
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(QPointF(tx, ty), QPointF(tx, top - 1))
+    # an orb and a little cross of leaves at the top
+    cx, cy = tips[2][0], tips[2][1] - h * 0.16
+    p.drawEllipse(QPointF(cx, cy), h * 0.07, h * 0.07)
+    # hatching inside the band of the crown, as engraved
+    p.setPen(pen(colour, 0.3))
+    for k in range(1, 4):
+        p.drawLine(QPointF(band.left() + 3, top - h * 0.03 * k), QPointF(band.right() - 3, top - h * 0.03 * k))
+
+
+def twisted_column(p, x, y1, y2, cw, colour, vine=True):
+    """a twisted (Solomonic) column with a capital and a base, from y1 to y2."""
+    cap_h, base_h = cw * 1.0, cw * 1.3
+    p.setPen(pen(colour, 0.7))
+    p.setBrush(Qt.NoBrush)
+    # base
+    bw = cw * 1.5
+    p.drawRect(QRectF(x - bw / 2, y2 - base_h * 0.5, bw, base_h * 0.5))
+    p.drawRect(QRectF(x - bw / 2 + 2.5, y2 - base_h * 0.5 + 2.5, bw - 5, base_h * 0.5 - 5))
+    rosette(p, x, y2 - base_h * 0.25, base_h * 0.17, colour, 0.4, 6)
+    p.drawRoundedRect(QRectF(x - cw * 0.68, y2 - base_h * 0.78, cw * 1.36, base_h * 0.28), 4, 4)
+    p.drawRect(QRectF(x - cw * 0.6, y2 - base_h, cw * 1.2, base_h * 0.22))
+    # capital: abacus, volutes, leaves
+    p.drawRect(QRectF(x - cw * 0.85, y1, cw * 1.7, cap_h * 0.22))
+    scroll(p, x - cw * 0.55, y1 + cap_h * 0.45, cap_h * 0.25, colour, 0.6, 1)
+    scroll(p, x + cw * 0.55, y1 + cap_h * 0.45, cap_h * 0.25, colour, 0.6, -1)
+    for k in (-1, 0, 1):
+        lx = x + k * cw * 0.27
+        path = QPainterPath()
+        path.moveTo(lx, y1 + cap_h)
+        path.quadTo(QPointF(lx - cw * 0.14, y1 + cap_h * 0.55), QPointF(lx, y1 + cap_h * 0.28))
+        path.quadTo(QPointF(lx + cw * 0.14, y1 + cap_h * 0.55), QPointF(lx, y1 + cap_h))
+        p.drawPath(path)
+    p.drawLine(QPointF(x - cw * 0.55, y1 + cap_h), QPointF(x + cw * 0.55, y1 + cap_h))
+    # the shaft: swelling edges and twisting bands
+    top, bot = y1 + cap_h, y2 - base_h
+    period = cw * 1.25
+    n = max(2, int((bot - top) / period))
+    period = (bot - top) / n
+    amp = cw * 0.06
+    for side in (-1, 1):
+        path = QPainterPath()
+        for k in range(n * 16 + 1):
+            yy = top + (bot - top) * k / (n * 16)
+            xx = x + side * (cw / 2 + amp * math.sin(2 * math.pi * (yy - top) / period * 2))
+            if k:
+                path.lineTo(xx, yy)
+            else:
+                path.moveTo(xx, yy)
+        p.drawPath(path)
+    p.setPen(pen(colour, 0.55))
+    for k in range(n):
+        yb = top + k * period
+        for off, w_ in ((0, 0.6), (period * 0.18, 0.35), (period * 0.36, 0.35)):
+            path = QPainterPath()
+            path.moveTo(x - cw / 2, yb + off)
+            path.cubicTo(QPointF(x - cw * 0.15, yb + off + period * 0.05), QPointF(x + cw * 0.15, yb + off + period * 0.45),
+                         QPointF(x + cw / 2, yb + off + period * 0.5))
+            p.setPen(pen(colour, w_))
+            p.drawPath(path)
+    if vine:
+        # a vine winding round it, with leaves and grapes
+        p.setPen(pen(colour, 0.5))
+        path = QPainterPath()
+        for k in range(n * 20 + 1):
+            yy = top + (bot - top) * k / (n * 20)
+            xx = x + cw * 0.5 * math.sin(2 * math.pi * (yy - top) / period + 1.2)
+            if k:
+                path.lineTo(xx, yy)
+            else:
+                path.moveTo(xx, yy)
+        p.drawPath(path)
+        for k in range(n):
+            yy = top + period * (k + 0.3)
+            side = 1 if k % 2 else -1
+            lx = x + side * cw * 0.55
+            leaf = QPainterPath()
+            leaf.moveTo(x + side * cw * 0.3, yy)
+            leaf.cubicTo(QPointF(lx, yy - cw * 0.35), QPointF(lx + side * cw * 0.3, yy - cw * 0.1), QPointF(lx + side * cw * 0.2, yy + cw * 0.15))
+            leaf.cubicTo(QPointF(lx, yy + cw * 0.2), QPointF(x + side * cw * 0.4, yy + cw * 0.1), QPointF(x + side * cw * 0.3, yy))
+            p.setBrush(QBrush(QColor("white")))
+            p.drawPath(leaf)
+            p.setBrush(Qt.NoBrush)
+            gx, gy = x - side * cw * 0.35, yy + period * 0.45
+            for gi, (dx, dy) in enumerate(((0, 0), (-2.4, 2.6), (2.4, 2.6), (0, 5.2), (-2.4, 7.8 - 2.6), (2.4, 7.8 - 2.6), (0, 9.5))):
+                p.setBrush(QBrush(QColor("white")))
+                p.drawEllipse(QPointF(gx + dx, gy + dy), 1.5, 1.5)
+            p.setBrush(Qt.NoBrush)
+
+
+def rope(p, x1, y1, x2, y2, h, colour, w=0.45):
+    """a twisted rope along a side (horizontal or vertical)."""
+    horiz = abs(y2 - y1) < abs(x2 - x1)
+    L = abs(x2 - x1) if horiz else abs(y2 - y1)
+    n = max(2, int(L / (h * 0.7)))
+    step = L / n
+    p.setPen(pen(colour, w))
+    p.setBrush(Qt.NoBrush)
+
+    def pt(u, v):
+        return QPointF(x1 + u, y1 + v) if horiz else QPointF(x1 + v, y1 + u)
+    p.drawLine(pt(0, 0), pt(L, 0))
+    p.drawLine(pt(0, h), pt(L, h))
+    for k in range(n):
+        u = k * step
+        path = QPainterPath()
+        path.moveTo(pt(u, h))
+        path.cubicTo(pt(u + step * 0.1, h * 0.3), pt(u + step * 0.6, 0), pt(u + step * 1.2, 0))
+        p.drawPath(path)
+
+
+def cartouche(p, r, colour, fill="white"):
+    """a frame with scrolled ends, for a line of text."""
+    p.setPen(pen(colour, 0.9))
+    p.setBrush(QBrush(QColor(fill)))
+    h = r.height()
+    path = QPainterPath()
+    path.moveTo(r.left() + h * 0.5, r.top())
+    path.lineTo(r.right() - h * 0.5, r.top())
+    path.quadTo(QPointF(r.right() - h * 0.15, r.center().y()), QPointF(r.right() - h * 0.5, r.bottom()))
+    path.lineTo(r.left() + h * 0.5, r.bottom())
+    path.quadTo(QPointF(r.left() + h * 0.15, r.center().y()), QPointF(r.left() + h * 0.5, r.top()))
+    p.drawPath(path)
+    p.setBrush(Qt.NoBrush)
+    p.setPen(pen(colour, 0.4))
+    p.drawPath(path.translated(0, 0))
+    inner = QRectF(r.left() + 4, r.top() + 3, r.width() - 8, r.height() - 6)
+    path2 = QPainterPath()
+    path2.moveTo(inner.left() + h * 0.5, inner.top())
+    path2.lineTo(inner.right() - h * 0.5, inner.top())
+    path2.quadTo(QPointF(inner.right() - h * 0.2, inner.center().y()), QPointF(inner.right() - h * 0.5, inner.bottom()))
+    path2.lineTo(inner.left() + h * 0.5, inner.bottom())
+    path2.quadTo(QPointF(inner.left() + h * 0.2, inner.center().y()), QPointF(inner.left() + h * 0.5, inner.top()))
+    p.drawPath(path2)
+    for f in (1, -1):
+        cx = r.left() + h * 0.12 if f == 1 else r.right() - h * 0.12
+        scroll(p, cx, r.top() + h * 0.28, h * 0.22, colour, 0.6, f)
+        scroll(p, cx, r.bottom() - h * 0.28, h * 0.22, colour, 0.6, f)
+
+
+def gate(pw, ph, name, masechet, sub, foot_text, colour="black", style=4):
+    """A title page in the manner of the Vilna Shas and its new printings: a gate of two
+    twisted columns, a crown over an arch, the name in the arch, the masechet in great
+    engraved letters, a line or two under it, the days in a cartouche at the foot.
+    style 4: twisted columns with a vine, a round arch and a crown; 5: fluted columns, a
+    rounded broken pediment with scrolls and a crown between them, garlands; 6: a frame of
+    rope and leaves, an arched panel with a crown in an oval."""
+    def paint(p):
+        p.save()
+        p.setRenderHint(p.RenderHint.Antialiasing, True)
+        m = 26.0
+        mid = pw / 2
+        # the border: a thick line, a rope, a thin line
+        p.setPen(pen(colour, 1.8))
+        p.drawRect(QRectF(m, m, pw - 2 * m, ph - 2 * m))
+        rh = 7
+        rope(p, m + 3, m + 3, pw - m - 3, m + 3, rh, colour)
+        rope(p, m + 3, ph - m - 3 - rh, pw - m - 3, ph - m - 3 - rh, rh, colour)
+        rope(p, m + 3, m + 3 + rh, m + 3, ph - m - 3 - rh, rh, colour)
+        rope(p, pw - m - 3 - rh, m + 3 + rh, pw - m - 3 - rh, ph - m - 3 - rh, rh, colour)
+        p.setPen(pen(colour, 0.6))
+        b = QRectF(m + 3 + rh + 3, m + 3 + rh + 3, pw - 2 * (m + rh + 6), ph - 2 * (m + rh + 6))
+        p.drawRect(b)
+        for cx, cy in ((b.left(), b.top()), (b.right(), b.top()), (b.left(), b.bottom()), (b.right(), b.bottom())):
+            p.setBrush(QBrush(QColor("white")))
+            p.drawRect(QRectF(cx - 9, cy - 9, 18, 18))
+            p.setBrush(Qt.NoBrush)
+            rosette(p, cx, cy, 7, colour, 0.45, 8)
+        L, R = b.left() + 14, b.right() - 14
+        foot = b.bottom() - 66
+        cw = 30.0
+        xl, xr = L + cw * 0.8, R - cw * 0.8
+        if style in (4, 5):
+            ent = b.top() + 128          # the entablature's top
+            ent_h = 26.0
+            cap_top = ent + ent_h
+            # entablature
+            p.setPen(pen(colour, 1.0))
+            p.drawRect(QRectF(L - 4, ent, R - L + 8, ent_h))
+            dentils(p, L, R, ent + 3, 7, colour, 0.4)
+            leaf_band(p, L, R, ent + 13, 10, colour, 0.4)
+            if style == 4:
+                twisted_column(p, xl, cap_top, foot, cw, colour)
+                twisted_column(p, xr, cap_top, foot, cw, colour)
+                # over the entablature: a half round tympanum with a crown above it
+                tr = (R - L) * 0.34
+                for k, lw in ((0, 1.1), (6, 0.45)):
+                    path = QPainterPath()
+                    path.moveTo(mid - tr + k, ent)
+                    path.arcTo(QRectF(mid - tr + k, ent - tr * 0.62 + k, 2 * (tr - k), 2 * (tr * 0.62 - k)), 180, -180)
+                    p.setPen(pen(colour, lw))
+                    p.drawPath(path)
+                # rays in the tympanum, as engraved
+                p.setPen(pen(colour, 0.3))
+                for k in range(1, 24):
+                    a = math.pi * k / 24
+                    p.drawLine(QPointF(mid - math.cos(a) * (tr - 10), ent - math.sin(a) * (tr * 0.62 - 10)),
+                               QPointF(mid - math.cos(a) * (tr * 0.45), ent - math.sin(a) * (tr * 0.62 * 0.45)))
+                crown(p, mid, ent - tr * 0.62 - 2, 62, colour)
+                for f in (1, -1):
+                    path = QPainterPath()
+                    sx = mid - f * (tr + 6)
+                    path.moveTo(sx, ent)
+                    path.cubicTo(QPointF(sx - f * 20, ent - 10), QPointF(sx - f * 30, ent - 34), QPointF(sx - f * 52, ent - 28))
+                    p.setPen(pen(colour, 0.7))
+                    p.drawPath(path)
+                    scroll(p, sx - f * 54, ent - 22, 7, colour, 0.6, f)
+                    p.drawEllipse(QPointF(mid - f * (R - L) * 0.47, ent - 8), 6, 6)
+                    rosette(p, mid - f * (R - L) * 0.47, ent - 8, 5, colour, 0.35, 6)
+            else:
+                column(p, xl, cap_top, foot, cw, colour)
+                column(p, xr, cap_top, foot, cw, colour)
+                # a broken pediment of two scrolls rising to a crown on a pedestal
+                for f in (1, -1):
+                    path = QPainterPath()
+                    sx = mid - f * (R - L) * 0.48
+                    path.moveTo(sx, ent)
+                    path.cubicTo(QPointF(sx + f * 40, ent - 4), QPointF(mid - f * 70, ent - 70), QPointF(mid - f * 32, ent - 58))
+                    p.setPen(pen(colour, 1.1))
+                    p.drawPath(path)
+                    path2 = QPainterPath()
+                    path2.moveTo(sx + f * 10, ent)
+                    path2.cubicTo(QPointF(sx + f * 46, ent - 2), QPointF(mid - f * 72, ent - 60), QPointF(mid - f * 38, ent - 50))
+                    p.setPen(pen(colour, 0.45))
+                    p.drawPath(path2)
+                    scroll(p, mid - f * 36, ent - 50, 9, colour, 0.8, f)
+                    garland(p, mid - f * 22, mid - f * (R - L) * 0.4, ent - 6, 9, colour, 0.5)
+                p.setPen(pen(colour, 0.9))
+                p.setBrush(QBrush(QColor("white")))
+                p.drawRect(QRectF(mid - 18, ent - 30, 36, 30))
+                p.setBrush(Qt.NoBrush)
+                rosette(p, mid, ent - 15, 10, colour, 0.45, 8)
+                crown(p, mid, ent - 32, 54, colour)
+            # the arch between the columns, round, with a keystone and garlands
+            ix1, ix2 = xl + cw * 0.85, xr - cw * 0.85
+            rx = (ix2 - ix1) / 2
+            ry = rx * 0.5
+            spring = cap_top + ry + 4
+            for k, lw in ((0, 1.0), (8, 0.45)):
+                path = QPainterPath()
+                path.moveTo(ix1 + k, foot)
+                path.lineTo(ix1 + k, spring)
+                path.arcTo(QRectF(ix1 + k, spring - (ry - k), 2 * (rx - k), 2 * (ry - k)), 180, -180)
+                path.lineTo(ix2 - k, foot)
+                p.setPen(pen(colour, lw))
+                p.drawPath(path)
+            p.setPen(pen(colour, 0.35))
+            for k in range(1, 16):
+                a = math.pi * k / 16
+                p.drawLine(QPointF(mid - math.cos(a) * rx, spring - math.sin(a) * ry),
+                           QPointF(mid - math.cos(a) * (rx - 8), spring - math.sin(a) * (ry - 8)))
+            p.setPen(pen(colour, 0.8))
+            p.setBrush(QBrush(QColor("white")))
+            key = QPainterPath()
+            key.moveTo(mid - 8, spring - ry - 1)
+            key.lineTo(mid + 8, spring - ry - 1)
+            key.lineTo(mid + 5, spring - ry + 13)
+            key.lineTo(mid - 5, spring - ry + 13)
+            key.closeSubpath()
+            p.drawPath(key)
+            p.setBrush(Qt.NoBrush)
+            garland(p, ix1 + 8, mid - 10, spring - ry * 0.25, 12, colour, 0.45)
+            garland(p, mid + 10, ix2 - 8, spring - ry * 0.25, 12, colour, 0.45)
+            name_y = spring + 14
+            inner = ix2 - ix1 - 24
+        else:
+            # a panel with an arched head, a crown in an oval over it, fleurons in the corners
+            panel = QRectF(L + 10, b.top() + 70, R - L - 20, foot - b.top() - 70)
+            rr = panel.width() / 2
+            for k, lw in ((0, 1.2), (7, 0.45)):
+                path = QPainterPath()
+                path.moveTo(panel.left() + k, panel.bottom())
+                path.lineTo(panel.left() + k, panel.top() + rr * 0.55)
+                path.arcTo(QRectF(panel.left() + k, panel.top() + k, panel.width() - 2 * k, rr * 1.1 - 2 * k), 180, -180)
+                path.lineTo(panel.right() - k, panel.bottom())
+                p.setPen(pen(colour, lw))
+                p.drawPath(path)
+            lobed_arch(p, panel.left() + 14, panel.right() - 14, panel.top() + rr * 0.55, rr * 0.55 - 14, colour, 0.45, 11)
+            # leaves up the sides
+            for side in (panel.left() - 7, panel.right() + 7):
+                yy = panel.top() + rr * 0.6
+                while yy < panel.bottom() - 10:
+                    for f in (1, -1):
+                        leaf = QPainterPath()
+                        leaf.moveTo(side, yy)
+                        leaf.quadTo(QPointF(side + f * 7, yy - 4), QPointF(side + f * 3, yy - 11))
+                        leaf.quadTo(QPointF(side, yy - 6), QPointF(side, yy))
+                        p.setPen(pen(colour, 0.45))
+                        p.drawPath(leaf)
+                    yy += 12
+            oy = b.top() + 40
+            p.setPen(pen(colour, 1.0))
+            p.setBrush(QBrush(QColor("white")))
+            p.drawEllipse(QPointF(mid, oy + 10), 46, 30)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(pen(colour, 0.4))
+            p.drawEllipse(QPointF(mid, oy + 10), 41, 25)
+            crown(p, mid, oy + 28, 50, colour)
+            for f in (1, -1):
+                fleuron(p, mid - f * 70, oy + 14, 18, colour, 0.5, f * -90)
+                fleuron(p, b.left() + 30 if f == 1 else b.right() - 30, b.top() + 30, 16, colour, 0.5, -45 if f == 1 else 45)
+            name_y = panel.top() + rr * 0.55 + 6
+            inner = panel.width() - 50
+        # the step under the gate, the days in a cartouche
+        p.setPen(pen(colour, 1.0))
+        p.drawRect(QRectF(L - 4, foot, R - L + 8, b.bottom() - 10 - foot))
+        p.setPen(pen(colour, 0.25))
+        yy = foot + 3
+        while yy < b.bottom() - 13:
+            p.drawLine(QPointF(L - 1, yy), QPointF(R + 1, yy))
+            yy += 3.2
+        cr = QRectF(mid - 110, foot + 12, 220, 32)
+        cartouche(p, cr, colour)
+        text_c(p, mid, cr.center().y() + 4, foot_text, Style(TEXT_FONT, 11), colour)
+        # the lines
+        st = fit(Style(TITLE_FONT, 30, True), name, inner)
+        y = name_y + st.size
+        text_c(p, mid, y, name, st, colour)
+        y += 14
+        p.setPen(pen(colour, 0.5))
+        p.drawLine(QPointF(mid - 60, y), QPointF(mid - 9, y))
+        p.drawLine(QPointF(mid + 9, y), QPointF(mid + 60, y))
+        rosette(p, mid, y, 5.5, colour, 0.4, 6)
+        y += 22
+        text_c(p, mid, y + 4, "מסכת", Style(TITLE_FONT, 16, True), colour)
+        st = fit(Style(TITLE_FONT, 64, True), masechet, inner)
+        y += st.size * 1.05
+        outlined(p, mid, y, masechet, st, colour)
+        y += 18
+        for text in sub:
+            st = fit(Style(TEXT_FONT, 12), text, inner)
+            y += st.size * 1.45
+            text_c(p, mid, y, text, st, colour)
+        p.restore()
+    return paint
