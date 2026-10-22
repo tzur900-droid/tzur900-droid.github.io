@@ -447,6 +447,8 @@ class MainWindow(QMainWindow):
         lay.addStretch(1)
         area.setWidget(w)
         side.addTab(area, "עימוד")
+        side.addTab(self.build_prepare(), "הכנת טקסט")
+        side.currentChanged.connect(lambda i: self.prep_targets() if side.widget(i) is self.prep_box else None)
         # the mouse wheel scrolls the settings, it doesn't change a number or a choice it
         # happens to pass over (only one that was clicked first)
         self.wheel_guard = WheelGuard(self)
@@ -466,6 +468,87 @@ class MainWindow(QMainWindow):
         self.ded.textChanged.connect(self.changed)
         self.title_sub.textChanged.connect(self.changed)
         return side
+
+    def build_prepare(self):
+        """A tab for text as it comes (running text, copied from a site or a PDF): it is
+        made ready for the program and put into the main text or a commentary."""
+        box = QWidget()
+        self.prep_box = box
+        lay = QVBoxLayout(box)
+        lay.addWidget(hint(
+            "הדביקו כאן טקסט בכל צורה (מלל רץ, העתקה מאתר או מ־PDF) ולחצו <b>הכן</b>. "
+            "<b>טקסט עיקרי:</b> כל פסוק לשורה (לפי הנקודתיים שבסוף פסוק, או לפי מספרי פסוקים כמו (א) {א} [א]), "
+            "\"פרשת…\" ← <b># פרשת…</b>, \"פרק…\" ← <b># פרק…</b>, \"הפטרת…\" ← <b>## הפטרת…</b>. "
+            "<b>פירוש:</b> קטע שמתחיל במספר פסוק ((א), פסוק א, אחרי שורת \"פרק ב\") מקבל <b>@</b> של הפסוק בטקסט העיקרי."))
+        row = QHBoxLayout()
+        row.addWidget(QLabel("זה:"))
+        self.prep_target = QComboBox()
+        row.addWidget(self.prep_target, 1)
+        go = QPushButton("הכן ▼")
+        go.setStyleSheet("font-weight:bold; padding:4px 18px;")
+        go.clicked.connect(self.prepare_text)
+        row.addWidget(go)
+        lay.addLayout(row)
+        split = QSplitter(Qt.Vertical)
+        self.prep_in = hebrew_edit(size=12)
+        self.prep_in.setPlaceholderText("הדביקו כאן את הטקסט…")
+        self.prep_out = hebrew_edit(size=12)
+        self.prep_out.setPlaceholderText("כאן יופיע הטקסט המוכן (אפשר לתקן בו לפני שמכניסים)")
+        split.addWidget(self.prep_in)
+        split.addWidget(self.prep_out)
+        lay.addWidget(split, 1)
+        self.prep_report = QLabel()
+        self.prep_report.setWordWrap(True)
+        self.prep_report.setStyleSheet("color:#15803d;")
+        lay.addWidget(self.prep_report)
+        row = QHBoxLayout()
+        b1 = QPushButton("הכנס במקום מה שיש")
+        b1.clicked.connect(lambda: self.insert_prepared(False))
+        b2 = QPushButton("הוסף בסוף")
+        b2.clicked.connect(lambda: self.insert_prepared(True))
+        row.addWidget(b1)
+        row.addWidget(b2)
+        lay.addLayout(row)
+        self.prep_targets()
+        return box
+
+    def prep_targets(self):
+        cur = self.prep_target.currentIndex() if self.prep_target.count() else 0
+        self.prep_target.blockSignals(True)
+        self.prep_target.clear()
+        self.prep_target.addItem("הטקסט העיקרי (פסוקים)", -1)
+        for i in range(self.tabs.count() if hasattr(self, "tabs") else 0):
+            self.prep_target.addItem(f"פירוש: {self.tabs.widget(i).comm['name'] or '—'}", i)
+        self.prep_target.setCurrentIndex(min(cur, self.prep_target.count() - 1))
+        self.prep_target.blockSignals(False)
+
+    def prepare_text(self):
+        from .prepare import prepare_comm, prepare_main
+        raw = self.prep_in.toPlainText()
+        if not raw.strip():
+            return
+        if self.prep_target.currentData() == -1:
+            text, report, title = prepare_main(raw)
+            self.prep_title = title
+            if title:
+                report += f" · שם הספר: {title}"
+        else:
+            text, report = prepare_comm(raw, self.project["main"])
+            self.prep_title = None
+        self.prep_out.setPlainText(text)
+        self.prep_report.setText(report)
+
+    def insert_prepared(self, append):
+        text = self.prep_out.toPlainText().strip()
+        if not text:
+            return
+        target = self.prep_target.currentData()
+        edit = self.main if target == -1 else self.tabs.widget(target).text
+        old = edit.toPlainText().rstrip()
+        edit.setPlainText((old + "\n" + text) if append and old else text)
+        if target == -1 and getattr(self, "prep_title", None) and not self.title.text().strip():
+            self.title.setText(self.prep_title)
+        self.prep_report.setText("הוכנס. לחצו על עימוד מחדש כדי לראות את התוצאה.")
 
     def build_preview(self):
         w = QWidget()
