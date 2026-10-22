@@ -129,16 +129,21 @@ def title_page(pw, ph, lines, style=None):
 
 
 def masechet_title(pw, ph, m, info, part):
-    """The title page of the Rosh of a masechet (part "rosh") or of its Rif ("rif")."""
+    """The title page of the Rosh of a masechet (part "rosh") or of its Rif ("rif"): a gate
+    after the one of the Oz Vehadar Shas (design.oz_gate)."""
+    from . import design
     comm = info["comm_name"]
+    days = f"{heb(info['first_day'])}–{heb(info['last_day'])}"
+    every = "מחולק לימי הלימוד, ללימוד כל הש״ס בשנה"
     if part == "rosh":
-        lines = [("פסקי הרא\"ש", 36, True), ("", 6, False), ("מסכת " + m, 24, False)]
+        main, lines = "פסקי הרא״ש", ["ובהם לשון הרי״ף באותיות מודגשות", "—", every]
     else:
-        lines = [("הלכות רב אלפס", 36, True), ("", 6, False), ("מסכת " + m, 24, False)]
-        if comm:
-            lines.append((f"עם {comm}", 16, False))
-    lines += [("", 10, False), (f"ימי הלימוד {heb(info['first_day'])}–{heb(info['last_day'])}", 12, False)]
-    return title_page(pw, ph, lines)
+        main = "הלכות רב אלפס"
+        lines = ([f"עם {comm}", "ובו לשון רש״י באותיות מודגשות"] if comm else []) + ["—", every]
+    p = Page(pw, ph)
+    p.paint = [design.oz_gate(pw, ph, main, m, lines, "ימי הלימוד", [(days, 16)], "מהדורה מסודרת ללימוד יומי",
+                              shas.MASECHTOT[:16], shas.MASECHTOT[16:], current=m)]
+    return p
 
 
 def file_title(pw, ph, ms, books):

@@ -954,3 +954,301 @@ def gate(pw, ph, name, masechet, sub, foot_text, colour="black", style=4):
             text_c(p, mid, y, text, st, colour)
         p.restore()
     return paint
+
+
+# ------------------------------------------------------------------ the gate of Oz Vehadar
+GREY_LINE, GREY_LEAF, GREY_TINT, INK = "#6a6a6a", "#8f8f8f", "#e9e9e9", "#1e1e1e"
+
+
+def acanthus(p, x, y, s, angle, colour, w=0.5):
+    """a curling leaf of s points, from (x, y) towards angle (degrees, 0 = right)."""
+    p.save()
+    p.translate(x, y)
+    p.rotate(angle)
+    p.setPen(pen(colour, w))
+    p.setBrush(QBrush(QColor("white")))
+    path = QPainterPath()
+    path.moveTo(0, 0)
+    path.cubicTo(QPointF(s * 0.3, -s * 0.45), QPointF(s * 0.8, -s * 0.4), QPointF(s, -s * 0.05))
+    path.cubicTo(QPointF(s * 0.75, -s * 0.12), QPointF(s * 0.7, s * 0.02), QPointF(s * 0.55, s * 0.05))
+    path.cubicTo(QPointF(s * 0.62, s * 0.18), QPointF(s * 0.45, s * 0.3), QPointF(0, 0))
+    p.drawPath(path)
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(QPointF(s * 0.1, -s * 0.02), QPointF(s * 0.8, -s * 0.08))
+    p.restore()
+
+
+def filigree(p, r, colour=GREY_LEAF, tint=GREY_TINT, seed=1, cell=30.0):
+    """the area r filled with a light ground and a pattern of curling stems and leaves,
+    the same on both sides of the page's middle (as in an engraved frame)."""
+    import random
+    rnd = random.Random(seed)
+    p.save()
+    p.fillRect(r, QColor(tint))
+    p.setClipRect(r)
+    mid = r.center().x()
+    cols = int(r.width() / 2 / cell) + 2
+    rows = int(r.height() / cell) + 2
+    shapes = []
+    for i in range(cols):
+        for j in range(rows):
+            x = mid + i * cell + rnd.uniform(-4, 4)
+            y = r.top() + j * cell + (cell / 2 if i % 2 else 0) + rnd.uniform(-4, 4)
+            shapes.append((x - mid, y, rnd.uniform(0, 360), rnd.uniform(0.75, 1.1), rnd.random() < 0.5))
+    for f in (1, -1):
+        for dx, y, a, sc, curl in shapes:
+            x = mid + f * dx
+            ang = a if f == 1 else 180 - a
+            s = cell * 0.55 * sc
+            # a stem curving to a spiral, with leaves on it
+            rad = math.radians(ang)
+            ex, ey = x + math.cos(rad) * s, y + math.sin(rad) * s
+            path = QPainterPath()
+            path.moveTo(x, y)
+            path.cubicTo(QPointF(x + math.cos(rad + 0.9) * s * 0.6, y + math.sin(rad + 0.9) * s * 0.6),
+                         QPointF(ex + math.cos(rad - 1.2) * s * 0.4, ey + math.sin(rad - 1.2) * s * 0.4), QPointF(ex, ey))
+            p.setPen(pen(colour, 0.5))
+            p.drawPath(path)
+            scroll(p, ex, ey, s * 0.22, colour, 0.45, f if curl else -f)
+            acanthus(p, x, y, s * 0.55, ang + 60, colour, 0.4)
+            acanthus(p, x + math.cos(rad) * s * 0.5, y + math.sin(rad) * s * 0.5, s * 0.4, ang - 70, colour, 0.4)
+    p.restore()
+
+
+def text_path(x, y, text, st, maxw=None):
+    """the outline of text, centred on x with its baseline at y, no wider than maxw."""
+    from PySide6.QtGui import QTransform
+    path = QPainterPath()
+    path.addText(QPointF(0, 0), qfont(st), text)
+    r = path.boundingRect()
+    k = min(1.0, maxw / r.width()) if maxw else 1.0
+    t = QTransform()
+    t.translate(x - (r.left() + r.width() / 2) * k, y)
+    t.scale(k, k)
+    return t.map(path)
+
+
+def shaded(p, x, y, text, st, line=GREY_LINE, maxw=None):
+    """great letters as in the gate of Oz Vehadar: shaded light grey within a dark outline,
+    with a shadow; centred on x, the baseline at y."""
+    from PySide6.QtGui import QLinearGradient
+    path = text_path(x, y, text, st, maxw)
+    p.save()
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#9a9a9a")))
+    p.drawPath(path.translated(1.6, 1.6))
+    r = path.boundingRect()
+    g = QLinearGradient(QPointF(0, r.top()), QPointF(0, r.bottom()))
+    g.setColorAt(0, QColor("#f6f6f6"))
+    g.setColorAt(1, QColor("#c4c4c4"))
+    p.setBrush(QBrush(g))
+    p.setPen(pen("#3a3a3a", 0.8))
+    p.drawPath(path)
+    p.restore()
+
+
+def arc_text(p, cx, cy, rad, text, st, colour=INK):
+    """text along the top of a circle (centre cx, cy; rad to the baseline), read from
+    right to left, centred on the top."""
+    total = width(st, text)
+    a = math.pi / 2 - (total / 2) / rad       # the angle of the right end (y up)
+    p.save()
+    p.setPen(QColor(colour))
+    p.setFont(qfont(st))
+    for ch in text:
+        w = width(st, ch)
+        mid_a = a + (w / 2) / rad
+        x = cx + rad * math.cos(mid_a)
+        y = cy - rad * math.sin(mid_a)
+        p.save()
+        p.translate(x, y)
+        p.rotate(90 - math.degrees(mid_a))
+        p.drawText(QPointF(-w / 2, 0), ch)
+        p.restore()
+        a += w / rad
+    p.restore()
+
+
+def divider(p, x, y, half, colour=GREY_LINE):
+    p.setPen(pen(colour, 0.6))
+    p.drawLine(QPointF(x - half, y), QPointF(x - 8, y))
+    p.drawLine(QPointF(x + 8, y), QPointF(x + half, y))
+    d = QPainterPath()
+    d.moveTo(x - 6, y)
+    d.lineTo(x, y - 3)
+    d.lineTo(x + 6, y)
+    d.lineTo(x, y + 3)
+    d.closeSubpath()
+    p.setBrush(QBrush(QColor(colour)))
+    p.drawPath(d)
+    p.setBrush(Qt.NoBrush)
+    for f in (1, -1):
+        scroll(p, x + f * (half + 4), y - 2, 3.5, colour, 0.5, -f)
+
+
+def flame(p, x, y, s, colour=GREY_LINE):
+    path = QPainterPath()
+    path.moveTo(x, y)
+    path.cubicTo(QPointF(x - s * 0.6, y - s * 0.3), QPointF(x - s * 0.2, y - s * 0.8), QPointF(x, y - s * 1.2))
+    path.cubicTo(QPointF(x + s * 0.25, y - s * 0.75), QPointF(x + s * 0.6, y - s * 0.3), QPointF(x, y))
+    p.setPen(pen(colour, 0.6))
+    p.setBrush(QBrush(QColor("#d8d8d8")))
+    p.drawPath(path)
+    p.setBrush(Qt.NoBrush)
+
+
+SEDARIM_SIDES = (("אמונת", "עתיך", "חוסן"), ("ישועות", "חכמת", "ודעת"))
+
+
+def oz_gate(pw, ph, main, masechet, lines, foot_title, foot_lines, arc_line, right_list, left_list,
+            current=None, right_foot=("זרעים", "מועד", "נשים"), left_foot=("נזיקין", "קדשים", "טהרות")):
+    """A title page after the gate of the Oz Vehadar Shas: a frame of grey filigree, a
+    great round arch with a line along it, the name in great shaded letters, the masechet
+    and the lines under them; pillars on both sides with the masechtot (the current one
+    marked), the words of the verse over them and the sedarim under them; and at the foot
+    a little gate of twisted columns and flames, with the days in it."""
+    def paint(p):
+        p.save()
+        p.setRenderHint(p.RenderHint.Antialiasing, True)
+        m = 24.0
+        O = QRectF(m, m, pw - 2 * m, ph - 2 * m)
+        I = O.adjusted(7, 7, -7, -7)
+        filigree(p, I, seed=7, cell=22)
+        p.setPen(pen(GREY_LINE, 1.6))
+        p.drawRect(O)
+        p.setPen(pen(GREY_LINE, 0.6))
+        p.drawRect(O.adjusted(3, 3, -3, -3))
+        p.drawRect(I)
+        mid = pw / 2
+        pil = 74.0
+        xr1, xl1 = I.right() - pil, I.left() + pil
+        panel_bot = I.top() + I.height() * 0.80
+        # the arch and the panel under it
+        ax1, ax2 = xl1 + 4, xr1 - 4
+        rx = (ax2 - ax1) / 2
+        spring = I.top() + 22 + rx
+        band = 13.0
+        outer = QPainterPath()
+        outer.moveTo(ax1, panel_bot)
+        outer.lineTo(ax1, spring)
+        outer.arcTo(QRectF(ax1, spring - rx, 2 * rx, 2 * rx), 180, -180)
+        outer.lineTo(ax2, panel_bot)
+        outer.closeSubpath()
+        p.setBrush(QBrush(QColor(GREY_TINT)))
+        p.setPen(pen(GREY_LINE, 1.0))
+        p.drawPath(outer)
+        inner = QPainterPath()
+        inner.moveTo(ax1 + band, panel_bot)
+        inner.lineTo(ax1 + band, spring)
+        inner.arcTo(QRectF(ax1 + band, spring - rx + band, 2 * (rx - band), 2 * (rx - band)), 180, -180)
+        inner.lineTo(ax2 - band, panel_bot)
+        inner.closeSubpath()
+        # the band of the arch: a ring of leaves
+        p.save()
+        p.setClipPath(outer.subtracted(inner))
+        filigree(p, QRectF(ax1, spring - rx, 2 * rx, panel_bot - spring + rx), seed=3, cell=11)
+        p.restore()
+        p.setBrush(QBrush(QColor("white")))
+        p.setPen(pen(GREY_LINE, 0.8))
+        p.drawPath(inner)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(pen(GREY_LINE, 1.0))
+        p.drawPath(outer)
+        # the pillars: the verse at the head, the masechtot, the sedarim at the foot
+        for x0, words, names, foot in ((xr1, SEDARIM_SIDES[0], right_list, right_foot),
+                                       (I.left(), SEDARIM_SIDES[1], left_list, left_foot)):
+            px1, px2 = x0 + 7, x0 + pil - 7
+            pc = (px1 + px2) / 2
+            top_r = QRectF(px1, spring - 6, px2 - px1, 66)
+            list_r = QRectF(px1, top_r.bottom() + 16, px2 - px1, panel_bot - top_r.bottom() - 30)
+            foot_r = QRectF(px1, panel_bot + 10, px2 - px1, I.bottom() - panel_bot - 18)
+            for rr in (top_r, list_r, foot_r):
+                p.setBrush(QBrush(QColor("white")))
+                p.setPen(pen(GREY_LINE, 0.9))
+                p.drawRect(rr)
+                p.setBrush(Qt.NoBrush)
+                p.setPen(pen(GREY_LINE, 0.4))
+                p.drawRect(rr.adjusted(2.5, 2.5, -2.5, -2.5))
+            # mouldings between them, as the rings of a pillar
+            for yy in (top_r.bottom() + 4, list_r.bottom() + 3):
+                p.setPen(pen(GREY_LINE, 0.8))
+                p.setBrush(QBrush(QColor("white")))
+                p.drawRect(QRectF(px1 - 4, yy, px2 - px1 + 8, 6))
+                p.setBrush(Qt.NoBrush)
+            st = Style(TITLE_FONT, 13, True)
+            for k, wd in enumerate(words):
+                text_c(p, pc, top_r.top() + 20 + k * 17, wd, st, "#555555")
+            n = len(names)
+            lh = min(14.5, (list_r.height() - 14) / max(1, n))
+            size = min(10.5, lh * 0.78)
+            for k, nm in enumerate(names):
+                bold = nm == current
+                s2 = fit(Style(TITLE_FONT if bold else TEXT_FONT, size + (1 if bold else 0), bold), nm, list_r.width() - 10)
+                text_c(p, pc, list_r.top() + 8 + lh * (k + 1) - lh * 0.25, nm, s2, INK)
+            for k, wd in enumerate(foot):
+                text_c(p, pc, foot_r.top() + foot_r.height() / 2 - 19 + k * 19 + 6, wd, Style(TITLE_FONT, 13, True), "#555555")
+        # the little gate at the foot
+        gw, gt = 132.0, panel_bot + 8
+        gb = I.bottom() - 4
+        gx1, gx2 = mid - gw / 2, mid + gw / 2
+        p.setBrush(QBrush(QColor("white")))
+        p.setPen(pen(GREY_LINE, 0.8))
+        gate_path = QPainterPath()
+        gate_path.moveTo(gx1 + 12, gb)
+        gate_path.lineTo(gx1 + 12, gt + 34)
+        gate_path.quadTo(QPointF(mid, gt - 6), QPointF(gx2 - 12, gt + 34))
+        gate_path.lineTo(gx2 - 12, gb)
+        gate_path.closeSubpath()
+        p.drawPath(gate_path)
+        p.setBrush(Qt.NoBrush)
+        for cx in (gx1 + 6, gx2 - 6):
+            twisted_column(p, cx, gt + 26, gb, 9, GREY_LINE, vine=False)
+            p.setPen(pen(GREY_LINE, 0.7))
+            p.setBrush(QBrush(QColor("white")))
+            p.drawRect(QRectF(cx - 7, gt + 18, 14, 8))
+            p.setBrush(Qt.NoBrush)
+            flame(p, cx, gt + 17, 12)
+        # in it: the arched title and the days
+        arc_text(p, mid, gt + 64, 38, foot_title, Style(TEXT_FONT, 9.5), INK)
+        box = QRectF(mid - 34, gt + 44, 68, gb - gt - 52)
+        p.setPen(pen(GREY_LINE, 1.0))
+        p.drawRect(box)
+        p.setPen(pen(GREY_LINE, 0.4))
+        p.drawRect(box.adjusted(2.5, 2.5, -2.5, -2.5))
+        yy = box.top() + 4
+        for text, size in foot_lines:
+            st = fit(Style(TITLE_FONT, size, True), text, box.width() - 10)
+            yy += st.size * 1.25
+            text_c(p, mid, yy, text, st, INK)
+        # the lines in the arch
+        arc_text(p, mid, spring, rx - band - 20, arc_line, Style(TITLE_FONT, 14, True), INK)
+        w_in = 2 * (rx - band) - 30
+        # the lines in the opening, as one block in its middle
+        ops, y = [], 0.0
+        st = Style(TITLE_FONT, 60, True)
+        y += st.size * 0.75
+        ops.append(("shaded", y, main, st))
+        y += 34
+        t = "מסכת " + masechet
+        ops.append(("text", y, t, fit(Style(TITLE_FONT, 28, True), t, w_in)))
+        y += 22
+        ops.append(("div", y, None, None))
+        for text in lines:
+            if text == "—":
+                y += 18
+                ops.append(("div", y - 4, None, None))
+                continue
+            st2 = fit(Style(TITLE_FONT, 12.5, True), text, w_in)
+            y += st2.size * 1.55
+            ops.append(("text", y, text, st2))
+        top, bot = spring - rx * 0.45, panel_bot - 16
+        y0 = top + max(0.0, (bot - top - y) / 2) - 10
+        for kind, yy, text, st2 in ops:
+            if kind == "shaded":
+                shaded(p, mid, y0 + yy, text, st2, maxw=w_in - 10)
+            elif kind == "text":
+                text_c(p, mid, y0 + yy, text, st2, INK)
+            else:
+                divider(p, mid, y0 + yy, 34)
+        p.restore()
+    return paint
