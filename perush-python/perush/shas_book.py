@@ -1,9 +1,9 @@
 """The whole Shas of the Rosh and the Rif: every masechet laid out (several at a time),
 checked (shas_check), and put together into files of 300 to 500 pages.
 
-  * In a file: a title page, then each masechet from a left-hand page (in a Hebrew book
-    the first page is on the left) with its own title page; the Rif of a masechet also
-    from a left-hand page. Blank pages where needed for that.
+  * In a file: a title page, then each masechet: the Rosh with its own title page and the
+    Rif with its own, each from a left-hand page (in a Hebrew book the first page is on
+    the left). Blank pages where needed for that.
   * The pages keep the masechet's own numbers in letters at the head; at the foot of
     each page, small, its number in the file.
   * The whole Shas in one file when it is 500 pages or less; otherwise files that keep
@@ -63,17 +63,18 @@ def build_all(root, fonts, page=B5, sizes=SIZES, jobs=4, only=None, log=print):
     return {m: out[m] for m in names if m in out}
 
 
-def block_size(n):
-    """The pages a masechet takes in a file: its title page and the blank page behind it,
-    its pages, and a blank page after them when they end on a left-hand page."""
-    return 2 + n + (n % 2)
+def block_size(info):
+    """The pages a masechet takes in a file: for the Rosh and for the Rif, a title page
+    and the blank page behind it, the pages, and a blank page after them when they end
+    on a left-hand page."""
+    return sum(2 + n + n % 2 for n in (info["rosh_pages"], info["rif_pages"]) if n)
 
 
 def group(books):
     """Files of LO to HI pages, keeping to the sedarim where they can: the whole Shas in
     one when it fits. -> [[masechet]]"""
     names = list(books)
-    size = [block_size(len(books[m][0])) for m in names]
+    size = [block_size(books[m][2]) for m in names]
     if 2 + sum(size) <= HI:
         return [names]
     n = len(names)
@@ -128,11 +129,15 @@ def title_page(pw, ph, lines):
     return p
 
 
-def masechet_title(pw, ph, m, info):
+def masechet_title(pw, ph, m, info, part):
+    """The title page of the Rosh of a masechet (part "rosh") or of its Rif ("rif")."""
     comm = info["comm_name"]
-    lines = [("מסכת " + m, 30, True), ("", 10, False), ("פסקי הרא\"ש", 16, False)]
-    if info["rif_pages"]:
-        lines.append(("הלכות רב אלפס" + (f" עם {comm}" if comm else ""), 16, False))
+    if part == "rosh":
+        lines = [("פסקי הרא\"ש", 26, True), ("", 6, False), ("מסכת " + m, 22, False)]
+    else:
+        lines = [("הלכות רב אלפס", 26, True), ("", 6, False), ("מסכת " + m, 22, False)]
+        if comm:
+            lines.append((f"עם {comm}", 16, False))
     lines += [("", 10, False), (f"ימי הלימוד {heb(info['first_day'])}–{heb(info['last_day'])}", 12, False)]
     return title_page(pw, ph, lines)
 
@@ -151,10 +156,17 @@ def assemble(ms, books, page=B5, margin=SIZES["margin"]):
     out = [file_title(pw, ph, ms, books), blank(pw, ph)]
     for m in ms:
         pages, _, info = books[m]
-        out += [masechet_title(pw, ph, m, info), blank(pw, ph)]
-        out += pages
-        if len(out) % 2:
-            out.append(blank(pw, ph))
+        # a title page for the Rosh and one for the Rif, each on a left-hand page with a
+        # blank page behind it (the blank page the masechet's pages have between them is
+        # left out: the Rif's title takes its place)
+        rosh, rif = pages[:info["rosh_pages"]], pages[len(pages) - info["rif_pages"]:] if info["rif_pages"] else []
+        for part, ps in (("rosh", rosh), ("rif", rif)):
+            if not ps:
+                continue
+            out += [masechet_title(pw, ph, m, info, part), blank(pw, ph)]
+            out += ps
+            if len(out) % 2:
+                out.append(blank(pw, ph))
     st = Style("Frank Ruhl Libre", 7)
     for n, p in enumerate(out):
         if p.frames:
