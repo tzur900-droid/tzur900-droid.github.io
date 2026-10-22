@@ -1110,6 +1110,8 @@ PALETTES = {
                  shade=("#ffffff", "#b3cbe3"), shadow="#7e9bb9", ground="#cfe2f1"),
     "תכלת עמוק": dict(line="#173156", leaf="#5a82ae", tint="#a9cbe6", ink="#0f2242", paper="#e6f0f9",
                       shade=("#ffffff", "#a3c0de"), shadow="#6b8bb0", ground="#a9cbe6"),
+    "שמנת ושחור": dict(line="#151515", leaf="#a88a5c", tint="#efe3c8", ink="#111111", paper="#fbf6ea",
+                       shade=("#fffaf0", "#e0c99a"), shadow="#8a7a5e", ground="#efe3c8"),
     "שמנת": dict(line="#5b4123", leaf="#a88a5c", tint="#efe3c8", ink="#3a2814", paper="#fbf6ea",
                  shade=("#fffaf0", "#e0c99a"), shadow="#b39a6e", ground="#efe3c8"),
 }
