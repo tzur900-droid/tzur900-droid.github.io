@@ -34,6 +34,9 @@ def draw_line(p, line, x_right, top):
 def draw_page(p, page):
     p.setPen(QColor("black"))
     p.setLayoutDirection(Qt.RightToLeft)
+    for paint in getattr(page, "paint", []):
+        # a page drawn in lines (a title page, a cover)
+        paint(p)
     if page.head:
         right, center, left, st, base = page.head
         m = page.rules[0][0] if page.rules else 0
@@ -98,6 +101,10 @@ def export_pdf(pages, path, title=""):
     p = QPainter(writer)
     for n, page in enumerate(pages):
         if n:
+            if (page.width, page.height) != (w, h):
+                w, h = page.width, page.height
+                size = QPageSize(QSizeF(w / PT_PER_MM, h / PT_PER_MM), QPageSize.Millimeter, "custom", QPageSize.ExactMatch)
+                writer.setPageLayout(QPageLayout(size, QPageLayout.Portrait, QMarginsF(0, 0, 0, 0), QPageLayout.Millimeter))
             writer.newPage()
         draw_page(p, page)
     p.end()

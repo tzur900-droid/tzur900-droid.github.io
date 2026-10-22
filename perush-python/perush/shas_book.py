@@ -30,6 +30,7 @@ SEDARIM = [("זרעים", ["ברכות"]),
            ("טהרות", ["נידה"])]
 SEDER_OF = {m: s for s, ms in SEDARIM for m in ms}
 LO, HI = 300, 500
+COVER = "כחול"           # the colour of the covers (design.COLOURS)
 
 
 def _init(fonts):
@@ -118,14 +119,11 @@ def blank(pw, ph):
 
 
 def title_page(pw, ph, lines):
-    """A page with lines of text (text, size, bold) in the middle of it."""
+    """A title page drawn as a gate, as in the Vilna Shas (design.title): lines of
+    (text, size, bold), the first in the arch."""
+    from . import design
     p = Page(pw, ph)
-    p.marks = []
-    y = ph * 0.3
-    for text, size, bold in lines:
-        st = Style("Frank Ruhl Libre", size, bold)
-        p.marks.append((pw / 2, y, text, st))
-        y += size * 1.9
+    p.paint = [design.title(pw, ph, lines)]
     return p
 
 
@@ -133,9 +131,9 @@ def masechet_title(pw, ph, m, info, part):
     """The title page of the Rosh of a masechet (part "rosh") or of its Rif ("rif")."""
     comm = info["comm_name"]
     if part == "rosh":
-        lines = [("פסקי הרא\"ש", 26, True), ("", 6, False), ("מסכת " + m, 22, False)]
+        lines = [("פסקי הרא\"ש", 36, True), ("", 6, False), ("מסכת " + m, 24, False)]
     else:
-        lines = [("הלכות רב אלפס", 26, True), ("", 6, False), ("מסכת " + m, 22, False)]
+        lines = [("הלכות רב אלפס", 36, True), ("", 6, False), ("מסכת " + m, 24, False)]
         if comm:
             lines.append((f"עם {comm}", 16, False))
     lines += [("", 10, False), (f"ימי הלימוד {heb(info['first_day'])}–{heb(info['last_day'])}", 12, False)]
@@ -143,10 +141,10 @@ def masechet_title(pw, ph, m, info, part):
 
 
 def file_title(pw, ph, ms, books):
-    lines = [("פסקי הרא\"ש", 28, True), ("והלכות רב אלפס", 20, True), ("", 12, False)]
+    lines = [("פסקי הרא\"ש", 36, True), ("והלכות רב אלפס", 22, True), ("", 14, False)]
     for m in ms:
         info = books[m][2]
-        lines.append((f"מסכת {m}  ·  ימים {heb(info['first_day'])}–{heb(info['last_day'])}", 11, False))
+        lines.append((f"מסכת {m}  ·  ימים {heb(info['first_day'])}–{heb(info['last_day'])}", 12, False))
     return title_page(pw, ph, lines)
 
 
@@ -174,6 +172,16 @@ def assemble(ms, books, page=B5, margin=SIZES["margin"]):
                 p.marks = []
             p.marks.append((pw / 2, ph - margin * PT_PER_MM / 2, str(n + 1), st))
     return out
+
+
+def cover_page(ms, n_pages, volume, colour=COVER, page=B5):
+    """The whole cover of a file (back, spine and front) as one page."""
+    from . import design
+    W, H, paint = design.cover(page, n_pages, [("פסקי הרא\"ש", 44), ("והלכות רב אלפס", 28)], ms,
+                               "כרך " + heb(volume), design.COLOURS[colour])
+    p = Page(W, H)
+    p.paint = [paint]
+    return p
 
 
 def report(books, files):
@@ -205,6 +213,8 @@ def build_shas(root, out_dir, fonts, jobs=4, only=None, log=print):
         name = file_name(ms)
         pages = assemble(ms, books)
         export_pdf(pages, os.path.join(out_dir, name + ".pdf"), name)
+        export_pdf([cover_page(ms, len(pages), len(files) + 1)], os.path.join(out_dir, "כריכה - " + name + ".pdf"),
+                   "כריכה - " + name)
         files.append((name, ms, len(pages)))
         log(f"{name}: {len(pages)} עמודים")
     rep = report(books, files)
