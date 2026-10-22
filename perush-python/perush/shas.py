@@ -993,6 +993,7 @@ class Unit:
 
 
 LONG_COMM = 15
+RIF_FONT = "Drugulin CLM"    # Culmus (GPL); the one face it has is a book weight
 
 
 class Book:
@@ -1009,8 +1010,10 @@ class Book:
         self.gap = 5 * PT_PER_MM
         self.vgap = 2.5 * PT_PER_MM
         self.st_rosh = Style("Frank Ruhl Libre", rosh_size)
-        self.st_rif = Style("Frank Ruhl Libre", rif_size)
-        self.st_comm = Style("Noto Rashi Hebrew", comm_size)
+        # the Rif in the letters of the Gemara of the Vilna Shas (Drugulin), the commentary in
+        # square letters (Frank Ruhl) with its dibbur hamatchil in the Rif's letters
+        self.st_rif = Style(RIF_FONT, rif_size)
+        self.st_comm = Style("Frank Ruhl Libre", comm_size)
         self.lh_rosh = rosh_size * 1.45
         self.lh_rif = rif_size * 1.34
         self.lh_comm = comm_size * 1.26
@@ -1028,8 +1031,8 @@ class Book:
         lab = Style("David Libre", st.size * 1.08, True)
         big = Style(st.family, st.size * 1.3, True)
         gem = Style(st.family, st.size * 0.75)
-        copen = Style("Frank Ruhl Libre", st.size * 1.4, True)
-        dh = Style("Frank Ruhl Libre", st.size, True)
+        copen = Style(RIF_FONT, st.size * 1.4)
+        dh = Style(RIF_FONT, st.size * 1.05)
         out = []
         for t in toks:
             w, bold = t[0], t[1]
@@ -1570,7 +1573,20 @@ class Book:
                 # of the commentary on its column's side
                 page.marks = []
                 mst = Style("Frank Ruhl Libre", 7.5, True)
-                sides = [(pg["text"], R + self.m / 2)]
+                dst = Style("Frank Ruhl Libre", 6, True)
+                for l in pg["text"]:
+                    labels = [w.ref for w in l.words if isinstance(w.ref, str)]
+                    if not labels:
+                        continue
+                    # beside the Rif's line: in the space between it and the commentary on its
+                    # right, "יום" over the day's number; where the line runs across the page,
+                    # in the margin
+                    x = R - l.right + self.gap / 2 if l.right > 1 else R + self.m / 2
+                    yb = top + l.y + l.h * 0.72
+                    word, num = (labels[0].split(" ", 1) + [""])[:2]
+                    page.marks.append((x, yb - dst.size * 0.95, word, dst))
+                    page.marks.append((x, yb + dst.size * 0.15, num, dst))
+                sides = []
                 if pg["cols"]:
                     sides.append((pg["cols"][0], R + self.m / 2))
                 if len(pg["cols"]) > 1:
