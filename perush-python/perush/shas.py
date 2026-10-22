@@ -1514,9 +1514,20 @@ class Book:
         def below_top(c):
             # the top block above the Rif stays as it is
             return [l for l in c if l.y >= T - EPS]
+
+        lim = r["th"] + self.vgap if r["text"] else T
+
+        def open_under(c, target, cap):
+            # where the commentary goes on under the Rif only the lines under it open, so
+            # that the lines beside the Rif stay by it (no blank band under the Rif)
+            under = [l for l in c if l.y >= lim - EPS]
+            if under and r["text"]:
+                stretch(under, target, min(cap, self.lh_comm * 0.4 * len(under)))
+            else:
+                stretch(below_top(c), target, cap)
         if r["mode"] == "long":
             for c in r["cols"]:
-                stretch(below_top(c), self.H, self.lh_comm * 1.5)
+                open_under(c, self.H, self.lh_comm * 1.5)
         elif r["mode"] == "short" and "below" in r:
             T = r.get("T", 0.0)
             for c in r["cols"]:
@@ -1534,7 +1545,7 @@ class Book:
                 stretch(r["text"], self.H, self.lh_rif * 0.25 * max(1, len(r["text"])))
         else:
             for c in r["cols"]:
-                stretch(below_top(c), r["total"] if last else self.H, self.lh_comm * 0.3 * max(1, len(c)))
+                open_under(c, r["total"] if last else self.H, self.lh_comm * 0.3 * max(1, len(c)))
         r["kind"] = "rif"
         return r
 
