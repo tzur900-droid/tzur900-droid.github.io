@@ -1031,8 +1031,9 @@ class Book:
         lab = Style("David Libre", st.size * 1.08, True)
         big = Style(st.family, st.size * 1.3, True)
         gem = Style(st.family, st.size * 0.75)
-        copen = Style(RIF_FONT, st.size * 1.4)
-        dh = Style(RIF_FONT, st.size * 1.05)
+        # the dibbur hamatchil bold and a quarter larger, to stand out over Rashi's wording
+        copen = Style(RIF_FONT, st.size * 1.45, True)
+        dh = Style(RIF_FONT, st.size * 1.25, True)
         out = []
         for t in toks:
             w, bold = t[0], t[1]
