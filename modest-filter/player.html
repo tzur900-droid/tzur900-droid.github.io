@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>נגן צנוע</title>
+<link rel="icon" href="icons/icon32.png">
+<link rel="stylesheet" href="player.css">
+</head>
+<body>
+<header>
+  <img src="icons/icon48.png" alt="">
+  <h1>נגן צנוע</h1>
+  <span id="status" class="chip">טוען...</span>
+</header>
+
+<main>
+  <section id="open" class="card">
+    <h2>איזה סרט לפתוח?</h2>
+    <div class="row">
+      <input id="drive-link" type="url" placeholder="הדביקו קישור לסרט בגוגל דרייב">
+      <button id="drive-go" class="primary">פתח מהדרייב</button>
+    </div>
+    <div id="drop" class="drop">
+      או גררו לכאן קובץ סרט מהמחשב, או <label class="link">בחרו קובץ<input id="file" type="file" accept="video/*,.mkv"></label>
+    </div>
+    <div id="dl" class="hidden">
+      <div class="bar"><div id="dl-bar"></div></div>
+      <p id="dl-text" class="muted"></p>
+    </div>
+  </section>
+
+  <section id="stage" class="hidden">
+    <canvas id="screen"></canvas>
+    <div id="skip-msg" class="hidden">⏩ <span id="skip-text">מדלג על קטע לא צנוע</span></div>
+    <div id="controls" dir="ltr">
+      <button id="play" title="ניגון / עצירה (רווח)">▶</button>
+      <button id="back" title="10 שניות אחורה">⟲10</button>
+      <button id="fwd" title="10 שניות קדימה">10⟳</button>
+      <span id="time">0:00 / 0:00</span>
+      <input id="seek" type="range" min="0" max="1000" value="0">
+      <button id="mute" title="השתקה">🔊</button>
+      <input id="vol" type="range" min="0" max="1" step="0.05" value="1">
+      <button id="black" title="מסך שחור מיידי (B)">⬛</button>
+      <button id="full" title="מסך מלא (F)">⛶</button>
+    </div>
+  </section>
+
+  <section id="settings" class="card">
+    <h2>מה לסנן</h2>
+    <div class="grid">
+      <label><input type="checkbox" data-k="arms" checked> שרוולים (כיסוי עד המרפק)</label>
+      <label><input type="checkbox" data-k="legs" checked> רגליים (כיסוי עד מתחת לברך)</label>
+      <label><input type="checkbox" data-k="neck" checked> מחשוף ופלג גוף עליון</label>
+      <label><input type="checkbox" data-k="intimate" checked> דילוג על נשיקות וחיבוקים</label>
+      <label><input type="checkbox" data-k="scenes" checked> דילוג על קטעים לא צנועים (זיהוי סצנה)</label>
+      <label><input type="checkbox" data-k="strict" checked> מצב קפדני: להציג רק פריימים שנבדקו</label>
+    </div>
+    <div class="row">
+      <label>רגישות
+        <select data-k="sensitivity">
+          <option value="low">נמוכה</option>
+          <option value="normal" selected>רגילה</option>
+          <option value="high">גבוהה (מדלג יותר)</option>
+        </select>
+      </label>
+      <label>סוג כיסוי
+        <select data-k="style">
+          <option value="garment" selected>בגד (בצבע הבגד של הדמות)</option>
+          <option value="blur">טשטוש</option>
+        </select>
+      </label>
+      <label class="inline"><input type="checkbox" data-k="debug"> הצג נקודות זיהוי (לבדיקה)</label>
+    </div>
+    <p class="muted">הזיהוי נעשה במחשב שלכם בלבד. אף תמונה לא נשלחת לאינטרנט. הזיהוי טוב אבל לא מושלם; מקש <b>B</b> מחשיך את המסך מיד.</p>
+  </section>
+</main>
+
+<video id="src" playsinline preload="auto" class="hidden"></video>
+<script src="lib/tf.min.js"></script>
+<script type="module" src="player.js"></script>
+</body>
+</html>
