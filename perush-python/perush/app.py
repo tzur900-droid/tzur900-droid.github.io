@@ -1,13 +1,14 @@
 """The program window: editing on one side, the laid-out pages on the other."""
 import json
+import re
 import os
 
 import sys
 
-from PySide6.QtCore import QSettings, QStandardPaths, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QObject, QSettings, QStandardPaths, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
+    QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
     QMenu, QToolBar, QToolButton, QVBoxLayout, QWidget,
@@ -163,6 +164,17 @@ class CommEditor(QWidget):
             self.status.setStyleSheet("color:#15803d;")
 
 
+class WheelGuard(QObject):
+    """A spin box or list passed over by the mouse wheel ignores it (the page scrolls)
+    unless it has been clicked."""
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Wheel and not obj.hasFocus():
+            ev.ignore()
+            return True
+        return False
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -179,6 +191,10 @@ class MainWindow(QMainWindow):
         self.timer.setSingleShot(True)
         self.timer.setInterval(400)
         self.timer.timeout.connect(self.relayout)
+        self.autosave = QTimer(self)
+        self.autosave.setSingleShot(True)
+        self.autosave.setInterval(1500)
+        self.autosave.timeout.connect(self.save_quietly)
 
         self.build_toolbar()
         split = QSplitter(Qt.Horizontal)
@@ -313,31 +329,30 @@ class MainWindow(QMainWindow):
         return menu
 
     def build_editor(self):
-        area = QScrollArea()
-        area.setWidgetResizable(True)
-        w = QWidget()
-        lay = QVBoxLayout(w)
+        """The editing side, in three tabs: each editor gets the full height and scrolls on
+        its own, instead of boxes inside one long scrolling page."""
+        side = QTabWidget()
+        side.setDocumentMode(True)
+        side.setStyleSheet("QTabBar::tab { padding:6px 14px; font-size:13px; }")
 
-        box = QGroupBox("טקסט עיקרי")
+        box = QWidget()
         bl = QVBoxLayout(box)
         self.title = QLineEdit()
         self.title.setPlaceholderText("כותרת (למשל שם הספר) — בראש כל עמוד")
         bl.addWidget(self.title)
         self.main = hebrew_edit()
-        self.main.setMinimumHeight(220)
-        bl.addWidget(self.main)
+        bl.addWidget(self.main, 1)
         bl.addWidget(hint(HINT_MAIN))
-        lay.addWidget(box)
+        side.addTab(box, "טקסט עיקרי")
 
-        box = QGroupBox("תרגומים ופירושים")
+        box = QWidget()
         bl = QVBoxLayout(box)
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
-        self.tabs.setMinimumHeight(360)
         self.tabs.tabCloseRequested.connect(self.remove_comm)
         self.tabs.tabBar().tabMoved.connect(self.tab_moved)
-        bl.addWidget(self.tabs)
+        bl.addWidget(self.tabs, 1)
         row = QHBoxLayout()
         for place, text in (("side", "+ תרגום בטור צמוד"), ("bottom", "+ פירוש מתחת לטקסט"), ("under", "+ ביאור אחרי כל פסוק")):
             b = QPushButton(text)
@@ -345,8 +360,12 @@ class MainWindow(QMainWindow):
             row.addWidget(b)
         bl.addLayout(row)
         bl.addWidget(hint(HINT_COMM))
-        lay.addWidget(box)
+        side.addTab(box, "תרגומים ופירושים")
 
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        w = QWidget()
+        lay = QVBoxLayout(w)
         box = QGroupBox("עימוד")
         form = QFormLayout(box)
         self.page_size = QComboBox()
@@ -427,6 +446,14 @@ class MainWindow(QMainWindow):
         lay.addWidget(box)
         lay.addStretch(1)
         area.setWidget(w)
+        side.addTab(area, "עימוד")
+        # the mouse wheel scrolls the settings, it doesn't change a number or a choice it
+        # happens to pass over (only one that was clicked first)
+        self.wheel_guard = WheelGuard(self)
+        for child in w.findChildren(QWidget):
+            if isinstance(child, (QAbstractSpinBox, QComboBox)):
+                child.setFocusPolicy(Qt.StrongFocus)
+                child.installEventFilter(self.wheel_guard)
 
         self.title.textChanged.connect(self.changed)
         self.main.textChanged.connect(self.changed)
@@ -438,7 +465,7 @@ class MainWindow(QMainWindow):
             c.toggled.connect(self.changed)
         self.ded.textChanged.connect(self.changed)
         self.title_sub.textChanged.connect(self.changed)
-        return area
+        return side
 
     def build_preview(self):
         w = QWidget()
@@ -462,7 +489,31 @@ class MainWindow(QMainWindow):
         self.pages_lay.setSpacing(18)
         self.scroll.setWidget(self.pages_box)
         lay.addWidget(self.scroll, 1)
+        bar = QHBoxLayout()
+        bar.setContentsMargins(8, 6, 8, 8)
+        self.stale_lbl = QLabel("")
+        self.stale_lbl.setStyleSheet("color:#7c3a06;")
+        self.relayout_btn = QPushButton("עימוד מחדש  (F5)")
+        self.relayout_btn.setShortcut("F5")
+        self.relayout_btn.setMinimumHeight(34)
+        self.relayout_btn.clicked.connect(self.request_relayout)
+        bar.addWidget(self.relayout_btn)
+        bar.addWidget(self.stale_lbl, 1)
+        lay.addLayout(bar)
+        self.set_stale(False)
         return w
+
+    def set_stale(self, stale):
+        """Changes not yet laid out: the button stands out until it is pressed."""
+        self.stale = stale
+        self.stale_lbl.setText("יש שינויים שעוד לא עומדו — לחצו על עימוד מחדש" if stale else "")
+        self.relayout_btn.setStyleSheet(
+            "QPushButton { background:#b45309; color:white; font-weight:bold; padding:4px 18px; border-radius:6px; }"
+            if stale else "QPushButton { padding:4px 18px; }")
+
+    def request_relayout(self):
+        self.generation += 1
+        self.relayout()
 
     # ---------------------------------------------------------------- project <-> editor
 
@@ -511,11 +562,49 @@ class MainWindow(QMainWindow):
             return
         self.read_editor()
         self.dirty = True
-        self.update_title()
+        self.edits = getattr(self, "edits", 0) + 1
         self.update_statuses()
         self.save_recovery()
-        self.generation += 1
-        self.timer.start()
+        self.autosave.start()
+        self.set_stale(True)
+
+    def loaded(self):
+        """A project was opened (or started): show it laid out; nothing to save yet."""
+        self.autosave.stop()
+        self.dirty = False
+        self.update_statuses()
+        self.save_recovery()
+        self.update_title()
+        self.request_relayout()
+
+    def my_projects_dir(self):
+        """Where projects without a file of their own are kept (a new one, or a ready one
+        that was changed): a folder in Documents."""
+        docs = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) or os.path.expanduser("~")
+        folder = os.path.join(docs, APP_NAME)
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def save_quietly(self):
+        """Every change is kept: in the project's file, or (for a project that has none yet)
+        in a new file in the projects folder."""
+        if not self.dirty:
+            return
+        if not self.path:
+            name = getattr(self, "copy_name", None) or self.project.get("title") or ""
+            name = re.sub(r'[\\/:*?"<>|]', "", name) or "פרויקט חדש"
+            folder = self.my_projects_dir()
+            path, k = os.path.join(folder, name + ".json"), 2
+            while os.path.exists(path):
+                path, k = os.path.join(folder, f"{name} ({k}).json"), k + 1
+            self.path = path
+        try:
+            model.save_project(self.project, self.path)
+        except OSError:
+            return
+        self.dirty = False
+        self.update_title()
+        self.save_recovery()
 
     def update_statuses(self):
         _, count = model.parse_main(self.project["main"])
@@ -589,6 +678,7 @@ class MainWindow(QMainWindow):
             return
         self.running = True
         gen = self.generation
+        edits = getattr(self, "edits", 0)
         self.info.setText("מעמד…")
         _log("מתחיל לעמד")
 
@@ -613,6 +703,7 @@ class MainWindow(QMainWindow):
             return
         self.running = False
         self.pages = pages
+        self.set_stale(getattr(self, "edits", 0) != edits)
         _log(f"עימוד: {len(pages)} עמודים")
         self.show_pages()
         _log("התצוגה מוכנה")
@@ -675,39 +766,33 @@ class MainWindow(QMainWindow):
             return None
 
     def confirm_discard(self):
-        if not self.dirty:
-            return True
-        r = QMessageBox.question(self, APP_NAME, "יש שינויים שלא נשמרו. לשמור אותם?",
-                                 QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
-        if r == QMessageBox.Save:
-            return self.save()
-        return r == QMessageBox.Discard
+        """Nothing to ask: what was changed is saved before another project is opened."""
+        self.autosave.stop()
+        self.save_quietly()
+        return True
 
     def new_project(self):
         if not self.confirm_discard():
             return
+        self.copy_name = None
         self.project = model.normalize({})
         self.path = None
         self.fill_editor()
-        self.dirty = False
-        self.changed()
-        self.dirty = False
-        self.update_title()
+        self.loaded()
 
     def load_example(self):
         if not self.confirm_discard():
             return
+        self.copy_name = None
         self.project = model.example_project()
         self.path = None
         self.fill_editor()
-        self.changed()
-        self.dirty = False
-        self.update_title()
+        self.loaded()
 
     def open_project(self):
         if not self.confirm_discard():
             return
-        start = self.settings.value("lastDir", "") or self.projects_dir()
+        start = self.settings.value("lastDir", "") or self.my_projects_dir()
         path, _ = QFileDialog.getOpenFileName(self, "פתיחת פרויקט", start, "פרויקט (*.json)")
         if not path:
             return
@@ -722,12 +807,13 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError) as e:
             QMessageBox.warning(self, APP_NAME, f"לא ניתן לפתוח את הקובץ:\n{e}")
             return
-        # a ready project is opened as a copy: saving asks where to keep it
-        self.path = None if os.path.abspath(path).startswith(os.path.abspath(self.projects_dir())) else path
+        # a ready project is opened as a copy: once it is changed, it is kept under the same
+        # name in the projects folder
+        ready = os.path.abspath(path).startswith(os.path.abspath(self.projects_dir()))
+        self.path = None if ready else path
+        self.copy_name = os.path.splitext(os.path.basename(path))[0] if ready else None
         self.fill_editor()
-        self.changed()
-        self.dirty = False
-        self.update_title()
+        self.loaded()
 
     def save(self):
         if not self.path:
@@ -754,6 +840,8 @@ class MainWindow(QMainWindow):
         return self.save()
 
     def export(self):
+        if self.stale and not self.running:
+            self.request_relayout()     # the PDF shows what is in the editor now
         if self.running or not self.pages:
             QMessageBox.information(self, APP_NAME, "העימוד עדיין רץ, נסו שוב בעוד רגע.")
             return
@@ -796,9 +884,7 @@ class MainWindow(QMainWindow):
         self.project = model.load_project(written[0])
         self.path = written[0]
         self.fill_editor()
-        self.changed()
-        self.dirty = False
-        self.update_title()
+        self.loaded()
 
     def show_check(self):
         items, count = model.parse_main(self.project["main"])
@@ -827,7 +913,8 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def closeEvent(self, ev):
-        if self.confirm_discard():
-            ev.accept()
-        else:
-            ev.ignore()
+        # no question on closing: the work is saved, and opens again next time as it was
+        self.autosave.stop()
+        self.save_quietly()
+        self.save_recovery()
+        ev.accept()
