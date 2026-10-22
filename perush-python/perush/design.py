@@ -1241,11 +1241,13 @@ def gate_page(w, h, items, foot_title, foot_lines, pal=GREY, sides=(("אמונת
         p.drawRect(box)
         p.setPen(pen(line, 0.4))
         p.drawRect(box.adjusted(2.5, 2.5, -2.5, -2.5))
-        yy = box.top() + 4
-        for text, size in foot_lines:
-            st = fit(Style(TITLE_FONT, size, True), text, box.width() - 10)
+        # the lines in the middle of the box
+        sts = [fit(Style(TITLE_FONT, size, True), text, box.width() - 10) for text, size in foot_lines]
+        tot = sum(st.size * 1.25 for st in sts)
+        yy = box.center().y() - tot / 2
+        for (text, _), st in zip(foot_lines, sts):
             yy += st.size * 1.25
-            text_c(p, mid, yy, text, st, ink)
+            text_c(p, mid, yy - st.size * 0.3, text, st, ink)
         # the block of lines in the arch
         w_in = 2 * (rx - band) - 30
         ops, y, last_shaded = [], 0.0, 0.0
