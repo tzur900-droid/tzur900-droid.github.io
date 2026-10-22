@@ -30,7 +30,7 @@ SEDARIM = [("זרעים", ["ברכות"]),
            ("טהרות", ["נידה"])]
 SEDER_OF = {m: s for s, ms in SEDARIM for m in ms}
 LO, HI = 300, 500
-COVER = "תכלת"           # the colours of the covers (design.PALETTES)
+COVER = "שמנת"           # the colours of the covers (design.PALETTES)
 
 
 def _init(fonts):
@@ -183,7 +183,7 @@ def assemble(ms, books, page=B5, margin=SIZES["margin"]):
 def cover_page(ms, n_pages, volume, colour=COVER, page=B5):
     """The whole cover of a file (front, spine and back) as one page."""
     from . import design
-    W, H, paint = design.gate_cover(page, n_pages, name_items(ms, 18, rosh=0.78), ["הלכות", "רב אלפס", "div", ("פסקי", 0.8), ("הרא״ש", 0.8)],
+    W, H, paint = design.gate_cover(page, n_pages, name_items(ms, 18, rosh=0.9), ["הלכות", "רב אלפס", "div", ("פסקי", 0.9), ("הרא״ש", 0.9)],
                                     ms, "כרך " + heb(volume), design.PALETTES[colour])
     p = Page(W, H)
     p.paint = [paint]
