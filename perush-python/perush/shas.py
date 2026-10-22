@@ -998,7 +998,7 @@ RIF_FONT = "Drugulin CLM"    # Culmus (GPL); the one face it has is a book weigh
 
 class Book:
     def __init__(self, name, rosh, rif, comm, comm_name, page=(210, 297), margin=14, rosh_size=12, rif_size=11.5,
-                 comm_size=10, head_size=9):
+                 comm_size=10, head_size=9, rif_lead=1.34):
         self.name = name
         self.rosh, self.rif, self.comm, self.comm_name = rosh, rif, comm, comm_name
         self.pw, self.ph = page[0] * PT_PER_MM, page[1] * PT_PER_MM
@@ -1015,7 +1015,7 @@ class Book:
         self.st_rif = Style(RIF_FONT, rif_size)
         self.st_comm = Style("Frank Ruhl Libre", comm_size)
         self.lh_rosh = rosh_size * 1.45
-        self.lh_rif = rif_size * 1.34
+        self.lh_rif = rif_size * rif_lead     # the Rif's lines: its size times rif_lead
         self.lh_comm = comm_size * 1.26
         self.head_style = Style("Frank Ruhl Libre", head_size)
         self.cw = self.W * 0.25            # a commentary column beside the Rif
