@@ -1472,7 +1472,10 @@ class Book:
 
     def full(self, q):
         if q["mode"] == "long":
-            return True
+            # the Rif ends at the bottom, or high enough for the commentary to go on under
+            # it; not a line or two above the bottom with nothing under it
+            rest = self.H - q["th"]
+            return rest < 0.6 * self.lh_rif or rest >= self.vgap + 2 * self.lh_comm
         if q["mode"] == "short":
             return self.H - q["total"] < 1.5 * self.lh_rif
         return self.H - q["total"] < 2 * self.lh_comm
@@ -1489,7 +1492,7 @@ class Book:
         if b2 <= r["a"]:
             return r
         r2 = self.compose(r["a"], b2, r["cptr"])
-        if r2["fits"] and (r2["mode"] == "long" or self.H - r2["total"] < self.lh_rif * 1.5):
+        if r2["fits"] and (self.full(r2) if r2["mode"] == "long" else self.H - r2["total"] < self.lh_rif * 1.5):
             return r2
         return r
 
@@ -1542,12 +1545,28 @@ class Book:
             for c in r["cols"]:
                 stretch([l for l in c if l.y >= T - EPS], hc, self.lh_comm * 1.5)
             if not last:
-                stretch(r["text"], self.H, self.lh_rif * 0.25 * max(1, len(r["text"])))
-        else:
-            for c in r["cols"]:
-                open_under(c, r["total"] if last else self.H, self.lh_comm * 0.3 * max(1, len(c)))
+                self.open_page(r, T)
+        elif not last:
+            self.open_page(r, T)
         r["kind"] = "rif"
         return r
+
+    def open_page(self, r, T, most=0.08):
+        """A page that ends a little above the bottom: everything under the top block
+        (the Rif and the commentary beside and under it) opens evenly to the bottom, so
+        that the Rif and the commentary stay as they were with each other."""
+        lines = [l for l in r["text"]] + [l for c in r["cols"] for l in c if l.y >= T - EPS]
+        if not lines:
+            return
+        bottom = max(l.y + l.h for l in lines)
+        if bottom <= T + EPS or bottom >= self.H - EPS:
+            return
+        f = (self.H - T) / (bottom - T)
+        if f - 1 > most:
+            return
+        for l in lines:
+            l.y = T + (l.y - T) * f
+            l.h *= f
 
     # -------------------------------------------------- pages
     def render(self, rosh_pages, rif_pages, xref, title_rosh, title_rif, first=1):
