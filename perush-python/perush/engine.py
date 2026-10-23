@@ -44,6 +44,7 @@ class Frame:
     lines: list
     x_right: float
     top: float
+    src: object = None   # where the lines come from: ("main", items) or ("comm", c), for clicks on the page
 
 
 @dataclass
@@ -161,7 +162,8 @@ class Engine:
                 else:
                     for k, r in enumerate(raws):
                         # the verse's letter only before its first passage, not before each one
-                        st.append({"v": v, "label": f"({labels[v]})" if k == 0 else "", "tokens": entry_tokens(r), "note": True})
+                        st.append({"v": v, "label": f"({labels[v]})" if k == 0 else "", "tokens": entry_tokens(r), "note": True,
+                                   "p": k})
             self.streams[i], self.first_idx[i] = st, first
         self.ptrs = {i: (0, 0) for i in self.streams}
         self.sec_end = {}
@@ -209,6 +211,11 @@ class Engine:
                 mt = 1 * PT_PER_MM if it["noComm"] else 0.0
                 specs.append(Spec(hw, st, st.size * self.lh_k, "center", mt, 0.6 * PT_PER_MM if it["noComm"] else 0.0, kind="h"))
                 continue
+            if it.get("aliyah") and frm == 0:
+                # the aliyah, small and bold, inside the text before its first verse
+                ast = self.main.scaled(0.68, bold=True)
+                t = f"({it['aliyah']})"
+                para.append(Word(t, ast, width(ast, t), ("l", i), glue=True))
             if P["numbers"] and frm == 0:
                 para.append(Word(it["label"], bold, width(bold, it["label"]), ("l", i)))
             para.extend(words_of(it["words"][frm:to], self.main, lambda k, i=i, frm=frm: (i, frm + k)))
@@ -840,13 +847,31 @@ class Engine:
         for n, (r, chapter, parasha) in enumerate(self.pages):
             pages.append(self.finalize(r, chapter, parasha, heb(first + n), n))
         if self.P.get("titlePage"):
-            pages = self.title_pages() + pages
+            pages = self.title_pages(self.contents(pages, first)) + pages
         return pages
 
-    def title_pages(self):
-        """The title page (and, in book form, the blank page behind it, so that the text
-        still begins on a left-hand page)."""
-        from .titlepage import blank_page, title_page, with_list
+    def contents(self, pages, first):
+        """(heading, page number, level) of the parashot and haftarot, for the table of
+        contents — when the book has more than one parasha."""
+        out = []
+        for n, pg in enumerate(pages):
+            for fr in pg.frames:
+                for l in fr.lines:
+                    if getattr(l, "kind", "") != "h":
+                        continue
+                    t = " ".join(w.text for w in l.words)
+                    if t.startswith("פרשת"):
+                        out.append((t, heb(first + n), 0))
+                    elif t.startswith("הפטרת"):
+                        out.append((t, heb(first + n), 1))
+        if sum(1 for e in out if e[2] == 0) < 2 or not self.P.get("toc", True):
+            return []
+        return out
+
+    def title_pages(self, contents=()):
+        """The title page, and behind it the table of contents (or, in book form without one,
+        a blank page, so that the text still begins on a left-hand page)."""
+        from .titlepage import blank_page, title_page, toc_page, with_list
         P = self.P
         lines = []
         parashot = [it["text"] for it in self.all_items if it["type"] == "h" and not it["noComm"]
@@ -865,7 +890,10 @@ class Engine:
         if sub:
             lines.append(sub)
         out = [title_page(self.page_w, self.page_h, self.m, P["mainFont"], P["title"] or "", lines, self.ded_lines)]
-        if P.get("bookMode"):
+        if contents:
+            # the back of the title page is a right-hand page: the binding is on its left
+            out.append(toc_page(self.page_w, self.page_h, self.m, P["mainFont"], contents, self.gutter))
+        elif P.get("bookMode"):
             out.append(blank_page(self.page_w, self.page_h))
         return out
 
@@ -918,7 +946,7 @@ class Engine:
                 budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM
                 lines, h, end, done = self.fill_plain(next_plain, self.plain_start, budget)
                 if lines:
-                    best["post"] = {"lines": lines, "h": h, "mt": self.sgap + 3 * PT_PER_MM}
+                    best["post"] = {"lines": lines, "h": h, "mt": self.sgap + 3 * PT_PER_MM, "items": next_plain}
                     self.plain_start = end
                     best["post"]["done"] = done
             # something follows on the next page (a haftara, the next parasha): no reason to
@@ -940,6 +968,7 @@ class Engine:
             if (last and post and post.get("done") and getattr(self, "comm_after_plain", False)
                     and spare > self.room_for_section()):
                 # the haftara ends on this page too: the next parasha starts under it
+                best["items"] = self.items
                 self.pre = {"r": best, "h": self.total_h(best) - self.head_h, "chapter": chapter, "parasha": parasha}
                 self.ptrs.update(best["ptrs"])
                 break
@@ -947,6 +976,7 @@ class Engine:
                 # the next parasha doesn't fit under the haftara: spread the room over the
                 # lines of the whole page (text, commentaries and haftara)
                 self.spread_page(best)
+            best["items"] = self.items
             self.pages.append((best, chapter, parasha))
             pre = None
             stuck = best["b"] == pos and all(best["ptrs"].get(c) == p for c, p in self.ptrs.items())
@@ -1176,13 +1206,13 @@ class Engine:
             spare = budget - h
             if done and next_sec and not next_sec["noComm"] and spare > self.room_for_section():
                 # the commented text continues under the end of the haftara on this page
-                self.pre = {"lines": lines, "h": h, "chapter": it["chapter"], "parasha": it["parasha"]}
+                self.pre = {"lines": lines, "h": h, "chapter": it["chapter"], "parasha": it["parasha"], "items": lst}
                 break
             if not done or next_sec:
                 n_lines = len([l for l in lines if l.kind == "p"])
                 h = self.stretch_lines(lines, spare, max(self.main_lh * 3, n_lines * self.main_lh * 0.3))
             r = {"a": frm, "b": end, "at_end": True, "pre": None, "ptrs": {}, "side": {}, "sections": [],
-                 "post": {"lines": lines, "h": h, "mt": 0.0}, "text": [], "text_h": 0.0, "top_h": 0.0}
+                 "post": {"lines": lines, "h": h, "mt": 0.0, "items": lst}, "text": [], "text_h": 0.0, "top_h": 0.0}
             self.pages.append((r, it["chapter"], it["parasha"]))
 
     # ------------------------------------------------------------ to absolute coordinates
@@ -1205,10 +1235,10 @@ class Engine:
             pre = None
         if pre:
             restack(pre["lines"])
-            page.frames.append(Frame(pre["lines"], R, y))
+            page.frames.append(Frame(pre["lines"], R, y, ("main", pre.get("items"))))
             y += pre["h"] + self.sgap + 3 * PT_PER_MM
         if r["text"] or r["side"]:
-            page.frames.append(Frame(r["text"], R, y))
+            page.frames.append(Frame(r["text"], R, y, ("main", r.get("items"))))
             off_r = off_l = 0.0
             for c in self.sides:
                 s = r["side"].get(c)
@@ -1233,7 +1263,7 @@ class Engine:
                     else:
                         x = L + off_l + cw
                         off_l += cw + self.gap
-                    page.frames.append(Frame(lines, x, y))
+                    page.frames.append(Frame(lines, x, y, ("comm", c)))
             band_y = y + max([r["text_h"]] + [s["h"] for s in r["side"].values()])
             for c in self.sides:
                 s = r["side"].get(c)
@@ -1243,7 +1273,7 @@ class Engine:
                     for l in s["band"]:
                         l.y = yy
                         yy += l.h
-                    page.frames.append(Frame(s["band"], R, band_y))
+                    page.frames.append(Frame(s["band"], R, band_y, ("comm", c)))
                     band_y += yy
             y += r["top_h"]
         if r["sections"]:
@@ -1267,12 +1297,12 @@ class Engine:
                         l.y = j * s["nlh"]
                         l.h = s["nlh"]
                     if chunk:
-                        page.frames.append(Frame(chunk, R - k * (cw + self.gap), y0 + th))
+                        page.frames.append(Frame(chunk, R - k * (cw + self.gap), y0 + th, ("comm", c)))
                 y += s["h"]
         if r.get("post"):
             y += r["post"]["mt"]
             restack(r["post"]["lines"])
-            page.frames.append(Frame(r["post"]["lines"], R, y))
+            page.frames.append(Frame(r["post"]["lines"], R, y, ("main", r["post"].get("items"))))
             y += r["post"]["h"]
         return y
 
@@ -1317,12 +1347,47 @@ class Engine:
                 lines.extend(ln)
             page.frames.append(Frame(lines, R, T + self.body_h - len(self.ded_lines) * self.ded_lh))
         self.finalizing = None
+        page.links = self.links(page)
         if self.gutter and index % 2 == 0:
             # a left-hand page: its inner side, the binding, is on the right
             for fr in page.frames:
                 fr.x_right -= self.gutter
             page.rules = [(x1 - self.gutter, y, x2 - self.gutter) for x1, y, x2 in page.rules]
+            page.links = [(x1 - self.gutter, y1, x2 - self.gutter, y2, to) for x1, y1, x2, y2, to in page.links]
         return page
+
+    def links(self, page):
+        """Where a click on each line of the page leads: (x1, y1, x2, y2, target), target
+        ('main', line number) or ('comm', commentary, verse, passage)."""
+        out = []
+        for fr in page.frames:
+            if not fr.src:
+                continue
+            for l in fr.lines:
+                to = None
+                for w in l.words:
+                    ref = w.ref
+                    if not isinstance(ref, tuple) or len(ref) != 2:
+                        continue
+                    if fr.src[0] == "main":
+                        items = fr.src[1]
+                        i = ref[1] if ref[0] in ("l", "h") else ref[0]
+                        if items and isinstance(i, int) and 0 <= i < len(items) and "line" in items[i]:
+                            to = ("main", items[i]["line"])
+                            break
+                    else:
+                        c = fr.src[1]
+                        j = ref[1] if ref[0] == "L" else ref[0]
+                        st = self.streams.get(c, [])
+                        if isinstance(j, int) and 0 <= j < len(st):
+                            e = st[j]
+                            to = ("comm", c, e["v"], e.get("p", 0))
+                            break
+                if to:
+                    right = fr.x_right - l.right
+                    top = fr.top + l.y
+                    out.append((right - l.width, top, right, top + l.h, to))
+        return out
 
 
 def layout_project(project, progress=None):

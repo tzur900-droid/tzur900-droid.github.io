@@ -1,0 +1,59 @@
+# Builds the program as a Windows app (Perush.exe, no Python needed) on every change to it,
+# and puts it on the release "exe": .../releases/download/exe/Perush-windows.zip
+name: build exe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "perush-python/**"
+      - ".github/workflows/build-exe.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r perush-python/requirements.txt pyinstaller
+
+      - name: Build
+        working-directory: perush-python
+        run: >
+          pyinstaller --noconfirm --windowed --name Perush
+          --add-data "fonts;fonts" --add-data "projects;projects"
+          --exclude-module tkinter
+          main.py
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          Copy-Item perush-python/README.md perush-python/dist/Perush/
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory("perush-python/dist/Perush", "Perush-windows.zip", [System.IO.Compression.CompressionLevel]::Optimal, $true, [System.Text.Encoding]::UTF8)
+
+      - name: Smoke test (the exe starts and lays out a project to PDF)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "perush-python/dist/Perush/Perush.exe" -ArgumentList '"perush-python/projects/ויקרא/ויקרא 01 - פרשת ויקרא.json"', "test.pdf" -Wait -PassThru
+          if (!(Test-Path test.pdf)) { throw "the exe did not make a PDF" }
+          Get-Item test.pdf | Format-List Name, Length
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view exe >/dev/null 2>&1 || gh release create exe --title "עימוד פירושים לווינדוס" --notes "Perush-windows.zip: מחלצים ומפעילים את Perush.exe. לא צריך להתקין Python."
+          gh release upload exe Perush-windows.zip --clobber

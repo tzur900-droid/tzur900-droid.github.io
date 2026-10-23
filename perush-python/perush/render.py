@@ -1,6 +1,6 @@
 """Drawing laid-out pages: on screen (preview images) and into a PDF file."""
-from PySide6.QtCore import QMarginsF, QPointF, QSizeF, Qt
-from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen
+from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt
+from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen, QPolygonF
 
 from .textlayout import PT_PER_MM, metrics, qfont, space
 
@@ -49,6 +49,28 @@ def draw_page(p, page):
         if left:
             p.setFont(qfont(bold))
             p.drawText(QPointF(m, base), left)
+    for shape in getattr(page, "shapes", []):
+        # ornaments (the title page's frame)
+        kind = shape[0]
+        if kind == "rect":
+            _, x, y, w, h, lw = shape
+            pen = QPen(QColor("black"))
+            pen.setWidthF(lw)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(QRectF(x, y, w, h))
+        elif kind == "line":
+            _, x1, y1, x2, y2, lw = shape
+            pen = QPen(QColor("black"))
+            pen.setWidthF(lw)
+            p.setPen(pen)
+            p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+        elif kind == "diamond":
+            _, cx, cy, r = shape
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("black"))
+            p.drawPolygon(QPolygonF([QPointF(cx, cy - r), QPointF(cx + r, cy), QPointF(cx, cy + r), QPointF(cx - r, cy)]))
+            p.setBrush(Qt.NoBrush)
     pen = QPen(QColor("black"))
     pen.setWidthF(0.6)
     p.setPen(pen)

@@ -91,6 +91,7 @@ class Word:
     style: Style
     w: float
     ref: object = None  # where the word comes from (for following positions in the text)
+    glue: bool = False  # never the last word of a line (it belongs with the word after it)
 
 
 def words_of(tokens, base, ref=None):
@@ -135,6 +136,10 @@ def break_lines(words, base, lh, width_at, y0=0.0, align="justify", tight=1.0):
             nat += sp + words[j].w
             cur.append(words[j])
             j += 1
+        while j < n and len(cur) > 1 and cur[-1].glue:
+            # a word that belongs with the next one goes down with it
+            j -= 1
+            nat -= sp + cur.pop().w
         lines.append(Line(cur, right, w, nat, lh, base, align, j >= n, y))
         y += lh
         i = j

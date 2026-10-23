@@ -63,6 +63,7 @@ DEFAULTS = {
     "dedication": DEDICATION,
     "titlePage": True,       # a title page at the start: the name of the book, what is in it, the dedication
     "titleSub": "",          # the line under the name on the title page ("" = made from the commentaries)
+    "toc": True,             # a table of contents behind the title page (a book of more than one parasha)
     "gutter": 7,             # extra margin on the inner side, for the binding (mm; book form only)
 }
 
@@ -219,7 +220,7 @@ def parse_main(text):
     chapter = ""
     parasha = ""
     no_comm = False
-    for line in text.replace("\r", "").split("\n"):
+    for line_no, line in enumerate(text.replace("\r", "").split("\n")):
         t = line.strip()
         if not t:
             continue
@@ -231,7 +232,8 @@ def parse_main(text):
             if not no_comm and re.match(r"^פרש(ת|ה)\s", chapter):
                 parasha = chapter
             in_chap = 0
-            items.append({"type": "h", "text": chapter, "chapter": chapter, "parasha": parasha, "noComm": no_comm})
+            items.append({"type": "h", "text": chapter, "chapter": chapter, "parasha": parasha, "noComm": no_comm,
+                          "line": line_no})
             continue
         in_chap += 1
         label = heb(in_chap)
@@ -239,9 +241,14 @@ def parse_main(text):
         m = re.match(r"^\[([^\]]{1,12})\]\s*(.*)$", t)
         if m:
             label, body = m.group(1), m.group(2)
+        # '{שני}' at the start of a verse: the aliyah that begins with it
+        aliyah = ""
+        m = re.match(r"^\{([^}]{1,14})\}\s*(.*)$", body)
+        if m:
+            aliyah, body = m.group(1).strip(), m.group(2)
         items.append({
-            "type": "v", "idx": -1 if no_comm else verses, "label": label, "words": tokenize(body),
-            "plain": body, "chapter": chapter, "parasha": parasha, "noComm": no_comm,
+            "type": "v", "idx": -1 if no_comm else verses, "label": label, "words": tokenize(body), "aliyah": aliyah,
+            "plain": body, "chapter": chapter, "parasha": parasha, "noComm": no_comm, "line": line_no,
         })
         if not no_comm:
             verses += 1

@@ -52,6 +52,10 @@ def on_error(kind, value, tb):
 
 def main():
     sys.excepthook = on_error
+    if sys.stdout is None:          # the exe without a console: printed messages go nowhere
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
     log(f"התחלה · Python {sys.version.split()[0]} · {sys.platform} · {base_dir()}")
     app = QApplication(sys.argv)
     import PySide6

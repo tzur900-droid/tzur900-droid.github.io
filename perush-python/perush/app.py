@@ -6,7 +6,8 @@ import os
 import sys
 
 from PySide6.QtCore import QEvent, QObject, QSettings, QStandardPaths, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPixmap
+from PySide6.QtGui import (QAction, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPixmap, QShortcut,
+                           QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -164,6 +165,20 @@ class CommEditor(QWidget):
             self.status.setStyleSheet("color:#15803d;")
 
 
+class PageLabel(QLabel):
+    """A page in the preview: a click on a line opens its source in the editor."""
+
+    def __init__(self, window, index, px_per_pt):
+        super().__init__()
+        self.window, self.index, self.k = window, index, px_per_pt
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("לחיצה על שורה פותחת אותה בעורך")
+
+    def mousePressEvent(self, ev):
+        pos = ev.position() if hasattr(ev, "position") else ev.pos()
+        self.window.page_clicked(self.index, (pos.x() - 1) / self.k, (pos.y() - 1) / self.k)
+
+
 class WheelGuard(QObject):
     """A spin box or list passed over by the mouse wheel ignores it (the page scrolls)
     unless it has been clicked."""
@@ -252,6 +267,19 @@ class MainWindow(QMainWindow):
         self.zoom_box.setCurrentIndex(2)
         self.zoom_box.currentIndexChanged.connect(self.set_zoom)
         tb.addWidget(self.zoom_box)
+        tb.addWidget(QLabel("  עמוד: "))
+        self.page_no = QSpinBox()
+        self.page_no.setRange(1, 9999)
+        self.page_no.setToolTip("מעבר לעמוד בתצוגה (לפי הסדר, מהעמוד הראשון)")
+        self.page_no.editingFinished.connect(self.go_to_page)
+        tb.addWidget(self.page_no)
+        tb.addSeparator()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("חיפוש בטקסט… (Enter)")
+        self.search.setMaximumWidth(190)
+        self.search.returnPressed.connect(self.find_text)
+        tb.addWidget(self.search)
+        QShortcut(QKeySequence.Find, self, lambda: (self.search.setFocus(), self.search.selectAll()))
         tb.addSeparator()
         act("עדכון תוכנה", self.update_program)
 
@@ -259,8 +287,11 @@ class MainWindow(QMainWindow):
         """Download the latest version from the site and install it over this one."""
         from . import updater
         if updater.frozen():
-            QMessageBox.information(self, APP_NAME, "בגרסה הזאת מעדכנים כך: מורידים מהאתר את perush-python.zip "
-                                    "ומחלצים אותו על תיקיית התוכנה.")
+            url = "https://github.com/tzur900-droid/tzur900-droid.github.io/releases/download/exe/Perush-windows.zip"
+            if QMessageBox.question(self, APP_NAME, "בגרסת ה־exe מעדכנים כך: מורידים את הקובץ Perush-windows.zip "
+                                    "ומחלצים אותו במקום התיקייה הקיימת (הפרויקטים שלך במסמכים לא נוגעים).\n\n"
+                                    "לפתוח את ההורדה עכשיו?") == QMessageBox.Yes:
+                QDesktopServices.openUrl(QUrl(url))
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
@@ -334,6 +365,7 @@ class MainWindow(QMainWindow):
         """The editing side, in three tabs: each editor gets the full height and scrolls on
         its own, instead of boxes inside one long scrolling page."""
         side = QTabWidget()
+        self.side = side
         side.setDocumentMode(True)
         side.setStyleSheet("QTabBar::tab { padding:6px 14px; font-size:13px; }")
 
@@ -832,11 +864,111 @@ class MainWindow(QMainWindow):
             img = page_image(page, px_per_pt)
             pm = QPixmap.fromImage(img)
             pm.setDevicePixelRatio(ratio)
-            lbl = QLabel()
+            lbl = PageLabel(self, n, self.zoom * 96 / 72)
             lbl.setPixmap(pm)
             lbl.setFrameShape(QFrame.Box)
             lbl.setStyleSheet("background:white; border:1px solid #c9c4b8;")
             self.pages_lay.addWidget(lbl, 0, Qt.AlignHCenter)
+
+    def page_clicked(self, n, x, y):
+        """A click on the preview: open the line under it in the editor."""
+        if not (0 <= n < len(self.pages)):
+            return
+        hit = None
+        for x1, y1, x2, y2, to in getattr(self.pages[n], "links", []):
+            if x1 - 2 <= x <= x2 + 2 and y1 <= y <= y2:
+                hit = to
+                break
+        if hit is None:
+            return
+        if hit[0] == "main":
+            self.side.setCurrentIndex(0)
+            self.select_line(self.main, hit[1])
+        else:
+            _, c, v, k = hit
+            if c >= self.tabs.count():
+                return
+            self.side.setCurrentIndex(1)
+            self.tabs.setCurrentIndex(c)
+            edit = self.tabs.widget(c).text
+            self.select_line(edit, self.comm_line(edit.toPlainText(), v, k))
+
+    @staticmethod
+    def comm_line(text, v, k):
+        """The line of a commentary's text that holds passage k of verse v (from 0): by
+        reference ('@N'), or by order (line N)."""
+        lines = text.replace("\r", "").split("\n")
+        if not any(re.match(r"^\s*@\s*\d+", l) for l in lines):
+            rows = [i for i, l in enumerate(lines) if not l.strip().startswith("#")]
+            return rows[v] if v < len(rows) else 0
+        cur, found = -1, []
+        for i, l in enumerate(lines):
+            m = re.match(r"^\s*@\s*(\d+)", l)
+            if m:
+                cur = int(m.group(1)) - 1
+            if cur == v and l.strip() and not re.match(r"^\s*@\s*\d+\s*$", l):
+                found.append(i)
+        if not found:
+            return 0
+        return found[min(k, len(found) - 1)]
+
+    def select_line(self, edit, line):
+        block = edit.document().findBlockByNumber(max(0, line))
+        cur = edit.textCursor()
+        cur.setPosition(block.position())
+        cur.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        edit.setTextCursor(cur)
+        edit.centerCursor()
+        edit.setFocus()
+
+    def find_text(self, backward=False):
+        """Find the next place (in the editor that is open) with what is in the search box."""
+        word = self.search.text()
+        if not word:
+            return
+        if self.side.currentIndex() == 1 and self.tabs.count():
+            edit = self.tabs.currentWidget().text
+        else:
+            self.side.setCurrentIndex(0)
+            edit = self.main
+        # vowels and cantillation marks don't count: "קרבן" finds "קׇרְבָּנוֹ"
+        text = edit.toPlainText()
+        marks = re.compile("[\u0591-\u05C7]")
+        plain, where = [], []
+        for i, ch in enumerate(text):
+            if not marks.match(ch):
+                plain.append(ch)
+                where.append(i)
+        plain = "".join(plain)
+        needle = marks.sub("", word)
+        if not needle:
+            return
+        cur = edit.textCursor()
+        here = cur.selectionStart() if backward else cur.selectionEnd()
+        pos = next((k for k, i in enumerate(where) if i >= here), len(where))
+        k = plain.rfind(needle, 0, max(0, pos - 1) + len(needle) - 1) if backward else plain.find(needle, pos)
+        if k < 0:
+            k = plain.rfind(needle) if backward else plain.find(needle)      # from the other end
+        if k < 0:
+            self.info.setText(f"\"{word}\" לא נמצא")
+            return
+        start = where[k]
+        end = where[k + len(needle) - 1] + 1
+        while end < len(text) and marks.match(text[end]):
+            end += 1                     # the marks on the last letter go with it
+        cur.setPosition(start)
+        cur.setPosition(end, QTextCursor.KeepAnchor)
+        edit.setTextCursor(cur)
+        edit.centerCursor()
+        edit.setFocus()
+
+    def go_to_page(self):
+        n = self.page_no.value() - 1
+        if 0 <= n < self.pages_lay.count():
+            w = self.pages_lay.itemAt(n).widget()
+            if w:
+                self.scroll.ensureWidgetVisible(w, 0, 0)
+                self.scroll.verticalScrollBar().setValue(w.y())
 
     def set_zoom(self):
         self.zoom = self.zoom_box.currentData()
@@ -944,20 +1076,49 @@ class MainWindow(QMainWindow):
         if self.running or not self.pages:
             QMessageBox.information(self, APP_NAME, "העימוד עדיין רץ, נסו שוב בעוד רגע.")
             return
+        from PySide6.QtWidgets import QInputDialog
+        rng, ok = QInputDialog.getText(
+            self, "ייצוא PDF", f"אילו עמודים? (ריק = כל {len(self.pages)} העמודים; למשל 1-20 או 5,8,10-12 — לפי הסדר בתצוגה)")
+        if not ok:
+            return
+        chosen = self.page_range(rng, len(self.pages))
+        if chosen is None:
+            QMessageBox.warning(self, APP_NAME, "לא הבנתי את טווח העמודים. כתבו למשל 1-20 או 5,8,10-12.")
+            return
         base = os.path.splitext(self.path)[0] if self.path else os.path.join(self.settings.value("lastDir", ""), self.project["title"] or "עימוד")
+        if len(chosen) < len(self.pages):
+            base += f" (עמודים {rng.strip()})"
         path, _ = QFileDialog.getSaveFileName(self, "ייצוא PDF", base + ".pdf", "PDF (*.pdf)")
         if not path:
             return
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
         try:
-            export_pdf(self.pages, path, self.project["title"])
+            export_pdf([self.pages[i] for i in chosen], path, self.project["title"])
         except Exception as e:
             QMessageBox.warning(self, APP_NAME, f"הייצוא נכשל:\n{e}")
             return
         self.settings.setValue("lastDir", os.path.dirname(path))
         if QMessageBox.question(self, APP_NAME, f"נשמר: {path}\n\nלפתוח את הקובץ?") == QMessageBox.Yes:
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    @staticmethod
+    def page_range(text, n):
+        """'1-20' / '5,8,10-12' / '' -> page indices (from 0), or None if it can't be read."""
+        text = text.strip().replace(" ", "")
+        if not text:
+            return list(range(n))
+        out = []
+        for part in text.split(","):
+            m = re.match(r"^(\d+)(?:-(\d+))?$", part)
+            if not m:
+                return None
+            a = int(m.group(1))
+            b = int(m.group(2) or a)
+            if a > b:
+                a, b = b, a
+            out.extend(i - 1 for i in range(a, b + 1) if 1 <= i <= n)
+        return sorted(set(out)) or None
 
     def import_sefaria(self):
         from .sefaria import convert
