@@ -231,6 +231,8 @@ def parse_main(text):
             chapter = t.lstrip("#").strip()
             if not no_comm and re.match(r"^פרש(ת|ה)\s", chapter):
                 parasha = chapter
+            elif no_comm and chapter.startswith("הפטרות "):
+                parasha = chapter      # the haftarot of the festivals at the end of a book
             in_chap = 0
             items.append({"type": "h", "text": chapter, "chapter": chapter, "parasha": parasha, "noComm": no_comm,
                           "line": line_no})

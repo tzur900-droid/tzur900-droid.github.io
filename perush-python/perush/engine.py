@@ -869,7 +869,7 @@ class Engine:
                     if getattr(l, "kind", "") != "h":
                         continue
                     t = " ".join(w.text for w in l.words)
-                    if t.startswith("פרשת"):
+                    if t.startswith("פרשת") or t.startswith("הפטרות"):
                         out.append((t, heb(first + n), 0))
                     elif t.startswith("הפטרת"):
                         out.append((t, heb(first + n), 1))
@@ -965,7 +965,12 @@ class Engine:
             if best.get("post") and not best["post"].get("done", True):
                 # the haftara starts under the parasha and continues: fill the page to the bottom
                 spare = self.contentH - self.total_h(best)
-                best["post"]["h"] = self.stretch_lines(best["post"]["lines"], spare, self.main_lh * 3)
+                if spare <= self.main_lh * 3:
+                    best["post"]["h"] = self.stretch_lines(best["post"]["lines"], spare, self.main_lh * 3)
+                else:
+                    # the haftara stops before headings that don't fit (the next haftara's):
+                    # spread the room over the lines of the whole page
+                    self.spread_page(best)
             best["col_w"] = dict(self.col_w)
             self.col_w = base
             first = self.items[min(pos[0], len(self.items) - 1)]

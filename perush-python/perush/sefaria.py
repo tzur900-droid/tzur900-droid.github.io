@@ -167,6 +167,54 @@ HAFTAROT_SEFARAD = {
     "וזאת הברכה": ("end", "יהושע", 1, 9),
 }
 
+# The haftarot of the festivals and special Shabbatot, printed at the end of the book their
+# Torah reading comes from: book -> [(title, parts, marks)]. marks: (book, chapter, verse) ->
+# (before / after, note), where the Sephardi custom (or the Ashkenazi one) begins or ends.
+SPECIAL_TITLE = "הפטרות לשבתות מיוחדות ולמועדים"
+SPECIAL_HAFTAROT = {
+    "בראשית": [
+        ("הפטרת יום ראשון של ראש השנה", [("שמואל א", 1, 1, 2, 10)], {}),
+        ("הפטרת יום שני של ראש השנה", [("ירמיהו", 31, 1, 31, 19)], {}),
+    ],
+    "שמות": [
+        ("הפטרת פרשת שקלים", [("מלכים ב", 11, 17, 12, 17)], {("מלכים ב", 12, 1): ("before", "(כאן מתחילים האשכנזים)")}),
+        ("הפטרת פרשת החודש", [("יחזקאל", 45, 16, 46, 18)], {("יחזקאל", 45, 18): ("before", "(כאן מתחילים הספרדים)"),
+                                                          ("יחזקאל", 46, 15): ("after", "(כאן מסיימים הספרדים)")}),
+        ("הפטרת שבת הגדול", [("מלאכי", 3, 4, 3, 24)], {("מלאכי", 3, 24): ("after", "(וחוזרים על פסוק כג)")}),
+        ("הפטרת יום ראשון של פסח", [("יהושע", 3, 5, 3, 7), ("יהושע", 5, 2, 6, 1), ("יהושע", 6, 27, 6, 27)],
+         {("יהושע", 5, 2): ("before", "(כאן מתחילים הספרדים)")}),
+        ("הפטרת שבת חול המועד פסח", [("יחזקאל", 36, 37, 37, 14)], {("יחזקאל", 37, 1): ("before", "(כאן מתחילים האשכנזים)")}),
+        ("הפטרת שביעי של פסח", [("שמואל ב", 22, 1, 22, 51)], {}),
+        ("הפטרת יום ראשון של שבועות", [("יחזקאל", 1, 1, 1, 28), ("יחזקאל", 3, 12, 3, 12)], {}),
+        ("הפטרת שבת חול המועד סוכות", [("יחזקאל", 38, 18, 39, 16)], {}),
+        ("הפטרת מנחה של תענית ציבור", [("ישעיהו", 55, 6, 56, 8)], {}),
+    ],
+    "ויקרא": [
+        ("הפטרת יום שני של פסח", [("מלכים ב", 23, 1, 23, 9), ("מלכים ב", 23, 21, 23, 25)], {}),
+        ("הפטרת שחרית של יום הכיפורים", [("ישעיהו", 57, 14, 58, 14)], {}),
+        ("הפטרת מנחה של יום הכיפורים", [("יונה", 1, 1, 4, 11), ("מיכה", 7, 18, 7, 20)], {}),
+        ("הפטרת יום ראשון של סוכות", [("זכריה", 14, 1, 14, 21)], {}),
+        ("הפטרת יום שני של סוכות", [("מלכים א", 8, 2, 8, 21)], {}),
+    ],
+    "במדבר": [
+        ("הפטרת שבת ראש חודש", [("ישעיהו", 66, 1, 66, 24)], {("ישעיהו", 66, 24): ("after", "(וחוזרים על פסוק כג)")}),
+        ("הפטרת שבת ערב ראש חודש (מחר חודש)", [("שמואל א", 20, 18, 20, 42)], {}),
+        ("הפטרת פרשת פרה", [("יחזקאל", 36, 16, 36, 38)], {("יחזקאל", 36, 36): ("after", "(כאן מסיימים הספרדים)")}),
+        ("הפטרת שבת חנוכה", [("זכריה", 2, 14, 4, 7)], {}),
+        ("הפטרת שבת שנייה של חנוכה", [("מלכים א", 7, 40, 7, 50)], {}),
+    ],
+    "דברים": [
+        ("הפטרת פרשת זכור", [("שמואל א", 15, 1, 15, 34)], {("שמואל א", 15, 2): ("before", "(כאן מתחילים האשכנזים)")}),
+        ("הפטרת שמיני של פסח", [("ישעיהו", 10, 32, 12, 6)], {}),
+        ("הפטרת יום שני של שבועות", [("חבקוק", 2, 20, 3, 19)], {("חבקוק", 3, 1): ("before", "(כאן מתחילים הספרדים)")}),
+        ("הפטרת שחרית של תשעה באב", [("ירמיהו", 8, 13, 9, 23)], {}),
+        ("הפטרת שבת שובה", [("הושע", 14, 2, 14, 10), ("יואל", 2, 15, 2, 27), ("מיכה", 7, 18, 7, 20)],
+         {("יואל", 2, 15): ("before", "(האשכנזים ממשיכים כאן; הספרדים מדלגים לפסוקי מיכה)"),
+          ("מיכה", 7, 18): ("before", "(כאן ממשיכים הספרדים)")}),
+        ("הפטרת שמיני עצרת", [("מלכים א", 8, 54, 8, 66)], {}),
+    ],
+}
+
 NAVI = {"ישעיהו", "ירמיהו", "יחזקאל", "שמואל א", "שמואל ב", "מלכים א", "מלכים ב", "יהושע", "שופטים", "הושע", "יואל",
         "עמוס", "עובדיה", "יונה", "מיכה", "נחום", "חבקוק", "צפניה", "חגי", "זכריה", "מלאכי"}
 
@@ -322,17 +370,22 @@ def parse_navi(lines):
     return out
 
 
-def haftara_part(title, parts, navi, end_mark=None, start_mark=None):
+def haftara_part(title, parts, navi, end_mark=None, start_mark=None, marks=None, level="##"):
     book0, c0 = parts[0][0], parts[0][1]
-    out = [f"## {title} ({book0} {heb(c0)})"]
-    cur = c0
+    out = [f"{level} {title} ({book0} {heb(c0)})"]
+    cur = (book0, c0)
     for book, c1, v1, c2, v2 in parts:
         verses = sorted(k for k in navi[book] if (c1, v1) <= k <= (c2, v2))
         for ch, v in verses:
-            if ch != cur:
-                out.append(f"### פרק {heb(ch)}")
-                cur = ch
+            if (book, ch) != cur:
+                out.append(f"### {book} פרק {heb(ch)}" if book != cur[0] else f"### פרק {heb(ch)}")
+                cur = (book, ch)
             text = navi[book][(ch, v)]
+            side, note = (marks or {}).get((book, ch, v), ("", ""))
+            if side == "before":
+                text = f"**{note}** " + text
+            elif side == "after":
+                text += f" **{note}**"
             if end_mark and (book, ch, v) == end_mark:
                 text += " **(כאן מסיימים הספרדים)**"
             if start_mark and (book, ch, v) == start_mark:
@@ -355,6 +408,16 @@ def haftara_lines(name, navi):
     end_mark = tuple(sef[1:]) if sef and sef[0] == "end" else None
     start_mark = tuple(sef[1:]) if sef and sef[0] == "start" else None
     return haftara_part(f"הפטרת {name}", parts, navi, end_mark, start_mark)
+
+
+def special_haftarot(book, navi):
+    """The festival and special-Shabbat haftarot of the book, under a heading of their own.
+    The ones whose book of Nevi'im isn't loaded are left out."""
+    out = []
+    for title, parts, marks in SPECIAL_HAFTAROT.get(book, []):
+        if all(b in navi for b, *_ in parts):
+            out += haftara_part(title, parts, navi, marks=marks)
+    return [f"## {SPECIAL_TITLE}"] + out if out else []
 
 
 def parse_torah(lines):
@@ -451,6 +514,8 @@ def build(book, verses, comms, parashot, navi=None):
         main.append(f"[{label}] " + (f"{{{aliyot[(ch, v)]}}} " if (ch, v) in aliyot else "") + text)
     if len(verses) in ends and navi:
         main.extend(haftara_lines(ends[len(verses)], navi))
+    if len(parashot) > 1 and navi:
+        main.extend(special_haftarot(book, navi))
     project = {
         "title": book,
         "main": "\n".join(main),
