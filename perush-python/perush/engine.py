@@ -30,6 +30,8 @@ from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, s
 EPS = 0.01
 # an automatic-width translation column: its share of the line stays within these (%)
 AUTO_MIN, AUTO_MAX = 20.0, 40.0
+# the letter (פ / ס) at the end of an open / a closed section
+SECTION_FONT = "David Libre"
 
 
 class Cancelled(Exception):
@@ -227,11 +229,14 @@ class Engine:
                         st = self.style[u]
                         toks = [t for r in ent for t in entry_tokens(r)]
                         und.append(Spec(words_of(toks, st), st, st.size * self.note_k, mt=0.3 * PT_PER_MM, kind="u"))
-            if to == len(it["words"]) and it.get("sec") == "ס" and not (P["verseNewLine"] or und):
-                # a closed section: an empty space in the line, as in a Sefer Torah
-                para.append(Word("", self.main, self.main.size * 2.6, ("l", i)))
-            if P["verseNewLine"] or und or (to == len(it["words"]) and it.get("sec") == "פ"):
-                # (an open section: the next verse begins a new line)
+            if to == len(it["words"]) and it.get("sec"):
+                # the end of an open / a closed section: its letter, bold, in another font, the
+                # text running on (the letter is never alone at the start of a line)
+                sst = Style(SECTION_FONT, self.main.size, True)
+                if para:
+                    para[-1].glue = True
+                para.append(Word(it["sec"], sst, width(sst, it["sec"]), ("l", i)))
+            if P["verseNewLine"] or und:
                 flush()
                 specs.extend(und)
         flush()
@@ -429,8 +434,7 @@ class Engine:
         segs = self.segments(a, b)
         at_end = b[0] >= len(items)
         # the text on the page ends on a full line unless the section or a paragraph ends here
-        cut = b[1] > 0 or (not at_end and not self.is_break(items[b[0]]) and not self.P["verseNewLine"]
-                           and not (b[0] > 0 and items[b[0] - 1].get("sec") == "פ"))
+        cut = b[1] > 0 or (not at_end and not self.is_break(items[b[0]]) and not self.P["verseNewLine"])
         r = {"a": a, "b": b, "at_end": at_end, "pre": pre, "ptrs": dict(self.ptrs), "side": {}, "sections": [],
              "side_dir": {c: self.side_of(c) for c in self.sides},
              "post": None, "req_fit": True, "side_short": False}
@@ -798,8 +802,7 @@ class Engine:
             return g
         b = self.pos(g)
         nxt = self.items[b[0]]
-        if b[1] == 0 and (self.P["verseNewLine"] or (b[0] > 0 and (self.items[b[0] - 1]["type"] == "h"
-                                                                    or self.items[b[0] - 1].get("sec") == "פ"))):
+        if b[1] == 0 and (self.P["verseNewLine"] or (b[0] > 0 and self.items[b[0] - 1]["type"] == "h")):
             return g
         if self.is_break(nxt):
             # the page ends with the end of a chapter: fine if its last line is well filled
