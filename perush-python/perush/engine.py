@@ -227,7 +227,11 @@ class Engine:
                         st = self.style[u]
                         toks = [t for r in ent for t in entry_tokens(r)]
                         und.append(Spec(words_of(toks, st), st, st.size * self.note_k, mt=0.3 * PT_PER_MM, kind="u"))
-            if P["verseNewLine"] or und:
+            if to == len(it["words"]) and it.get("sec") == "ס" and not (P["verseNewLine"] or und):
+                # a closed section: an empty space in the line, as in a Sefer Torah
+                para.append(Word("", self.main, self.main.size * 2.6, ("l", i)))
+            if P["verseNewLine"] or und or (to == len(it["words"]) and it.get("sec") == "פ"):
+                # (an open section: the next verse begins a new line)
                 flush()
                 specs.extend(und)
         flush()
@@ -425,7 +429,8 @@ class Engine:
         segs = self.segments(a, b)
         at_end = b[0] >= len(items)
         # the text on the page ends on a full line unless the section or a paragraph ends here
-        cut = b[1] > 0 or (not at_end and not self.is_break(items[b[0]]) and not self.P["verseNewLine"])
+        cut = b[1] > 0 or (not at_end and not self.is_break(items[b[0]]) and not self.P["verseNewLine"]
+                           and not (b[0] > 0 and items[b[0] - 1].get("sec") == "פ"))
         r = {"a": a, "b": b, "at_end": at_end, "pre": pre, "ptrs": dict(self.ptrs), "side": {}, "sections": [],
              "side_dir": {c: self.side_of(c) for c in self.sides},
              "post": None, "req_fit": True, "side_short": False}
@@ -793,7 +798,8 @@ class Engine:
             return g
         b = self.pos(g)
         nxt = self.items[b[0]]
-        if b[1] == 0 and (self.P["verseNewLine"] or (b[0] > 0 and self.items[b[0] - 1]["type"] == "h")):
+        if b[1] == 0 and (self.P["verseNewLine"] or (b[0] > 0 and (self.items[b[0] - 1]["type"] == "h"
+                                                                    or self.items[b[0] - 1].get("sec") == "פ"))):
             return g
         if self.is_break(nxt):
             # the page ends with the end of a chapter: fine if its last line is well filled
@@ -1069,12 +1075,19 @@ class Engine:
                 and hole / len(text) > 0.16 * self.main_lh):
             # no commentary to fill the page and the translation can't go on: rather the
             # text running on under the translation column than a hole
+            near = None
             for x in range(min(self.total, g + 80), g, -1):
                 q = self.compose(pos, self.pos(x), False, pre)
-                if (q["req_fit"] and q["top_fits"] and self.contentH - self.total_h(q) < 1.5 * self.main_lh
-                        and self.full_line_end(q, g0, x) == x):
+                if not (q["req_fit"] and q["top_fits"] and self.contentH - self.total_h(q) < 1.5 * self.main_lh):
+                    continue
+                if self.full_line_end(q, g0, x) == x:
                     best = q
                     break
+                if near is None and self.pos(x)[1] == 0:
+                    near = q        # failing a full line: the end of a verse
+            else:
+                if near is not None:
+                    best = near
         return best
 
     def fill_hole(self, pos, g0, g, pre):

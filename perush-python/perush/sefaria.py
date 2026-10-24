@@ -201,7 +201,9 @@ def clean(s, keep_bold=False):
 
 
 def clean_torah(s):
-    s = re.sub(r'<span class="mam-spi-[a-z]+">.*?</span>', " ", s)      # {פ} {ס} paragraph marks
+    s = re.sub(r'<span class="mam-spi-pe">.*?</span>', " {פ}", s)        # an open section
+    s = re.sub(r'<span class="mam-spi-samekh">.*?</span>', " {ס}", s)    # a closed section
+    s = re.sub(r'<span class="mam-spi-[a-z]+">.*?</span>', " ", s)
     s = re.sub(r"<sup[^>]*>.*?</sup>", "", s)                             # editorial notes
     s = re.sub(r'<span class="mam-kq"><span class="mam-kq-q">\[(.*?)\]</span>\s*<span class="mam-kq-k">\((.*?)\)</span></span>',
                lambda m: f"({m.group(2)}) [{m.group(1)}]", s)              # ketiv/qere

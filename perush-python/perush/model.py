@@ -241,13 +241,18 @@ def parse_main(text):
         m = re.match(r"^\[([^\]]{1,12})\]\s*(.*)$", t)
         if m:
             label, body = m.group(1), m.group(2)
+        # '{פ}' / '{ס}' at the end of a verse: an open / a closed section ends with it
+        sec = ""
+        m = re.match(r"^(.*?)\s*\{([פס])\}\s*$", body)
+        if m:
+            body, sec = m.group(1), m.group(2)
         # '{שני}' at the start of a verse: the aliyah that begins with it
         aliyah = ""
         m = re.match(r"^\{([^}]{1,14})\}\s*(.*)$", body)
         if m:
             aliyah, body = m.group(1).strip(), m.group(2)
         items.append({
-            "type": "v", "idx": -1 if no_comm else verses, "label": label, "words": tokenize(body), "aliyah": aliyah,
+            "type": "v", "idx": -1 if no_comm else verses, "label": label, "words": tokenize(body), "aliyah": aliyah, "sec": sec,
             "plain": body, "chapter": chapter, "parasha": parasha, "noComm": no_comm, "line": line_no,
         })
         if not no_comm:

@@ -28,7 +28,7 @@ def clean(raw):
     s = re.sub(r"<\s*(br|p|div|li)[^>]*>", "\n", s, flags=re.I)
     s = re.sub(r"<[^>]+>", " ", s)
     s = html.unescape(s)
-    s = re.sub(r"[\{\(\[]\s*[פס]\s*[\}\)\]]", " ", s)          # {פ} {ס}
+    s = re.sub(r"[\(\[]\s*([פס])\s*[\)\]]", r"{\1}", s)        # (פ) [ס] -> {פ} {ס}: open / closed sections
     s = s.replace("־", "־")                            # keep the maqaf
     s = re.sub(r"[ \t ]+", " ", s)
     return s
@@ -83,7 +83,7 @@ def prepare_main(raw):
                     verses += 1
             return
         # running text: a verse ends with : or ׃
-        parts = re.split(r"(?<=[:׃])\s+", body)
+        parts = re.split(r"(?<=[:׃])\s+(?!\{[פס]\})|(?<=\{[פס]\})\s+", body)
         for t in parts:
             t = t.strip()
             if t:
