@@ -139,4 +139,12 @@ python main.py project.json out.pdf
 | Aharoni CLM | — | כותרות |
 | Stam Ashkenaz CLM, Stam Sefarad CLM | — | כתב סת"ם (בלי ניקוד) — לשם הספר בעמוד השער |
 
+**כתב רש"י** (לפירושים):
+
+| גופן | אופי |
+|---|---|
+| Noto Rashi Hebrew | עדין ודק (ברירת המחדל) |
+| BenOr Rashi | קלאסי, כמו בחומשים מודפסים (רישיון Ubuntu Font Licence) |
+| Mekorot-Rashi | עבה וכהה, בסגנון ש"ס וילנא (רישיון LPPL) |
+
 אפשר לבחור גם כל גופן עברי שמותקן במחשב.
