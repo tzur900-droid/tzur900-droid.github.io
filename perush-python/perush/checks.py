@@ -9,9 +9,8 @@ release, so that a fault is found before anyone sees it in print.
 import re
 from dataclasses import dataclass
 
-from .engine import AUTO_MAX, EPS
+from .engine import AUTO_MAX, EPS, space_ratio
 from .model import heb
-from .textlayout import space
 
 # a justified line whose spaces are wider than this many normal spaces
 WIDE_SPACE = 5.0
@@ -133,18 +132,6 @@ def check_bounds(eng, pg, n, add):
             if fr.top + l.y + l.h > pg.height - eng.m + 1.0:
                 add("outside", n, "מתחת לשוליים: " + " ".join(w.text for w in l.words)[:30])
                 return
-
-
-def space_ratio(l):
-    """How many normal spaces wide the spaces of a line come out when drawn (render.draw_line)."""
-    ws = l.words
-    if len(ws) < 2 or l.align != "justify" or l.last:
-        return 1.0
-    total = sum(w.w for w in ws)
-    fill = 0.3 if getattr(l, "force", False) else 0.6
-    if total < l.width * fill:
-        return 1.0
-    return (l.width - total) / (len(ws) - 1) / space(l.base)
 
 
 def check_spaces(pg, n, add):

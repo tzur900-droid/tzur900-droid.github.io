@@ -33,6 +33,9 @@ AUTO_MIN, AUTO_MAX = 20.0, 40.0
 # a little more room between the words of the text (not seen), so that it reaches further
 # down beside a long translation
 LOOSE = 1.12
+# looking ahead: a page and the next with a cost under GOOD are taken as they are; another
+# way to end a page is taken only if it does better by MARGIN
+GOOD, MARGIN = 60.0, 25.0
 # the letter (פ / ס) at the end of an open / a closed section
 SECTION_FONT = "David Libre"
 
@@ -111,6 +114,28 @@ def layout_specs(specs, width_at, tight=1.0):
         y += sp.mb
         lines += ls
     return lines, y
+
+
+def line_start(line):
+    """Where the text of a line begins: (item, word)."""
+    if not line.words:
+        return None
+    ref = line.words[0].ref
+    if isinstance(ref, tuple) and ref and ref[0] in ("l", "h"):
+        return (ref[1], 0)
+    return next((w.ref for w in line.words if isinstance(w.ref, tuple) and isinstance(w.ref[0], int)), None)
+
+
+def space_ratio(l):
+    """How many normal spaces wide the spaces of a line come out when drawn (render.draw_line)."""
+    ws = l.words
+    if len(ws) < 2 or l.align != "justify" or l.last:
+        return 1.0
+    total = sum(w.w for w in ws)
+    fill = 0.3 if getattr(l, "force", False) else 0.6
+    if total < l.width * fill:
+        return 1.0
+    return (l.width - total) / (len(ws) - 1) / space(l.base)
 
 
 def restack(lines):
@@ -459,6 +484,7 @@ class Engine:
         # the text on the page ends on a full line unless the section or a paragraph ends here
         cut = b[1] > 0 or (not at_end and not self.is_break(items[b[0]]) and not self.P["verseNewLine"])
         r = {"a": a, "b": b, "at_end": at_end, "pre": pre, "ptrs": dict(self.ptrs), "side": {}, "sections": [],
+             "state": (dict(self.col_w), self.allow_band, self.text_tight, comm_only),
              "side_dir": {c: self.side_of(c) for c in self.sides},
              "post": None, "req_fit": True, "side_short": False}
         max_v = last_full = -1
@@ -615,13 +641,6 @@ class Engine:
             return False
         return len([l for l in r["text"] if l.kind == "p"]) == 1
 
-    def good_page(self, r, late_last=False):
-        """late_last: the commentary of the page's last verse may begin at the top of the next
-        page (only to save a line of text from standing alone on a page)."""
-        starts = r["start_ok"] or (late_last and r["late_v"] <= {r["max_v"]})
-        return (r["top_fits"] and starts and not self.thin_text(r) and (not self.sides or r["col_full"] or r["at_end"])
-                and not self.page_unstarted(r) and self.fills(r))
-
     def fills(self, r):
         """Whether the page comes out without a hole: the room left can be spread over its
         lines (with no commentary, only the text's lines open, as justify does)."""
@@ -630,68 +649,6 @@ class Engine:
             return self.can_close(r, spare)
         text = [l for l in r["text"] if l.kind == "p"]
         return spare < self.main_lh * 1.5 or bool(text) and spare / len(text) <= self.main_lh * 0.16
-
-    def join_prev(self, prev, thin):
-        """The page before again, now running on to the end of the thin page's text. None
-        if it doesn't make a good page (then self.ptrs is as it was)."""
-        cur = dict(self.ptrs)
-        page = self.pages.pop()       # (the side of the page depends on the number of pages)
-        self.ptrs = dict(prev["ptrs"])
-        # the translation may go on under the text on these pages too
-        self.allow_band = True
-        try:
-            return self._join_prev(prev, thin, cur, page)
-        finally:
-            self.allow_band = False
-
-    def ends_to_try(self, b):
-        """Where a joined page may end: at the end of the thin page's last verse (so that
-        no word of it is left alone), else where the thin page ended."""
-        out = []
-        if b[1] > 0 and b[0] < len(self.items):
-            out.append((b[0] + 1, 0) if b[0] + 1 < len(self.items) else (len(self.items), 0))
-        out.append(b)
-        return out
-
-    def _join_prev(self, prev, thin, cur, page):
-        self.pages.append(page)
-        for b in self.ends_to_try(thin["b"]):
-            self.pages.pop()
-            r = self.compose(prev["pos"], b, False, prev["pre"])
-            self.pages.append(page)
-            if self.good_page(r):
-                return r
-        # or the page before ends earlier, so that the next page has more than a line
-        page = self.pages.pop()
-        g0, g1 = self.g_of(prev["pos"]), self.g_of(page[0]["b"])
-        found = None
-        for x in range(g1 - 1, max(g0, g1 - 200), -1):
-            q = self.compose(prev["pos"], self.pos(x), False, prev["pre"])
-            # ending on a full line, or failing that at the end of a verse
-            if not (self.good_page(q) and (self.full_line_end(q, g0, x) == x or self.pos(x)[1] == 0)):
-                continue
-            keep = dict(self.ptrs)
-            self.ptrs.update(q["ptrs"])
-            self.pages.append(page)    # the next page's side
-            nxt = self.search_page(self.pos(x), None)
-            self.pages.pop()
-            self.ptrs = keep
-            if not self.thin_text(nxt):
-                found = q
-                break
-        self.pages.append(page)
-        if found is None:
-            # last of all: the thin page's text at the end of the page before, the commentary
-            # of its last verse beginning at the top of the next page
-            for b in self.ends_to_try(thin["b"]):
-                self.pages.pop()
-                r = self.compose(prev["pos"], b, False, prev["pre"])
-                self.pages.append(page)
-                if self.good_page(r, late_last=True):
-                    r["late_ok"] = True     # a known exception (see RULES.md), not a fault
-                    return r
-            self.ptrs = cur
-        return found
 
     def leaves_unstarted(self, inf, n):
         """Whether, after its first n words, a translation's entries on the page leave a verse
@@ -1047,7 +1004,11 @@ class Engine:
         return out
 
     def tick(self):
-        self.memo.clear()   # a new page: what was tried for the last one is no use
+        # a new page. What was tried while looking ahead is used again; the rest is dropped
+        # now and then (a page's key holds the pointers of its start, so old entries never
+        # come back wrong)
+        if len(self.memo) > 6000:
+            self.memo.clear()
         if self.progress:
             self.progress(len(self.pages))
 
@@ -1057,7 +1018,6 @@ class Engine:
         self.pre = None
         pos = (0, 0)
         guard = 0
-        before = None   # where the last page began, to take it again when the next page is too thin
 
         def pending():
             return pos[0] < len(self.items) or any(not self.done(c, p) for c, p in self.ptrs.items())
@@ -1066,77 +1026,8 @@ class Engine:
             guard += 1
             self.tick()
             base = dict(self.col_w)
-            best = self.search_page(pos, pre)
-            # the translation of every verse on the page begins on the page. In this order:
-            # a wider column (within its limit), a little more room between the words of the
-            # text, the rest of the translation under the text, and last less text
-            if self.sides and not best["at_end"]:
-                miss = self.page_unstarted(best)
-                short = not best["col_full"]
-                ok = lambda q: (q["col_full"] or q["at_end"]) and (q["start_ok"] or not best["start_ok"])
-                if miss:
-                    prev = None
-                    for step in (1.5, 3, 5, 8, 12, 20):
-                        for c in self.sides:
-                            top = AUTO_MAX if self.comms[c]["autoW"] else base[c]
-                            self.col_w[c] = min(top, max(12.0, base[c] + step))
-                        if self.col_w == prev:
-                            break
-                        prev = dict(self.col_w)
-                        cand = self.search_page(pos, pre)
-                        m2 = self.page_unstarted(cand)
-                        if ok(cand) and m2 < miss:
-                            best, miss = cand, m2
-                            best["col_w"] = dict(self.col_w)
-                            if not miss:
-                                break
-                    self.col_w = dict(best.get("col_w", base))
-                    for tries in (("tight",), ("band",)):
-                        if not miss:
-                            break
-                        if tries[0] == "tight":
-                            self.text_tight = LOOSE
-                        else:
-                            self.allow_band = True
-                        cand = self.search_page(pos, pre)
-                        m2 = self.page_unstarted(cand)
-                        if ok(cand) and m2 < miss:
-                            best, miss = cand, m2
-                            best["col_w"] = dict(self.col_w)
-                        else:
-                            self.text_tight = 1.0 if tries[0] == "tight" else self.text_tight
-                            self.allow_band = False
-                    if miss:
-                        best = self.shorten_for_lag(pos, pre, best)
-                    self.allow_band, self.text_tight = False, 1.0
-                elif short:
-                    # the translation runs out: a narrower column
-                    for step in (1.5, 3):
-                        for c in self.sides:
-                            top = AUTO_MAX if self.comms[c]["autoW"] else 60.0
-                            self.col_w[c] = min(top, max(12.0, base[c] - step))
-                        cand = self.search_page(pos, pre)
-                        if ok(cand) and not self.page_unstarted(cand):
-                            best = cand
-                            best["col_w"] = dict(self.col_w)
-                            break
-                    self.col_w = dict(best.get("col_w", base))
-            if self.thin_text(best):
-                # a line of text alone over a page of commentary: never. Rather a page of
-                # commentary only, the words going on with the text of the next page, or else
-                # the words at the end of the page before, their commentary beginning there
-                only = None
-                if not best["at_end"]:
-                    only = self.compose(pos, pos, False, pre, comm_only=True)
-                if only is not None and only["sections"] and self.can_close(only, self.contentH - self.total_h(only)):
-                    best = only
-                else:
-                    joined = self.join_prev(before, best) if before is not None else None
-                    if joined is not None:
-                        self.pages.pop()
-                        pos, pre, best = before["pos"], before["pre"], joined
-                    else:
-                        best["thin_ok"] = True  # every way out was tried: a known exception
+            best = self.choose(pos, pre, base)
+            self.col_w = dict(best["state"][0])
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
             if last and next_plain:
                 budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM
@@ -1178,7 +1069,6 @@ class Engine:
                 # lines of the whole page (text, commentaries and haftara)
                 self.spread_page(best)
             best["items"] = self.items
-            before = {"pos": pos, "pre": pre, "ptrs": dict(self.ptrs)}
             self.pages.append((best, chapter, parasha))
             pre = None
             stuck = best["b"] == pos and all(best["ptrs"].get(c) == p for c, p in self.ptrs.items())
@@ -1187,6 +1077,172 @@ class Engine:
             if stuck:
                 self.warnings.append("חלק מהטקסט לא נכנס לעמוד (פסוק או פירוש ארוך מעמוד שלם). הקטינו את הגופן.")
                 break
+
+    def decide(self, pos, pre, base):
+        """The page the rules give directly, starting at pos with the column widths base."""
+        self.col_w = dict(base)
+        best = self.search_page(pos, pre)
+        # the translation of every verse on the page begins on the page. In this order:
+        # a wider column (within its limit), a little more room between the words of the
+        # text, the rest of the translation under the text, and last less text
+        if self.sides and not best["at_end"]:
+            miss = self.page_unstarted(best)
+            short = not best["col_full"]
+            ok = lambda q: (q["col_full"] or q["at_end"]) and (q["start_ok"] or not best["start_ok"])
+            if miss:
+                prev = None
+                for step in (1.5, 3, 5, 8, 12, 20):
+                    for c in self.sides:
+                        top = AUTO_MAX if self.comms[c]["autoW"] else base[c]
+                        self.col_w[c] = min(top, max(12.0, base[c] + step))
+                    if self.col_w == prev:
+                        break
+                    prev = dict(self.col_w)
+                    cand = self.search_page(pos, pre)
+                    m2 = self.page_unstarted(cand)
+                    if ok(cand) and m2 < miss:
+                        best, miss = cand, m2
+                        best["col_w"] = dict(self.col_w)
+                        if not miss:
+                            break
+                self.col_w = dict(best.get("col_w", base))
+                for tries in (("tight",), ("band",)):
+                    if not miss:
+                        break
+                    if tries[0] == "tight":
+                        self.text_tight = LOOSE
+                    else:
+                        self.allow_band = True
+                    cand = self.search_page(pos, pre)
+                    m2 = self.page_unstarted(cand)
+                    if ok(cand) and m2 < miss:
+                        best, miss = cand, m2
+                        best["col_w"] = dict(self.col_w)
+                    else:
+                        self.text_tight = 1.0 if tries[0] == "tight" else self.text_tight
+                        self.allow_band = False
+                if miss:
+                    best = self.shorten_for_lag(pos, pre, best)
+                self.allow_band, self.text_tight = False, 1.0
+            elif short:
+                # the translation runs out: a narrower column
+                for step in (1.5, 3):
+                    for c in self.sides:
+                        top = AUTO_MAX if self.comms[c]["autoW"] else 60.0
+                        self.col_w[c] = min(top, max(12.0, base[c] - step))
+                    cand = self.search_page(pos, pre)
+                    if ok(cand) and not self.page_unstarted(cand):
+                        best = cand
+                        best["col_w"] = dict(self.col_w)
+                        break
+                self.col_w = dict(best.get("col_w", base))
+        if self.thin_text(best) and not best["at_end"]:
+            # a line of text alone over a page of commentary: rather a page of commentary only
+            only = self.compose(pos, pos, False, pre, comm_only=True)
+            if only["sections"] and self.can_close(only, self.contentH - self.total_h(only)):
+                best = only
+        self.allow_band, self.text_tight = False, 1.0
+        self.col_w = dict(base)
+        return best
+
+    # ------------------------------------------------------------ looking ahead
+
+    def choose(self, pos, pre, base):
+        """The page to set: the one the rules give directly, unless it or the page after it
+        breaks a rule (RULES.md) and another way to end this page does better over both
+        pages together. Each page is scored by page_cost."""
+        g = self.decide(pos, pre, base)
+        cost = self.page_cost(g) + self.look(g, base)
+        if cost >= GOOD:
+            for q in self.variants(pos, pre, g):
+                c1 = self.page_cost(q)
+                if c1 + 0.0 >= cost - MARGIN:
+                    continue
+                c = c1 + self.look(q, base)
+                if c < cost - MARGIN:
+                    g, cost = q, c
+        # what the chosen page still breaks, it breaks because nothing better was found:
+        # a known exception (the check shows it as such)
+        if g.get("late_v"):
+            g["late_ok"] = True
+        if self.thin_text(g):
+            g["thin_ok"] = True
+        return g
+
+    def look(self, r, base):
+        """The cost of the page that would follow r."""
+        if r["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in r["ptrs"].items()):
+            return 0.0
+        saved = dict(self.ptrs)
+        self.ptrs.update(r["ptrs"])
+        self.pages.append(None)        # (the side of the next page)
+        try:
+            return self.page_cost(self.decide(r["b"], None, base))
+        finally:
+            self.pages.pop()
+            self.ptrs = saved
+
+    def with_state(self, state, f):
+        keep = (dict(self.col_w), self.allow_band, self.text_tight)
+        self.col_w, self.allow_band, self.text_tight = dict(state[0]), state[1], state[2]
+        try:
+            return f()
+        finally:
+            self.col_w, self.allow_band, self.text_tight = keep
+
+    def variants(self, pos, pre, g):
+        """Other ways to end the page that begins at pos: a line or a few less text, the text
+        run on to the end of its verse (or the next), a page of commentary only."""
+        out, seen = [], {(g["b"], g["state"][3])}
+        g0 = self.g_of(pos)
+
+        def add(q):
+            key = (q["b"], q["state"][3])
+            if key not in seen and q["top_fits"]:
+                seen.add(key)
+                out.append(q)
+
+        def make():
+            if g["state"][3]:
+                return
+            text = [l for l in g["text"] if l.kind == "p"]
+            for k in range(1, min(4, len(text)) + 1):
+                ref = line_start(text[-k])
+                if ref is not None:
+                    x = self.g_of(ref)
+                    if x > g0:
+                        add(self.compose(pos, self.pos(x), False, pre))
+            b = g["b"]
+            for e in ((b[0] + 1, 0), (b[0] + 2, 0)):
+                if e[0] <= len(self.items):
+                    add(self.compose(pos, e if e[0] < len(self.items) else (len(self.items), 0), False, pre))
+        self.with_state(g["state"], make)
+        if not g["at_end"]:
+            add(self.compose(pos, pos, False, pre, comm_only=True))
+        return out
+
+    def page_cost(self, r):
+        """How badly a page breaks the rules (RULES.md): 0 for a page that keeps them all."""
+        if not r["top_fits"]:
+            return 1e9
+        c = 1e6 * self.page_unstarted(r) + 2e4 * len(r.get("late_v", ()))
+        if self.thin_text(r):
+            c += 5e4
+        if r["state"][3] and not r["sections"]:
+            c += 1e5                   # an empty page
+        spare = self.contentH - self.total_h(r)
+        if not r["at_end"]:
+            # a hole in the middle of a parasha is the worst of all (RULES.md, rule 7)
+            c += (6e4 + spare * 20) if not self.fills(r) else spare * 0.3
+        for l in r["text"]:
+            q = space_ratio(l)
+            if q > 3:
+                c += (q - 3) ** 2 * 40
+        if r["state"][1] and any(s.get("band") for s in r["side"].values()):
+            c += 30
+        if r["state"][2] != 1.0:
+            c += 20
+        return c
 
     def search_page(self, pos, pre):
         """The best page starting at pos, with the current column widths."""
