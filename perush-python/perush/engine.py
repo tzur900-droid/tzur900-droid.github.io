@@ -642,7 +642,22 @@ class Engine:
             even_paragraphs(s["band"])
         for s in r["sections"]:
             even_paragraphs(s["lines"])
-        for lines in r.get("gm", {}).values():
+        for c, lines in r.get("gm", {}).items():
+            # a Talmud page: a column ends flush with a full line, the words spread over its
+            # lines, unless that would open the spaces too wide (or the commentary ends here)
+            if lines and lines[-1].last and not (r["at_end"] and self.done(c, r["ptrs"][c]) and not r.get("more")):
+                keep = [list(l.words) for l in lines]
+                widest = max([space_ratio(l) for l in lines[:-1]] + [1.0])
+                lines[-1].last = False
+                even_lines(lines, slack=30)
+                lines[-1].force = True
+                if (sum(w.w for w in lines[-1].words) >= lines[-1].width * 0.5
+                        and max(map(space_ratio, lines)) <= max(3.5, widest)):
+                    lines[-1].force = True
+                else:
+                    for l, ws in zip(lines, keep):
+                        l.words = ws
+                    lines[-1].last, lines[-1].force = True, False
             even_paragraphs(lines)
         if r.get("post"):
             for l in r["post"]["lines"]:
@@ -801,6 +816,12 @@ class Engine:
             for k, (c, ptr, req, alll, words) in lists.items():
                 lh = self.note_lh[c]
                 lines = break_lines(words, self.style[c], lh, side_at(k, lh))
+                if len(lines) > 1 and sum(w.w for w in lines[-1].words) < lines[-1].width * 0.5:
+                    # a short last line: rather its words in the lines above, a little closer
+                    # (the column then ends flush, see even_page)
+                    tighter = break_lines(words, self.style[c], lh, side_at(k, lh), tight=0.8)
+                    if len(tighter) < len(lines):
+                        lines = tighter
                 fit = [l for l in lines if l.y + lh <= avail + EPS]
                 if len(fit) == len(lines):
                     side_lines[k] = (lines, len(words))

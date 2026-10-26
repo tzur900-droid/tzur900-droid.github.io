@@ -252,11 +252,11 @@ def even_lines(lines, slack=10):
         gaps = (m - 1) - (joins[j - 1] - joins[i])      # spaces between the words of the line
         width_ = lines[line_no].width
         if line_no == n_lines - 1 and free_last:
-            return 0.0 if total + gaps * s * 0.85 <= width_ + 0.01 else INF
+            return 0.0 if total + gaps * s * 0.8 <= width_ + 0.01 else INF
         if gaps <= 0:
             return 1e4 if total <= width_ + 0.01 else INF
         r = (width_ - total) / (gaps * s)
-        if r < 0.85:
+        if r < 0.8:
             return INF
         c = (r - 1) ** 2 * 100 if r >= 1 else (1 - r) ** 2 * 400
         if r > 3:
