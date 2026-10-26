@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass, field
 
 from .model import entry_tokens, heb, page_mm, parse_comm, parse_main
-from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width, words_of
+from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, even_lines, full_width, space, width, words_of
 
 EPS = 0.01
 # an automatic-width translation column: its share of the line stays within these (%)
@@ -114,6 +114,25 @@ def layout_specs(specs, width_at, tight=1.0):
         y += sp.mb
         lines += ls
     return lines, y
+
+
+def even_paragraphs(lines):
+    """even_lines on each paragraph of lines (a run of justified text lines, ending where a
+    paragraph ends)."""
+    run = []
+    for l in list(lines) + [None]:
+        if l is not None and getattr(l, "kind", "p") in ("p", "u") and l.align == "justify":
+            if run and getattr(run[-1], "kind", "p") != getattr(l, "kind", "p"):
+                even_lines(run)
+                run = []
+            run.append(l)
+            if l.last:
+                even_lines(run)
+                run = []
+        else:
+            if run:
+                even_lines(run)
+            run = []
 
 
 def line_start(line):
@@ -222,6 +241,7 @@ class Engine:
         # text's words a little further apart
         self.allow_band = False
         self.text_tight = 1.0
+        self.decided = {}
         self._auto_widths()
 
     # ------------------------------------------------------------ text of the page
@@ -267,7 +287,8 @@ class Engine:
                 t = f"({it['aliyah']})"
                 para.append(Word(t, ast, width(ast, t), ("l", i), glue=True))
             if P["numbers"] and frm == 0:
-                para.append(Word(it["label"], bold, width(bold, it["label"]), ("l", i)))
+                # the verse's number goes with its first word, never alone at the end of a line
+                para.append(Word(it["label"], bold, width(bold, it["label"]), ("l", i), glue=True))
             para.extend(words_of(it["words"][frm:to], self.main, lambda k, i=i, frm=frm: (i, frm + k)))
             und = []
             if to == len(it["words"]) and it["idx"] >= 0:
@@ -634,6 +655,19 @@ class Engine:
             if r2["req_fit"]:
                 return r2
         return r
+
+    def even_page(self, r):
+        """The page is chosen: the words of each paragraph on it are spread over its lines
+        again, so that the spaces come out even (RULES.md, rule 8). The number of lines stays,
+        so nothing else on the page moves."""
+        even_paragraphs(r["text"])
+        for s in r["side"].values():
+            even_paragraphs(s["col"])
+            even_paragraphs(s["band"])
+        for s in r["sections"]:
+            even_paragraphs(s["lines"])
+        if r.get("post"):
+            even_paragraphs(r["post"]["lines"])
 
     def thin_text(self, r):
         """Whether the page has only one line of text (no heading) over its commentaries."""
@@ -1039,6 +1073,7 @@ class Engine:
             # something follows on the next page (a haftara, the next parasha): no reason to
             # leave room at the bottom of this one
             best["more"] = not last or bool(next_plain)
+            self.even_page(best)
             self.justify(best)
             if best.get("post") and not best["post"].get("done", True):
                 # the haftara starts under the parasha and continues: fill the page to the bottom
@@ -1079,7 +1114,18 @@ class Engine:
                 break
 
     def decide(self, pos, pre, base):
-        """The page the rules give directly, starting at pos with the column widths base."""
+        """The page the rules give directly, starting at pos with the column widths base.
+        Kept: the page looked at ahead is the page decided when its turn comes."""
+        key = (pos, id(pre), tuple(sorted(self.ptrs.items())), tuple(sorted(base.items())), len(self.pages) % 2)
+        hit = self.decided.get(key)
+        if hit is None:
+            hit = self._decide(pos, pre, base)
+            if len(self.decided) > 400:
+                self.decided.clear()
+            self.decided[key] = hit
+        return hit
+
+    def _decide(self, pos, pre, base):
         self.col_w = dict(base)
         best = self.search_page(pos, pre)
         # the translation of every verse on the page begins on the page. In this order:
@@ -1450,6 +1496,7 @@ class Engine:
             if not lines:
                 break
             self.plain_start = end
+            even_paragraphs(lines)
             it = lst[min(frm[0], len(lst) - 1)]
             spare = budget - h
             if (done and next_sec and not next_sec["noComm"] and not self.opens_page(next_sec["items"][0])

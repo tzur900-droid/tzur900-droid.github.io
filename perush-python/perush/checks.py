@@ -37,6 +37,7 @@ NAMES = {
     "hole": "מקום ריק בתחתית העמוד",
     "spaces": "רווחים גדולים בין המילים",
     "text": "סימן משובש בטקסט",
+    "number": "מספר פסוק לבד בסוף שורה",
     "engine": "הודעה מהעימוד",
 }
 
@@ -65,6 +66,7 @@ def check(eng, pages):
         pg = pages[n]
         check_bounds(eng, pg, n, add)
         check_spaces(pg, n, add)
+        check_numbers(pg, n, add)
         if not r.get("ptrs"):
             continue                          # a page of a haftara only
         for c in eng.sides:
@@ -149,6 +151,23 @@ def where(eng, v):
             ch = re.sub(r"^פרק\s+", "", it["chapter"]) if it["chapter"].startswith("פרק") else it["chapter"]
             return f"{ch},{it['label']}" if ch else f"פסוק {it['label']}"
     return f"פסוק {v + 1}"
+
+
+def check_numbers(pg, n, add):
+    """A verse's number is never the last word of a line (its verse begins on the next)."""
+    for fr in pg.frames:
+        if not (fr.src and fr.src[0] == "main"):
+            continue
+        items = fr.src[1] or []
+        for l in fr.lines[:-1]:
+            w = l.words[-1] if l.words else None
+            ref = getattr(w, "ref", None)
+            if not (isinstance(ref, tuple) and ref and ref[0] == "l" and ref[1] < len(items)):
+                continue
+            it = items[ref[1]]
+            if it.get("label") == w.text and it.get("sec") != w.text:
+                add("number", n, w.text)
+                return
 
 
 def late_commentaries(eng, r):
