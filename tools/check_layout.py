@@ -2,7 +2,8 @@
 
     python tools/check_layout.py [-v] [project.json ...]      (-v: the warnings too)
 
-Without arguments: all the books in perush-python/projects. Prints the faults and the
+Without arguments: all the books in perush-python/projects, and the samples of other page
+shapes in tools/samples. Prints the faults and the
 known exceptions of each book; the exit code is 1 if there is any fault, so that a release
 (or the build on GitHub) stops before a fault reaches anyone.
 """
@@ -28,10 +29,13 @@ from perush.textlayout import load_bundled_fonts  # noqa: E402
 def main():
     load_bundled_fonts(os.path.join(ROOT, "fonts"))
     flags = [a for a in sys.argv[1:] if a.startswith("-")]
-    files = [a for a in sys.argv[1:] if not a.startswith("-")] or sorted(glob.glob(os.path.join(ROOT, "projects", "*", "*.json")))
+    # the ready books, and test samples of other shapes (tools/samples, not part of the program)
+    files = [a for a in sys.argv[1:] if not a.startswith("-")] or (
+        sorted(glob.glob(os.path.join(ROOT, "projects", "*", "*.json")))
+        + sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples", "*.json"))))
     total_errors = 0
     for f in files:
-        name = os.path.relpath(f, os.path.join(ROOT, "projects"))
+        name = os.path.relpath(f, os.path.join(ROOT, "projects")) if "projects" in f else os.path.basename(f)
         t = time.time()
         eng = Engine(load_project(f))
         pages = eng.run()

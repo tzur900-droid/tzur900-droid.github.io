@@ -210,15 +210,20 @@ class Engine:
             self.parsed[i] = entries
             if problem:
                 self.warnings.append(f"{c['name']}: {problem}")
-        self.sides = [i for i, c in enumerate(self.comms) if c["place"] == "side"]
-        self.bottoms = [i for i, c in enumerate(self.comms) if c["place"] == "bottom"]
-        self.unders = [i for i, c in enumerate(self.comms) if c["place"] == "under"]
         # the shape of a Talmud page (RULES.md): the text in the middle, one commentary on the
         # inner side and one on the outer side, both above it too
         self.gm_mode = P.get("layout") == "gemara"
         self.gm_inner = next((i for i, c in enumerate(self.comms) if c["place"] == "inner"), None) if self.gm_mode else None
         self.gm_outer = next((i for i, c in enumerate(self.comms) if c["place"] == "outer"), None) if self.gm_mode else None
         self.gm = [c for c in (self.gm_inner, self.gm_outer) if c is not None]
+        if self.gm_mode and not self.gm:
+            self.warnings.append("בצורת דף גמרא: בחרו לפירוש אחד מיקום \"צד פנימי\" ולאחר \"צד חיצוני\".")
+        # a place the shape has no room for goes under the text: a column beside the text on
+        # a Talmud page, the sides of a Talmud page in a Mikraot Gedolot book, a second
+        # commentary on the same side
+        self.sides = [i for i, c in enumerate(self.comms) if c["place"] == "side" and not self.gm_mode]
+        self.unders = [i for i, c in enumerate(self.comms) if c["place"] == "under"]
+        self.bottoms = [i for i, c in enumerate(self.comms) if i not in self.sides + self.unders + self.gm]
         self.style = {i: Style(c["font"], float(c["size"])) for i, c in enumerate(self.comms)}
         self.side_lh = {i: self.comms[i]["size"] * self.lh_k for i in self.sides}
         self.note_lh = {i: self.comms[i]["size"] * self.note_k for i in self.bottoms + self.gm}

@@ -440,7 +440,22 @@ class MainWindow(QMainWindow):
             "pageW": dspin(50, 500, 1, " מ\"מ"),
             "pageH": dspin(50, 700, 1, " מ\"מ"),
             "gutter": dspin(0, 30, 1, " מ\"מ"),
+            "gmBand": ispin(0, 10),
+            "gmMain": dspin(20, 70, 1, "%"),
         }
+        # the shape of the page: Mikraot Gedolot, or a Talmud page
+        self.layout_box = QComboBox()
+        self.layout_box.addItem("מקראות גדולות (תרגום בטור צמוד, פירושים מתחת)", "mg")
+        self.layout_box.addItem("דף גמרא (הפסוקים באמצע, פירוש מכל צד ומעליהם)", "gemara")
+        form.addRow("צורת העמוד:", self.layout_box)
+        self.gm_hint = hint("בדף גמרא: בלשונית של כל פירוש בחרו מיקום \"צד פנימי\" (ליד הכריכה, כמו רש\"י) "
+                            "או \"צד חיצוני\" (כמו תוספות). פירוש נוסף יכול להיות \"מתחת לטקסט\" או \"אחרי כל פסוק\".")
+        self.gm_hint.setWordWrap(True)
+        form.addRow(self.gm_hint)
+        self.gm_band_lbl = QLabel("שורות פירוש מעל הפסוקים:")
+        form.addRow(self.gm_band_lbl, self.sp["gmBand"])
+        self.gm_main_lbl = QLabel("רוחב טור הפסוקים:")
+        form.addRow(self.gm_main_lbl, self.sp["gmMain"])
         form.addRow("גודל עמוד:", self.page_size)
         dims = QHBoxLayout()
         dims.addWidget(QLabel("רוחב:"))
@@ -503,6 +518,7 @@ class MainWindow(QMainWindow):
         self.title.textChanged.connect(self.changed)
         self.main.textChanged.connect(self.changed)
         self.page_size.currentIndexChanged.connect(self.page_size_changed)
+        self.layout_box.currentIndexChanged.connect(self.changed)
         self.main_font.currentFontChanged.connect(self.changed)
         for s in self.sp.values():
             s.valueChanged.connect(self.changed)
@@ -674,6 +690,8 @@ class MainWindow(QMainWindow):
         self.sp["pageH"].setValue(h)
         for k, c in self.cb.items():
             c.setChecked(bool(p[k]))
+        self.layout_box.setCurrentIndex(1 if p.get("layout") == "gemara" else 0)
+        self.update_layout_fields()
         self.ded.setPlainText(p.get("dedication", ""))
         self.title_sub.setText(p.get("titleSub", ""))
         self.tabs.clear()
@@ -692,11 +710,19 @@ class MainWindow(QMainWindow):
             p[k] = s.value()
         for k, c in self.cb.items():
             p[k] = c.isChecked()
+        p["layout"] = self.layout_box.currentData()
+        self.update_layout_fields()
         p["dedication"] = self.ded.toPlainText()
         p["titleSub"] = self.title_sub.text()
         p["comms"] = [self.tabs.widget(i).comm for i in range(self.tabs.count())]
         for i in range(self.tabs.count()):
             self.tabs.setTabText(i, self.tabs.widget(i).comm["name"] or "—")
+
+    def update_layout_fields(self):
+        """The settings of a Talmud page only when it is chosen."""
+        gm = self.layout_box.currentData() == "gemara"
+        for w in (self.gm_hint, self.gm_band_lbl, self.sp["gmBand"], self.gm_main_lbl, self.sp["gmMain"]):
+            w.setVisible(gm)
 
     def changed(self, *_):
         if self.loading:

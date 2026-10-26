@@ -9,6 +9,7 @@ on:
     paths:
       - "perush-python/**"
       - "tools/check_layout.py"
+      - "tools/samples/**"
       - ".github/workflows/build-exe.yml"
 
 permissions:
