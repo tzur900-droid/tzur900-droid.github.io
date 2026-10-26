@@ -619,7 +619,7 @@ class Engine:
         """late_last: the commentary of the page's last verse may begin at the top of the next
         page (only to save a line of text from standing alone on a page)."""
         starts = r["start_ok"] or (late_last and r["late_v"] <= {r["max_v"]})
-        return (r["top_fits"] and starts and (not self.sides or r["col_full"] or r["at_end"])
+        return (r["top_fits"] and starts and not self.thin_text(r) and (not self.sides or r["col_full"] or r["at_end"])
                 and not self.page_unstarted(r) and self.fills(r))
 
     def fills(self, r):
@@ -688,6 +688,7 @@ class Engine:
                 r = self.compose(prev["pos"], b, False, prev["pre"])
                 self.pages.append(page)
                 if self.good_page(r, late_last=True):
+                    r["late_ok"] = True     # a known exception (see RULES.md), not a fault
                     return r
             self.ptrs = cur
         return found
@@ -1129,11 +1130,13 @@ class Engine:
                     only = self.compose(pos, pos, False, pre, comm_only=True)
                 if only is not None and only["sections"] and self.can_close(only, self.contentH - self.total_h(only)):
                     best = only
-                elif before is not None:
-                    joined = self.join_prev(before, best)
+                else:
+                    joined = self.join_prev(before, best) if before is not None else None
                     if joined is not None:
                         self.pages.pop()
                         pos, pre, best = before["pos"], before["pre"], joined
+                    else:
+                        best["thin_ok"] = True  # every way out was tried: a known exception
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
             if last and next_plain:
                 budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM

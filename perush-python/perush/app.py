@@ -1,4 +1,5 @@
 """The program window: editing on one side, the laid-out pages on the other."""
+import html
 import json
 import re
 import os
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import model
+from .checks import check, describe, summary
 from .engine import Cancelled, Engine
 from .render import export_pdf, page_image
 
@@ -613,6 +615,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.info)
         self.warn = QLabel()
         self.warn.setWordWrap(True)
+        self.warn.setTextFormat(Qt.RichText)
+        self.warn.linkActivated.connect(self.open_problem)
         self.warn.setStyleSheet("background:#fff4e5; border:1px solid #f5c98b; color:#7c3a06; padding:6px; border-radius:6px;")
         self.warn.hide()
         lay.addWidget(self.warn)
@@ -846,11 +850,39 @@ class MainWindow(QMainWindow):
         _log("התצוגה מוכנה")
         sides = [f" · {self.project['comms'][c]['name']}: רוחב {round(eng.col_w[c])}%" for c in eng.sides]
         self.info.setText(f"{len(pages)} עמודים · {eng.count} פסוקים · {len(self.project['comms'])} פירושים{''.join(sides)}")
-        if eng.warnings:
-            self.warn.setText("\n".join("⚠ " + w for w in eng.warnings))
-            self.warn.show()
-        else:
+        self.show_problems(eng, pages)
+
+    def show_problems(self, eng, pages):
+        """The layout checked against the rules (RULES.md): faults and known exceptions, each
+        with a link to its page."""
+        try:
+            problems = check(eng, pages)
+        except Exception as e:  # a fault in the check must not stop the program
+            _log(f"check failed: {e}")
+            problems = []
+        errors, known, warns = summary(problems)
+        rows = []
+        for p_ in errors + known:
+            text = html.escape(describe(p_))
+            if p_.page >= 0:
+                text = f'<a href="page:{p_.page}">{text}</a>'
+            rows.append(("⚠ " if p_.severity == "error" else "• ") + text)
+        if not rows:
             self.warn.hide()
+            return
+        head = []
+        if errors:
+            head.append(f"<b>בדיקת עימוד: {len(errors)} תקלות</b>")
+        if known:
+            head.append(f"{len(known)} חריגים מותרים (ראו RULES.md)")
+        more = len(rows) - 12
+        self.warn.setText(" · ".join(head) + "<br>" + "<br>".join(rows[:12]) + (f"<br>ועוד {more}…" if more > 0 else ""))
+        self.warn.show()
+
+    def open_problem(self, link):
+        if link.startswith("page:"):
+            self.page_no.setValue(int(link[5:]) + 1)
+            self.go_to_page()
 
     def show_pages(self):
         while self.pages_lay.count():
