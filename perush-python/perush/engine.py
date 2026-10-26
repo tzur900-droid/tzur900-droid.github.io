@@ -83,11 +83,27 @@ def layout_specs(specs, width_at, tight=1.0):
     for sp in specs:
         y += sp.mt
         ls = break_lines(sp.words, sp.base, sp.lh, width_at, y, sp.align, tight)
+        if sp.cut and len(ls) > 1 and ls[-1].natural < 0.9 * ls[-1].width:
+            # the text runs on to the next page and its last line is short: the words move
+            # down a little (more room between them on every line of the paragraph, the same
+            # number of lines), so that the last line fills and no line has wide gaps
+            lo, hi, best = 1.0, 1.6, None
+            for _ in range(8):
+                mid = (lo + hi) / 2
+                l2 = break_lines(sp.words, sp.base, sp.lh, width_at, y, sp.align, tight * mid)
+                if len(l2) == len(ls):
+                    best, lo = l2, mid
+                else:
+                    hi = mid
+            if best is not None and best[-1].natural > ls[-1].natural:
+                ls = best
         for k, l in enumerate(ls):
             l.mt = sp.mt if k == 0 else 0.0
             l.mb = sp.mb if k == len(ls) - 1 else 0.0
             l.kind = sp.kind
-        if ls and sp.cut:
+        if ls and sp.cut and ls[-1].natural >= 0.6 * ls[-1].width:
+            # the text runs on to the next page: its last line is justified, unless it is
+            # short (its words would stand far apart)
             ls[-1].last = False
             ls[-1].force = getattr(sp, "force", False)
         if ls:
@@ -577,12 +593,14 @@ class Engine:
         r["min_v"] = next((it["idx"] for _, it, _, _ in segs if it["type"] == "v"), None)
         # every commentary of a verse whose text is on the page begins on the page
         r["start_ok"] = True
+        r["late_v"] = set()
         for c, ptr, req, alll, req_h in plans:
             e, w = r["ptrs"][c]
             for v in {x["v"] for x in alll}:
                 idx = self.first_idx[c].get(v)
                 if idx is not None and not (e > idx or (e == idx and w > 0)):
                     r["start_ok"] = False
+                    r["late_v"].add(v)
         r["req_fit"] = r["req_fit"] and r["start_ok"]
         if not r["req_fit"] and tight == 1.0 and segs and not force:
             # a little less room between the words of the commentaries (over all their lines)
@@ -590,6 +608,89 @@ class Engine:
             if r2["req_fit"]:
                 return r2
         return r
+
+    def thin_text(self, r):
+        """Whether the page has only one line of text (no heading) over its commentaries."""
+        if not (r["sections"] or r["at_end"]) or any(l.kind == "h" for l in r["text"]):
+            return False
+        return len([l for l in r["text"] if l.kind == "p"]) == 1
+
+    def good_page(self, r, late_last=False):
+        """late_last: the commentary of the page's last verse may begin at the top of the next
+        page (only to save a line of text from standing alone on a page)."""
+        starts = r["start_ok"] or (late_last and r["late_v"] <= {r["max_v"]})
+        return (r["top_fits"] and starts and (not self.sides or r["col_full"] or r["at_end"])
+                and not self.page_unstarted(r) and self.fills(r))
+
+    def fills(self, r):
+        """Whether the page comes out without a hole: the room left can be spread over its
+        lines (with no commentary, only the text's lines open, as justify does)."""
+        spare = self.contentH - self.total_h(r)
+        if r["sections"] or r["at_end"]:
+            return self.can_close(r, spare)
+        text = [l for l in r["text"] if l.kind == "p"]
+        return spare < self.main_lh * 1.5 or bool(text) and spare / len(text) <= self.main_lh * 0.16
+
+    def join_prev(self, prev, thin):
+        """The page before again, now running on to the end of the thin page's text. None
+        if it doesn't make a good page (then self.ptrs is as it was)."""
+        cur = dict(self.ptrs)
+        page = self.pages.pop()       # (the side of the page depends on the number of pages)
+        self.ptrs = dict(prev["ptrs"])
+        # the translation may go on under the text on these pages too
+        self.allow_band = True
+        try:
+            return self._join_prev(prev, thin, cur, page)
+        finally:
+            self.allow_band = False
+
+    def ends_to_try(self, b):
+        """Where a joined page may end: at the end of the thin page's last verse (so that
+        no word of it is left alone), else where the thin page ended."""
+        out = []
+        if b[1] > 0 and b[0] < len(self.items):
+            out.append((b[0] + 1, 0) if b[0] + 1 < len(self.items) else (len(self.items), 0))
+        out.append(b)
+        return out
+
+    def _join_prev(self, prev, thin, cur, page):
+        self.pages.append(page)
+        for b in self.ends_to_try(thin["b"]):
+            self.pages.pop()
+            r = self.compose(prev["pos"], b, False, prev["pre"])
+            self.pages.append(page)
+            if self.good_page(r):
+                return r
+        # or the page before ends earlier, so that the next page has more than a line
+        page = self.pages.pop()
+        g0, g1 = self.g_of(prev["pos"]), self.g_of(page[0]["b"])
+        found = None
+        for x in range(g1 - 1, max(g0, g1 - 200), -1):
+            q = self.compose(prev["pos"], self.pos(x), False, prev["pre"])
+            # ending on a full line, or failing that at the end of a verse
+            if not (self.good_page(q) and (self.full_line_end(q, g0, x) == x or self.pos(x)[1] == 0)):
+                continue
+            keep = dict(self.ptrs)
+            self.ptrs.update(q["ptrs"])
+            self.pages.append(page)    # the next page's side
+            nxt = self.search_page(self.pos(x), None)
+            self.pages.pop()
+            self.ptrs = keep
+            if not self.thin_text(nxt):
+                found = q
+                break
+        self.pages.append(page)
+        if found is None:
+            # last of all: the thin page's text at the end of the page before, the commentary
+            # of its last verse beginning at the top of the next page
+            for b in self.ends_to_try(thin["b"]):
+                self.pages.pop()
+                r = self.compose(prev["pos"], b, False, prev["pre"])
+                self.pages.append(page)
+                if self.good_page(r, late_last=True):
+                    return r
+            self.ptrs = cur
+        return found
 
     def leaves_unstarted(self, inf, n):
         """Whether, after its first n words, a translation's entries on the page leave a verse
@@ -861,9 +962,11 @@ class Engine:
         return g2 if g2 > g0 else g
 
     def run(self):
+        # a section of text with commentary or without (a haftara); a new parasha, and the
+        # haftarot of the festivals, begin a section of their own, on a new page
         sections = []
         for it in self.all_items:
-            if sections and sections[-1]["noComm"] == it["noComm"]:
+            if sections and sections[-1]["noComm"] == it["noComm"] and not self.opens_page(it):
                 sections[-1]["items"].append(it)
             else:
                 sections.append({"noComm": it["noComm"], "items": [it]})
@@ -877,8 +980,8 @@ class Engine:
                 self.plain_start = (0, 0)
             else:
                 after = sections[si + 2] if si + 2 < len(sections) else None
-                self.comm_after_plain = bool(after and not after["noComm"])
-                self.run_comm(sec["items"], nxt["items"] if nxt else None)
+                self.comm_after_plain = bool(after and not after["noComm"] and not self.opens_page(after["items"][0]))
+                self.run_comm(sec["items"], nxt["items"] if nxt and nxt["noComm"] else None)
         pages = []
         first = int(self.P.get("firstPage") or 1)
         for n, (r, chapter, parasha) in enumerate(self.pages):
@@ -886,6 +989,14 @@ class Engine:
         if self.P.get("titlePage"):
             pages = self.title_pages(self.contents(pages, first)) + pages
         return pages
+
+    def opens_page(self, it):
+        """A heading that begins a new page: a parasha, or the haftarot of the festivals."""
+        if it["type"] != "h":
+            return False
+        if it["noComm"]:
+            return it["text"].startswith("הפטרות ")
+        return re.match(r"^פרש(ת|ה)\s", it["text"]) is not None
 
     def contents(self, pages, first):
         """(heading, page number, level) of the parashot and haftarot, for the table of
@@ -945,6 +1056,7 @@ class Engine:
         self.pre = None
         pos = (0, 0)
         guard = 0
+        before = None   # where the last page began, to take it again when the next page is too thin
 
         def pending():
             return pos[0] < len(self.items) or any(not self.done(c, p) for c, p in self.ptrs.items())
@@ -1008,6 +1120,20 @@ class Engine:
                             best["col_w"] = dict(self.col_w)
                             break
                     self.col_w = dict(best.get("col_w", base))
+            if self.thin_text(best):
+                # a line of text alone over a page of commentary: never. Rather a page of
+                # commentary only, the words going on with the text of the next page, or else
+                # the words at the end of the page before, their commentary beginning there
+                only = None
+                if not best["at_end"]:
+                    only = self.compose(pos, pos, False, pre, comm_only=True)
+                if only is not None and only["sections"] and self.can_close(only, self.contentH - self.total_h(only)):
+                    best = only
+                elif before is not None:
+                    joined = self.join_prev(before, best)
+                    if joined is not None:
+                        self.pages.pop()
+                        pos, pre, best = before["pos"], before["pre"], joined
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
             if last and next_plain:
                 budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM
@@ -1049,6 +1175,7 @@ class Engine:
                 # lines of the whole page (text, commentaries and haftara)
                 self.spread_page(best)
             best["items"] = self.items
+            before = {"pos": pos, "pre": pre, "ptrs": dict(self.ptrs)}
             self.pages.append((best, chapter, parasha))
             pre = None
             stuck = best["b"] == pos and all(best["ptrs"].get(c) == p for c, p in self.ptrs.items())
@@ -1144,7 +1271,7 @@ class Engine:
             near = None
             for x in range(min(self.total, g + 80), g, -1):
                 q = self.compose(pos, self.pos(x), False, pre)
-                if not (q["req_fit"] and q["top_fits"] and self.contentH - self.total_h(q) < 1.5 * self.main_lh):
+                if not (q["req_fit"] and q["top_fits"] and self.fills(q)):
                     continue
                 if self.full_line_end(q, g0, x) == x:
                     best = q
@@ -1201,7 +1328,7 @@ class Engine:
         x = g - 1
         while x > g0 and g - x <= 250:
             r = self.compose(pos, self.pos(x), False, pre)
-            closes = lambda q: self.can_close(q, self.contentH - self.total_h(q))
+            closes = self.fills
             if (r["col_full"] or r["at_end"]) and not self.page_unstarted(r):
                 if self.text_h_ok(r) and closes(r):
                     r2, x2 = self.end_on_full_line(pos, g0, x, r, pre)
@@ -1266,11 +1393,12 @@ class Engine:
             self.plain_start = end
             it = lst[min(frm[0], len(lst) - 1)]
             spare = budget - h
-            if done and next_sec and not next_sec["noComm"] and spare > self.room_for_section():
+            if (done and next_sec and not next_sec["noComm"] and not self.opens_page(next_sec["items"][0])
+                    and spare > self.room_for_section()):
                 # the commented text continues under the end of the haftara on this page
                 self.pre = {"lines": lines, "h": h, "chapter": it["chapter"], "parasha": it["parasha"], "items": lst}
                 break
-            if not done or next_sec:
+            if not done:
                 n_lines = len([l for l in lines if l.kind == "p"])
                 h = self.stretch_lines(lines, spare, max(self.main_lh * 3, n_lines * self.main_lh * 0.3))
             r = {"a": frm, "b": end, "at_end": True, "pre": None, "ptrs": {}, "side": {}, "sections": [],
