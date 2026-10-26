@@ -25,7 +25,8 @@ import time
 from dataclasses import dataclass, field
 
 from .model import entry_tokens, heb, page_mm, parse_comm, parse_main
-from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, even_lines, full_width, space, width, words_of
+from .textlayout import (PT_PER_MM, Line, Style, Word, break_lines, even_lines, full_width, space, split_maqaf, width,
+                         words_of)
 
 EPS = 0.01
 # an automatic-width translation column: its share of the line stays within these (%)
@@ -36,6 +37,7 @@ LOOSE = 1.12
 # looking ahead: a page and the next with a cost under GOOD are taken as they are; another
 # way to end a page is taken only if it does better by MARGIN
 GOOD, MARGIN = 60.0, 25.0
+LOOK_AHEAD = 1      # how many pages ahead each page looks
 # the letter (פ / ס) at the end of an open / a closed section
 SECTION_FONT = "David Libre"
 
@@ -148,13 +150,14 @@ def line_start(line):
 def space_ratio(l):
     """How many normal spaces wide the spaces of a line come out when drawn (render.draw_line)."""
     ws = l.words
-    if len(ws) < 2 or l.align != "justify" or l.last:
+    gaps = sum(1 for w in ws[:-1] if not w.join)
+    if gaps < 1 or l.align != "justify" or l.last:
         return 1.0
     total = sum(w.w for w in ws)
     fill = 0.3 if getattr(l, "force", False) else 0.6
     if total < l.width * fill:
         return 1.0
-    return (l.width - total) / (len(ws) - 1) / space(l.base)
+    return (l.width - total) / gaps / space(l.base)
 
 
 def restack(lines):
@@ -660,6 +663,11 @@ class Engine:
         """The page is chosen: the words of each paragraph on it are spread over its lines
         again, so that the spaces come out even (RULES.md, rule 8). The number of lines stays,
         so nothing else on the page moves."""
+        # in the text a line may end after a maqaf (only now: the page itself was laid out with
+        # whole words, so allowing it changes nothing but the spaces)
+        for l in r["text"]:
+            if getattr(l, "kind", "p") == "p":
+                l.words = split_maqaf(l.words)
         even_paragraphs(r["text"])
         for s in r["side"].values():
             even_paragraphs(s["col"])
@@ -667,6 +675,9 @@ class Engine:
         for s in r["sections"]:
             even_paragraphs(s["lines"])
         if r.get("post"):
+            for l in r["post"]["lines"]:
+                if getattr(l, "kind", "p") == "p":
+                    l.words = split_maqaf(l.words)
             even_paragraphs(r["post"]["lines"])
 
     def thin_text(self, r):
@@ -1215,15 +1226,16 @@ class Engine:
             g["thin_ok"] = True
         return g
 
-    def look(self, r, base):
-        """The cost of the page that would follow r."""
-        if r["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in r["ptrs"].items()):
+    def look(self, r, base, depth=LOOK_AHEAD):
+        """The cost of the pages that would follow r (as the rules give them directly)."""
+        if depth < 1 or r["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in r["ptrs"].items()):
             return 0.0
         saved = dict(self.ptrs)
         self.ptrs.update(r["ptrs"])
         self.pages.append(None)        # (the side of the next page)
         try:
-            return self.page_cost(self.decide(r["b"], None, base))
+            nxt = self.decide(r["b"], None, base)
+            return self.page_cost(nxt) + self.look(nxt, base, depth - 1)
         finally:
             self.pages.pop()
             self.ptrs = saved
@@ -1279,7 +1291,7 @@ class Engine:
         spare = self.contentH - self.total_h(r)
         if not r["at_end"]:
             # a hole in the middle of a parasha is the worst of all (RULES.md, rule 7)
-            c += (6e4 + spare * 20) if not self.fills(r) else spare * 0.3
+            c += (3e5 + spare * 20) if not self.fills(r) else spare * 0.3
         for l in r["text"]:
             q = space_ratio(l)
             if q > 3:
@@ -1496,6 +1508,9 @@ class Engine:
             if not lines:
                 break
             self.plain_start = end
+            for l in lines:
+                if getattr(l, "kind", "p") == "p":
+                    l.words = split_maqaf(l.words)
             even_paragraphs(lines)
             it = lst[min(frm[0], len(lst) - 1)]
             spare = budget - h

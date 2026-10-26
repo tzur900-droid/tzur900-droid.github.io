@@ -10,15 +10,16 @@ def draw_line(p, line, x_right, top):
     if not ws:
         return
     total = sum(w.w for w in ws)
-    n = len(ws)
+    # the spaces of the line (none after a word that ends with a maqaf)
+    gaps = sum(1 for w in ws[:-1] if not getattr(w, "join", False))
     fill = 0.3 if getattr(line, "force", False) else 0.6
-    justify = (line.align == "justify" and not line.last and n > 1 and total >= line.width * fill)
-    gap = (line.width - total) / (n - 1) if justify else space(line.base)
-    if n > 1 and total + gap * (n - 1) > line.width:
-        gap = (line.width - total) / (n - 1)     # a line set with tighter spaces
+    justify = (line.align == "justify" and not line.last and gaps > 0 and total >= line.width * fill)
+    gap = (line.width - total) / gaps if justify else space(line.base)
+    if gaps > 0 and total + gap * gaps > line.width:
+        gap = (line.width - total) / gaps     # a line set with tighter spaces
     x = x_right
     if line.align == "center":
-        x = x_right - (line.width - (total + gap * (n - 1))) / 2
+        x = x_right - (line.width - (total + gap * gaps)) / 2
     m = metrics(line.base)
     nominal = line.base.size * 1.0
     baseline = top + (line.h - (m.ascent() + m.descent())) / 2 + m.ascent()
@@ -28,7 +29,8 @@ def draw_line(p, line, x_right, top):
         x -= w.w
         p.setFont(qfont(w.style))
         p.drawText(QPointF(x, baseline), w.text)
-        x -= gap
+        if not getattr(w, "join", False):
+            x -= gap
 
 
 def draw_page(p, page):

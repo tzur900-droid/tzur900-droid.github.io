@@ -6,6 +6,7 @@ Lines are right-to-left: each line knows its right edge and width, and its words
 drawn from the right.
 """
 import os
+import re
 from dataclasses import dataclass, field
 
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetricsF, QImage
@@ -92,16 +93,45 @@ class Word:
     w: float
     ref: object = None  # where the word comes from (for following positions in the text)
     glue: bool = False  # never the last word of a line (it belongs with the word after it)
+    join: bool = False  # ends with a maqaf: no space after it (a line may still end with it)
 
 
-def words_of(tokens, base, ref=None):
-    """[(text, bold)] -> [Word] in style base (bold where marked)."""
+MAQAF = "\u05be"
+
+
+def words_of(tokens, base, ref=None, maqaf=False):
+    """[(text, bold)] -> [Word] in style base (bold where marked). maqaf: a word joined by
+    maqaf is set as its parts (the maqaf ending each but the last, with no space after it),
+    so that a line may end after a maqaf; the parts keep the word's ref."""
     out = []
     bold = base.with_bold(True)
     for i, (t, b) in enumerate(tokens):
         st = bold if b else base
-        out.append(Word(t, st, width(st, t), ref(i) if ref else None))
+        r = ref(i) if ref else None
+        parts = [t]
+        if maqaf and MAQAF in t.strip(MAQAF):
+            parts = [x for x in re.split("(?<=" + MAQAF + ")", t) if x]
+        for k, part in enumerate(parts):
+            out.append(Word(part, st, width(st, part), r, join=k < len(parts) - 1))
     return out
+
+
+def split_maqaf(words):
+    """The words with each maqaf-joined word as its parts (see words_of), keeping refs."""
+    out = []
+    for w in words:
+        if w.join or MAQAF not in w.text.strip(MAQAF):
+            out.append(w)
+            continue
+        parts = [x for x in re.split("(?<=" + MAQAF + ")", w.text) if x]
+        for k, part in enumerate(parts):
+            out.append(Word(part, w.style, width(w.style, part), w.ref, w.glue if k == len(parts) - 1 else False,
+                            join=k < len(parts) - 1))
+    return out
+
+
+def gap_after(w, sp):
+    return 0.0 if w.join else sp
 
 
 @dataclass
@@ -132,14 +162,15 @@ def break_lines(words, base, lh, width_at, y0=0.0, align="justify", tight=1.0):
         cur = [words[i]]
         nat = words[i].w
         j = i + 1
-        while j < n and nat + sp + words[j].w <= w + 0.01:
-            nat += sp + words[j].w
+        while j < n and nat + gap_after(words[j - 1], sp) + words[j].w <= w + 0.01:
+            nat += gap_after(words[j - 1], sp) + words[j].w
             cur.append(words[j])
             j += 1
         while j < n and len(cur) > 1 and cur[-1].glue:
             # a word that belongs with the next one goes down with it
             j -= 1
-            nat -= sp + cur.pop().w
+            w_ = cur.pop()
+            nat -= gap_after(cur[-1], sp) + w_.w
         lines.append(Line(cur, right, w, nat, lh, base, align, j >= n, y))
         y += lh
         i = j
@@ -191,8 +222,10 @@ def even_lines(lines, slack=10):
     n = len(words)
     s = space(lines[0].base)
     pre = [0.0]
+    joins = [0]                      # joins[k]: maqaf joins among the first k words
     for w in words:
         pre.append(pre[-1] + w.w)
+        joins.append(joins[-1] + (1 if w.join else 0))
     starts = []
     k = 0
     for l in lines:
@@ -203,9 +236,10 @@ def even_lines(lines, slack=10):
     # spaces already even (no line wider than twice a normal space): nothing to do
     worst = 0.0
     for k, l in enumerate(lines):
-        if k == n_lines - 1 and free_last or len(l.words) < 2:
+        g = sum(1 for w in l.words[:-1] if not w.join)
+        if k == n_lines - 1 and free_last or g < 1:
             continue
-        worst = max(worst, (l.width - sum(w.w for w in l.words)) / ((len(l.words) - 1) * s))
+        worst = max(worst, (l.width - sum(w.w for w in l.words)) / (g * s))
     if worst <= 2.0:
         return False
 
@@ -215,12 +249,13 @@ def even_lines(lines, slack=10):
         if m <= 0:
             return INF
         total = pre[j] - pre[i]
+        gaps = (m - 1) - (joins[j - 1] - joins[i])      # spaces between the words of the line
         width_ = lines[line_no].width
         if line_no == n_lines - 1 and free_last:
-            return 0.0 if total + (m - 1) * s * 0.85 <= width_ + 0.01 else INF
-        if m == 1:
+            return 0.0 if total + gaps * s * 0.85 <= width_ + 0.01 else INF
+        if gaps <= 0:
             return 1e4 if total <= width_ + 0.01 else INF
-        r = (width_ - total) / ((m - 1) * s)
+        r = (width_ - total) / (gaps * s)
         if r < 0.85:
             return INF
         c = (r - 1) ** 2 * 100 if r >= 1 else (1 - r) ** 2 * 400
@@ -260,5 +295,5 @@ def even_lines(lines, slack=10):
     for k, l in enumerate(lines):
         ws = words[cuts[k]:cuts[k + 1]]
         l.words = ws
-        l.natural = sum(w.w for w in ws) + max(0, len(ws) - 1) * s
+        l.natural = sum(w.w for w in ws) + sum(gap_after(w, s) for w in ws[:-1])
     return True
