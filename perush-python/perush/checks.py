@@ -60,7 +60,7 @@ def check(eng, pages):
     if "???" in eng.P.get("main", ""):
         out.append(Problem("text", -1, "", "'???' בטקסט העיקרי"))
 
-    starts = [n for n in range(off, len(pages)) if opens_section(pages[n])]
+    starts = [n for n in range(off, len(pages)) if opens_section(pages[n], 80 + eng.gm_band())]
     for k, (r, chapter, parasha) in enumerate(eng.pages):
         n = k + off
         pg = pages[n]
@@ -90,15 +90,15 @@ def check(eng, pages):
                 add("hole", n, f"{gap:.0f} נקודות")
     for n in range(off, len(pages)):
         for t, y in section_headings(pages[n]):
-            if y > eng.m + eng.head_h + 10:
+            if y > eng.m + eng.head_h + eng.gm_band() + 10:
                 add("parasha", n, t)
     return out
 
 
-def opens_section(pg):
+def opens_section(pg, top=80):
     """Whether the page begins with a parasha (or the haftarot of the festivals)."""
     hs = section_headings(pg)
-    return bool(hs) and hs[0][1] < 80
+    return bool(hs) and hs[0][1] < top
 
 
 def section_headings(pg):
@@ -176,7 +176,7 @@ def late_commentaries(eng, r):
     out = []
     if lo is None or hi is None or hi < 0:
         return out
-    for c in eng.bottoms:
+    for c in eng.bottoms + eng.gm:
         ptr = r["ptrs"].get(c)
         if ptr is None:
             continue

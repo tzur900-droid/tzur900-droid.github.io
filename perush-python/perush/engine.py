@@ -38,6 +38,7 @@ LOOSE = 1.12
 # way to end a page is taken only if it does better by MARGIN
 GOOD, MARGIN = 60.0, 25.0
 LOOK_AHEAD = 1      # how many pages ahead each page looks
+GM_STRETCH = 0.2    # a Talmud page: how much more room each line may take to fill the page
 # the letter (פ / ס) at the end of an open / a closed section
 SECTION_FONT = "David Libre"
 
@@ -212,14 +213,20 @@ class Engine:
         self.sides = [i for i, c in enumerate(self.comms) if c["place"] == "side"]
         self.bottoms = [i for i, c in enumerate(self.comms) if c["place"] == "bottom"]
         self.unders = [i for i, c in enumerate(self.comms) if c["place"] == "under"]
+        # the shape of a Talmud page (RULES.md): the text in the middle, one commentary on the
+        # inner side and one on the outer side, both above it too
+        self.gm_mode = P.get("layout") == "gemara"
+        self.gm_inner = next((i for i, c in enumerate(self.comms) if c["place"] == "inner"), None) if self.gm_mode else None
+        self.gm_outer = next((i for i, c in enumerate(self.comms) if c["place"] == "outer"), None) if self.gm_mode else None
+        self.gm = [c for c in (self.gm_inner, self.gm_outer) if c is not None]
         self.style = {i: Style(c["font"], float(c["size"])) for i, c in enumerate(self.comms)}
         self.side_lh = {i: self.comms[i]["size"] * self.lh_k for i in self.sides}
-        self.note_lh = {i: self.comms[i]["size"] * self.note_k for i in self.bottoms}
+        self.note_lh = {i: self.comms[i]["size"] * self.note_k for i in self.bottoms + self.gm}
 
         labels = [it["label"] for it in self.all_items if it["type"] == "v" and not it["noComm"]]
         # each translation / commentary is one stream of entries in verse order
         self.streams, self.first_idx = {}, {}
-        for i in self.sides + self.bottoms:
+        for i in self.sides + self.bottoms + self.gm:
             st, first = [], {}
             for v, raws in enumerate(self.parsed[i]):
                 if not raws:
@@ -376,10 +383,12 @@ class Engine:
     def done(self, c, ptr):
         return ptr[0] >= self.sec_end.get(c, len(self.streams[c]))
 
-    def take(self, words, base, lh, w, max_lines, tight=1.0):
-        """The first max_lines lines of words at width w (a new entry is not started
-        with fewer than three of its words). Returns (lines, number of words taken)."""
-        lines = break_lines(words, base, lh, full_width(w), tight=tight)
+    def take(self, words, base, lh, w, max_lines, tight=1.0, width_at=None):
+        """The first max_lines lines of words at width w (or in the shape width_at; a new
+        entry is not started with fewer than three of its words). Returns (lines, number of
+        words taken)."""
+        shape = width_at or full_width(w)
+        lines = break_lines(words, base, lh, shape, tight=tight)
         if len(lines) <= max_lines:
             return lines, len(words)
         lines = lines[:max(0, max_lines)]
@@ -392,7 +401,7 @@ class Engine:
             k -= 1      # the entry's letter goes with it
         taken = n - k - (1 if k >= 0 and words[k].ref[0] == "L" else 0)
         if k >= 0 and 0 < taken < 3:
-            lines = break_lines(words[:k], base, lh, full_width(w), tight=tight)
+            lines = break_lines(words[:k], base, lh, shape, tight=tight)
             n = k
         if lines:
             lines[-1].last = False
@@ -502,6 +511,8 @@ class Engine:
                 self.progress(len(self.pages))
 
     def _compose(self, a, b, force=False, pre=None, comm_only=False, tight=1.0):
+        if self.gm_mode:
+            return self._compose_gm(a, b, force, pre, comm_only)
         items = self.items
         segs = self.segments(a, b)
         at_end = b[0] >= len(items)
@@ -605,52 +616,9 @@ class Engine:
 
         # commentaries under the text
         room = self.contentH - used - top_h - self.sgap
-        plans = []
-        for c in self.bottoms:
-            ptr = self.ptrs[c]
-            req = self.list_from(c, ptr, last_full)
-            alll = self.list_from(c, ptr, max_v)
-            req_h = 0.0
-            if req:
-                rw = self.entry_words(c, req)
-                req_h = self.section_h(c, len(break_lines(rw, self.style[c], self.note_lh[c], full_width(self.note_col_w(c)))))
-            plans.append((c, ptr, req, alll, req_h))
-        req_total = sum(p[4] for p in plans if p[2]) + 1.2 * PT_PER_MM * max(0, sum(1 for p in plans if p[2]) - 1)
-        r["req_fit"] = top_fits and req_total <= room + EPS
-        placed_any = False
-        for n, (c, ptr, req, alll, req_h) in enumerate(plans):
-            r["ptrs"][c] = ptr
-            if not alll:
-                continue
-            later = sum(self.reserve(p, r["req_fit"]) for p in plans[n + 1:])
-            budget = room - later - (1.2 * PT_PER_MM if placed_any else 0.0)
-            nlh = self.note_lh[c]
-            rows = int((budget - self.note_pad() - self.note_title_h(c) + EPS) // nlh)
-            if force and not placed_any and rows < 1:
-                rows = 1
-            if rows < 1:
-                continue
-            words = self.entry_words(c, alll)
-            lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"], tight)
-            if not lines:
-                continue
-            h = self.section_h(c, len(lines))
-            r["sections"].append({"c": c, "lines": lines, "nlh": nlh, "cut": ntake < len(words), "h": h})
-            room -= h + (1.2 * PT_PER_MM if placed_any else 0.0)
-            placed_any = True
-            r["ptrs"][c] = self.advance(ptr, words, ntake, len(alll))
+        self.place_bottoms(r, room, last_full, max_v, force, tight, top_fits)
         r["max_v"] = max_v
         r["min_v"] = next((it["idx"] for _, it, _, _ in segs if it["type"] == "v"), None)
-        # every commentary of a verse whose text is on the page begins on the page
-        r["start_ok"] = True
-        r["late_v"] = set()
-        for c, ptr, req, alll, req_h in plans:
-            e, w = r["ptrs"][c]
-            for v in {x["v"] for x in alll}:
-                idx = self.first_idx[c].get(v)
-                if idx is not None and not (e > idx or (e == idx and w > 0)):
-                    r["start_ok"] = False
-                    r["late_v"].add(v)
         r["req_fit"] = r["req_fit"] and r["start_ok"]
         if not r["req_fit"] and tight == 1.0 and segs and not force:
             # a little less room between the words of the commentaries (over all their lines)
@@ -674,6 +642,8 @@ class Engine:
             even_paragraphs(s["band"])
         for s in r["sections"]:
             even_paragraphs(s["lines"])
+        for lines in r.get("gm", {}).values():
+            even_paragraphs(lines)
         if r.get("post"):
             for l in r["post"]["lines"]:
                 if getattr(l, "kind", "p") == "p":
@@ -682,7 +652,7 @@ class Engine:
 
     def thin_text(self, r):
         """Whether the page has only one line of text (no heading) over its commentaries."""
-        if not (r["sections"] or r["at_end"]) or any(l.kind == "h" for l in r["text"]):
+        if not (r["sections"] or r.get("gm") or r["at_end"]) or any(l.kind == "h" for l in r["text"]):
             return False
         return len([l for l in r["text"] if l.kind == "p"]) == 1
 
@@ -690,7 +660,7 @@ class Engine:
         """Whether the page comes out without a hole: the room left can be spread over its
         lines (with no commentary, only the text's lines open, as justify does)."""
         spare = self.contentH - self.total_h(r)
-        if r["sections"] or r["at_end"]:
+        if r["sections"] or r["at_end"] or "gm" in r:
             return self.can_close(r, spare)
         text = [l for l in r["text"] if l.kind == "p"]
         return spare < self.main_lh * 1.5 or bool(text) and spare / len(text) <= self.main_lh * 0.16
@@ -715,6 +685,202 @@ class Engine:
                     n += 1
         return n
 
+    # ------------------------------------------------------------ a Talmud page
+
+    def gm_geometry(self):
+        """(inner on the right?, the text column's width, a side column's width, half the
+        width) of a Talmud page."""
+        W, gap = self.W, self.gap
+        wm = W * float(self.P.get("gmMain") or 40) / 100
+        ws = (W - wm - 2 * gap) / 2
+        inner_right = not self.P.get("bookMode") or len(self.pages) % 2 == 0
+        return inner_right, wm, ws, (W - gap) / 2
+
+    def gm_band(self):
+        """The height of the band of the commentaries above the text on a Talmud page."""
+        if not self.gm_mode:
+            return 0.0
+        return int(self.P.get("gmBand", 4) or 0) * max([self.note_lh[c] for c in self.gm] or [self.main_lh])
+
+    def justify_gm(self, r):
+        """A Talmud page: the room left at its foot is spread evenly over all its lines under
+        the band — the text and both commentaries alike, every place moved down in the same
+        proportion, so nothing comes to overlap (at most GM_STRETCH more per line)."""
+        if r["at_end"] and not r.get("more"):
+            return
+        used = self.head_h + (r["pre"]["h"] + self.sgap + 3 * PT_PER_MM if r["pre"] else 0.0)
+        avail = self.contentH - used - (self.notes_h(r) if r["sections"] else 0.0)
+        if r.get("post"):
+            avail -= r["post"]["mt"] + r["post"]["h"]     # a haftara beginning under it
+        band = self.gm_band()
+        lines = list(r["text"]) + [l for ls in r["gm"].values() for l in ls]
+        bottom = max([band] + [l.y + l.h for l in lines])
+        if bottom <= band + EPS or avail <= bottom + 0.3:
+            return
+        k = (avail - band) / (bottom - band)
+        if k > 1 + GM_STRETCH:
+            return
+        for l in lines:
+            if l.y >= band - EPS:
+                l.y = band + (l.y - band) * k
+                l.h *= k
+        r["top_h"] = avail if r["text"] or r["gm"] else r["top_h"]
+
+    def _compose_gm(self, a, b, force, pre, comm_only):
+        """A Talmud page: the band of both commentaries at the top (gmBand lines), then the
+        text in the middle with a commentary on each side. Below the end of the text the
+        commentaries widen, each to half the page (or the whole of it when the other has
+        ended); below the end of a commentary the text widens into its side."""
+        items = self.items
+        segs = [] if comm_only else self.segments(a, b)
+        at_end = b[0] >= len(items) and not comm_only
+        cut = b[1] > 0 or (not at_end and b[0] < len(items) and not self.is_break(items[b[0]]) and not self.P["verseNewLine"])
+        r = {"a": a, "b": b, "at_end": at_end, "pre": pre, "ptrs": dict(self.ptrs), "side": {}, "sections": [],
+             "state": (dict(self.col_w), self.allow_band, self.text_tight, comm_only),
+             "post": None, "req_fit": True, "side_short": False, "col_full": True, "gm": {}}
+        max_v = last_full = -1
+        for i in range(min(b[0] if b[1] > 0 else b[0] - 1, len(items) - 1), -1, -1):
+            if items[i]["type"] == "v":
+                max_v = items[i]["idx"]
+                break
+        for i in range(min(b[0] - 1, len(items) - 1), -1, -1):
+            if items[i]["type"] == "v":
+                last_full = items[i]["idx"]
+                break
+        used = self.head_h + (pre["h"] + self.sgap + 3 * PT_PER_MM if pre else 0.0)
+        avail = self.contentH - used
+        inner_right, wm, ws, half = self.gm_geometry()
+        W, gap = self.W, self.gap
+        band = self.gm_band()
+        # where each column stands, as (right offset, width): the inner side first
+        side_col = {"I": (0.0, ws), "O": (ws + gap + wm + gap, ws)}
+        side_half = {"I": (0.0, half), "O": (half + gap, half)}
+        if not inner_right:
+            side_col = {"I": side_col["O"], "O": side_col["I"]}
+            side_half = {"I": side_half["O"], "O": side_half["I"]}
+        mid = (ws + gap, wm)
+        role = {"I": self.gm_inner, "O": self.gm_outer}
+        INF = 1e9
+        ends = {"I": INF if self.gm_inner is not None else 0.0, "O": INF if self.gm_outer is not None else 0.0,
+                "M": INF if segs else 0.0}
+
+        def main_at(y):
+            lo, hi = mid[0], mid[0] + mid[1]           # from the right
+            for k in ("I", "O"):
+                if ends[k] <= y + EPS:
+                    off, w = side_col[k]
+                    lo, hi = min(lo, off), max(hi, off + w)
+            return lo, hi - lo
+
+        def side_at(k, lh):
+            other = "O" if k == "I" else "I"
+
+            def f(y):
+                # the band above the text: a line that fits in it whole; below the text: once
+                # the text has ended
+                if y + lh <= band + EPS or ends["M"] <= y + EPS:
+                    return (0.0, W) if ends[other] <= y + EPS else side_half[k]
+                return side_col[k]
+            return f
+
+        specs = self.text_specs(segs, cut)
+        lists = {}
+        for k, c in role.items():
+            if c is None:
+                continue
+            ptr = self.ptrs[c]
+            alll = self.list_from(c, ptr, max_v)
+            lists[k] = (c, ptr, self.list_from(c, ptr, last_full), alll, self.entry_words(c, alll))
+        text_lines, text_h = [], 0.0
+        side_lines = {}
+        for _ in range(8):
+            before = dict(ends)
+            if segs:
+                text_lines, text_h = layout_specs(specs, lambda y: main_at(y + band), self.text_tight)
+                ends["M"] = band + text_h
+            for k, (c, ptr, req, alll, words) in lists.items():
+                lh = self.note_lh[c]
+                lines = break_lines(words, self.style[c], lh, side_at(k, lh))
+                fit = [l for l in lines if l.y + lh <= avail + EPS]
+                if len(fit) == len(lines):
+                    side_lines[k] = (lines, len(words))
+                    ends[k] = lines[-1].y + lh if lines else 0.0
+                else:
+                    taken, n = self.take(words, self.style[c], lh, None, len(fit), width_at=side_at(k, lh))
+                    side_lines[k] = (taken, n)
+                    ends[k] = INF
+            if ends == before:
+                break
+        for l in text_lines:
+            l.y += band
+        top_h = max([ends["M"] if segs else 0.0] + [l.y + l.h for k in side_lines for l in side_lines[k][0]])
+        r["text"], r["text_h"], r["top_h"] = text_lines, text_h, top_h
+        r["top_fits"] = top_fits = (not segs) or ends["M"] <= avail + EPS
+        extra = []
+        for k, (c, ptr, req, alll, words) in lists.items():
+            lines, n = side_lines.get(k, ([], 0))
+            r["gm"][c] = lines
+            r["ptrs"][c] = self.advance(ptr, words, n, len(alll))
+            e, w = r["ptrs"][c]
+            if req and not (e > req[-1]["j"] or (e == req[-1]["j"] and n >= len(words))):
+                r["req_fit"] = False
+            extra.append((c, ptr, alll))
+        room = self.contentH - used - top_h - self.sgap
+        self.place_bottoms(r, room, last_full, max_v, force, 1.0, top_fits, extra)
+        r["max_v"] = max_v
+        r["min_v"] = next((it["idx"] for _, it, _, _ in segs if it["type"] == "v"), None)
+        r["req_fit"] = r["req_fit"] and r["start_ok"]
+        return r
+
+    def place_bottoms(self, r, room, last_full, max_v, force, tight, top_fits, extra=()):
+        """The commentaries under the text, in room: what the page owes them (the verses
+        completed on it) in full if it can (req_fit), and as much more as fits. Sets the
+        pointers, start_ok and late_v (extra: more (c, ptr, alll) to check the start of)."""
+        plans = []
+        for c in self.bottoms:
+            ptr = self.ptrs[c]
+            req = self.list_from(c, ptr, last_full)
+            alll = self.list_from(c, ptr, max_v)
+            req_h = 0.0
+            if req:
+                rw = self.entry_words(c, req)
+                req_h = self.section_h(c, len(break_lines(rw, self.style[c], self.note_lh[c], full_width(self.note_col_w(c)))))
+            plans.append((c, ptr, req, alll, req_h))
+        req_total = sum(p[4] for p in plans if p[2]) + 1.2 * PT_PER_MM * max(0, sum(1 for p in plans if p[2]) - 1)
+        r["req_fit"] = r.get("req_fit", True) and top_fits and req_total <= room + EPS
+        placed_any = False
+        for n, (c, ptr, req, alll, req_h) in enumerate(plans):
+            r["ptrs"][c] = ptr
+            if not alll:
+                continue
+            later = sum(self.reserve(p, r["req_fit"]) for p in plans[n + 1:])
+            budget = room - later - (1.2 * PT_PER_MM if placed_any else 0.0)
+            nlh = self.note_lh[c]
+            rows = int((budget - self.note_pad() - self.note_title_h(c) + EPS) // nlh)
+            if force and not placed_any and rows < 1:
+                rows = 1
+            if rows < 1:
+                continue
+            words = self.entry_words(c, alll)
+            lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"], tight)
+            if not lines:
+                continue
+            h = self.section_h(c, len(lines))
+            r["sections"].append({"c": c, "lines": lines, "nlh": nlh, "cut": ntake < len(words), "h": h})
+            room -= h + (1.2 * PT_PER_MM if placed_any else 0.0)
+            placed_any = True
+            r["ptrs"][c] = self.advance(ptr, words, ntake, len(alll))
+        # every commentary of a verse whose text is on the page begins on the page
+        r["start_ok"] = True
+        r["late_v"] = set()
+        for c, ptr, alll in [(p[0], p[1], p[3]) for p in plans] + list(extra):
+            e, w = r["ptrs"][c]
+            for v in {x["v"] for x in alll}:
+                idx = self.first_idx[c].get(v)
+                if idx is not None and not (e > idx or (e == idx and w > 0)):
+                    r["start_ok"] = False
+                    r["late_v"].add(v)
+
     def reserve(self, p, req_fit):
         """Room kept for a commentary placed after another: all of what the page owes it,
         and the first lines of what it begins on the page."""
@@ -730,6 +896,9 @@ class Engine:
 
     def can_close(self, r, hole):
         """Whether a hole of this height can be spread over the page's lines."""
+        if "gm" in r:
+            # a Talmud page: what justify_gm can spread over the lines under the band
+            return hole <= 0.3 or hole <= (r["top_h"] - self.gm_band()) * GM_STRETCH
         if hole <= self.main_lh * 1.5:
             return True
         units = len([l for l in r["text"] if l.kind == "p"])
@@ -752,6 +921,8 @@ class Engine:
         return h
 
     def recompute_top(self, r):
+        if "gm" in r:
+            return          # a Talmud page keeps the heights it was laid out with
         text_h = restack(r["text"])
         r["text_h"] = text_h
         top_h = max([text_h] + [s["h"] for s in r["side"].values()])
@@ -783,6 +954,9 @@ class Engine:
         self.recompute_top(r)
 
     def justify(self, r):
+        if "gm" in r:
+            self.justify_gm(r)
+            return
         self.align_columns(r)
         spare = self.contentH - self.total_h(r)
         # no commentary on the page: open the text's line spacing to the bottom
@@ -858,6 +1032,8 @@ class Engine:
         return taken, h, end, False
 
     def spread_page(self, r):
+        if "gm" in r:
+            return
         spare = self.contentH - self.total_h(r)
         text = [l for l in r["text"] if l.kind == "p"]
         post = [l for l in (r.get("post") or {}).get("lines", []) if l.kind == "p"]
@@ -1422,7 +1598,7 @@ class Engine:
             if self.items[i]["type"] == "v":
                 last = self.items[i]["idx"]
                 break
-        return last >= 0 and any(self.list_from(c, self.ptrs[c], last) for c in self.bottoms)
+        return last >= 0 and any(self.list_from(c, self.ptrs[c], last) for c in self.bottoms + self.gm)
 
     def start_fill(self, pos, g0, g, pre):
         """The least text after g with which every commentary of the page's verses begins
@@ -1492,7 +1668,8 @@ class Engine:
         if ext is not None and not heading_alone and self.full_line_end(ext, g0, gx) == gx:
             return ext, gx
         alt = self.compose(pos, self.pos(g2), False, pre)
-        if (not self.sides or alt["col_full"]) and (not best["req_fit"] or self.can_close(alt, self.total_h(best) - self.total_h(alt))):
+        if ((not self.sides or alt["col_full"]) and (not best["req_fit"] or self.can_close(alt, self.total_h(best) - self.total_h(alt)))
+                and ("gm" not in alt or self.fills(alt) or not self.fills(best))):
             return alt, g2
         return best, g
 
@@ -1548,7 +1725,14 @@ class Engine:
             restack(pre["lines"])
             page.frames.append(Frame(pre["lines"], R, y, ("main", pre.get("items"))))
             y += pre["h"] + self.sgap + 3 * PT_PER_MM
-        if r["text"] or r["side"]:
+        if "gm" in r:
+            # a Talmud page: every line already knows its place in the text area
+            page.frames.append(Frame(r["text"], R, y, ("main", r.get("items"))))
+            for c, lines in r["gm"].items():
+                if lines:
+                    page.frames.append(Frame(lines, R, y, ("comm", c)))
+            y += r["top_h"]
+        elif r["text"] or r["side"]:
             page.frames.append(Frame(r["text"], R, y, ("main", r.get("items"))))
             off_r = off_l = 0.0
             for c in self.sides:

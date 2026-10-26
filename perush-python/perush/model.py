@@ -7,7 +7,8 @@ import copy
 import json
 import re
 
-PLACES = {"side": "טור צמוד לטקסט", "bottom": "מתחת לטקסט", "under": "אחרי כל פסוק"}
+PLACES = {"side": "טור צמוד לטקסט", "bottom": "מתחת לטקסט", "under": "אחרי כל פסוק",
+          "inner": "צד פנימי (דף גמרא)", "outer": "צד חיצוני (דף גמרא)"}
 
 # Page sizes (name, width mm, height mm): the usual sizes for printing seforim, then paper
 # sizes; "custom" takes pageW / pageH from the project.
@@ -65,6 +66,11 @@ DEFAULTS = {
     "titleSub": "",          # the line under the name on the title page ("" = made from the commentaries)
     "toc": True,             # a table of contents behind the title page (a book of more than one parasha)
     "gutter": 7,             # extra margin on the inner side, for the binding (mm; book form only)
+    # the shape of the page: "mg" (Mikraot Gedolot) or "gemara" (a Talmud page: the text in the
+    # middle, the commentaries placed "inner" and "outer" on its sides and above it)
+    "layout": "mg",
+    "gmBand": 4,             # a Talmud page: lines of the commentaries above the text
+    "gmMain": 40,            # a Talmud page: the text column's share of the width (%)
 }
 
 COMM_DEFAULTS = {
