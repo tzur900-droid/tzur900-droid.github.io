@@ -352,6 +352,12 @@ class MainWindow(QMainWindow):
                 files = sorted(f for f in os.listdir(folder) if f.endswith(".json")) if os.path.isdir(folder) else []
                 if not files:
                     continue
+                if len(files) == 1:
+                    # a book in one file: open it straight from the menu
+                    a = menu.addAction(book)
+                    a.triggered.connect(lambda _=False, p=os.path.join(folder, files[0]): self.open_path(p))
+                    found = True
+                    continue
                 sub = menu.addMenu(book)
                 for f in files:
                     a = sub.addAction(os.path.splitext(f)[0])

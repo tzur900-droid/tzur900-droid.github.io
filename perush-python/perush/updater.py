@@ -2,6 +2,7 @@
 files over the program's folder (the installed Python packages in .venv stay)."""
 import io
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -67,8 +68,26 @@ def install(data, progress=None):
                 failed.append(rel)   # e.g. a font file Windows keeps open
             if progress and k % 20 == 0:
                 progress(k, len(names))
+        remove_old_parashot(root, names)
     new_req = open(req_path, encoding="utf-8").read() if os.path.exists(req_path) else ""
     return written, failed, new_req != old_req
+
+
+def remove_old_parashot(root, names):
+    """The ready books now come as one file per book: remove the files of single parashot
+    that earlier versions put in their folders (only those, by their names)."""
+    shipped = {n[len(TOP):] for n in names}
+    folders = {r.split("/")[1] for r in shipped if r.startswith("projects/") and r.count("/") == 2}
+    for book in folders:
+        d = os.path.join(root, "projects", book)
+        if not os.path.isdir(d):
+            continue
+        for f in os.listdir(d):
+            if re.match(r"^.+ \d\d - פרשת .+\.json$", f) and f"projects/{book}/{f}" not in shipped:
+                try:
+                    os.remove(os.path.join(d, f))
+                except OSError:
+                    pass
 
 
 def update_packages():

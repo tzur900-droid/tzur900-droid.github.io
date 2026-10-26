@@ -30,7 +30,9 @@ from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, s
 EPS = 0.01
 # an automatic-width translation column: its share of the line stays within these (%)
 AUTO_MIN, AUTO_MAX = 20.0, 40.0
-LAG_MAX = 55.0     # how wide a translation column may grow on a page where it falls behind
+# a little more room between the words of the text (not seen), so that it reaches further
+# down beside a long translation
+LOOSE = 1.12
 # the letter (פ / ס) at the end of an open / a closed section
 SECTION_FONT = "David Libre"
 
@@ -75,12 +77,12 @@ class Spec:
     kind: str = "p"
 
 
-def layout_specs(specs, width_at):
+def layout_specs(specs, width_at, tight=1.0):
     lines = []
     y = 0.0
     for sp in specs:
         y += sp.mt
-        ls = break_lines(sp.words, sp.base, sp.lh, width_at, y, sp.align)
+        ls = break_lines(sp.words, sp.base, sp.lh, width_at, y, sp.align, tight)
         for k, l in enumerate(ls):
             l.mt = sp.mt if k == 0 else 0.0
             l.mb = sp.mb if k == len(ls) - 1 else 0.0
@@ -175,6 +177,10 @@ class Engine:
         self.memo = {}
         self.ew_cache = {}
         self.last_breath = 0.0
+        # set while a page is chosen: the translation may go on under the text (band), the
+        # text's words a little further apart
+        self.allow_band = False
+        self.text_tight = 1.0
         self._auto_widths()
 
     # ------------------------------------------------------------ text of the page
@@ -413,7 +419,7 @@ class Engine:
         end set above it. comm_only: a page of the commentaries under the text only.
         The same page is tried many times while a page is chosen: it is laid out once."""
         key = (a, b, force, id(pre), comm_only, tight, tuple(sorted(self.ptrs.items())),
-               tuple(sorted(self.col_w.items())), len(self.pages) % 2)
+               tuple(sorted(self.col_w.items())), len(self.pages) % 2, self.allow_band, self.text_tight)
         hit = self.memo.get(key)
         if hit is not None:
             return hit
@@ -466,7 +472,7 @@ class Engine:
             th = self.title_h(c) if lines else 0.0
             info[c] = {"lst": lst, "words": words, "nat": lines, "th": th, "ptr": ptr}
             heights[c] = 1e9 if lines and segs else 0.0
-        text_lines, text_h = layout_specs(specs, self.width_at(heights))
+        text_lines, text_h = layout_specs(specs, self.width_at(heights), self.text_tight)
         r["col_full"] = True
         if segs:
             short = False
@@ -485,7 +491,7 @@ class Engine:
                     short = True
             if short:
                 r["col_full"] = False
-                text_lines, text_h = layout_specs(specs, self.width_at(heights))
+                text_lines, text_h = layout_specs(specs, self.width_at(heights), self.text_tight)
         top_h = text_h
         for c in self.sides:
             inf = info[c]
@@ -500,9 +506,10 @@ class Engine:
                 if inf["mode"] == "full" and col_lines and inf["k"] < len(inf["nat"]):
                     col_lines[-1].last = False
                 mode = inf["mode"]
-                if at_end and inf["k"] < len(inf["nat"]):
-                    # the end of the parasha: the rest of the translation goes under the text
-                    n_c = sum(len(l.words) for l in col_lines)
+                n_c = sum(len(l.words) for l in col_lines)
+                if inf["k"] < len(inf["nat"]) and (at_end or (self.allow_band and self.leaves_unstarted(inf, n_c))):
+                    # the end of the parasha, or the column can't reach the translation of every
+                    # verse on the page: the rest of the translation goes under the text
                     room = avail - max(top_h, inf["th"] + len(col_lines) * slh) - 1 * PT_PER_MM
                     max_lines = int((room + EPS) // slh) if room > 0 else 0
                     band, n_band = self.take(inf["words"][n_c:], self.style[c], slh, self.W, max_lines)
@@ -583,6 +590,26 @@ class Engine:
             if r2["req_fit"]:
                 return r2
         return r
+
+    def leaves_unstarted(self, inf, n):
+        """Whether, after its first n words, a translation's entries on the page leave a verse
+        whose translation hasn't begun."""
+        e, w = self.advance(inf["ptr"], inf["words"], n, len(inf["lst"]))
+        return any(x["j"] > e or (x["j"] == e and w == 0) for x in inf["lst"])
+
+    def page_unstarted(self, r):
+        """How many verses with text on the page have no translation begun on it (or before)."""
+        lo, hi = r.get("min_v"), r.get("max_v")
+        if lo is None or hi is None or hi < 0:
+            return 0
+        n = 0
+        for c in self.sides:
+            e, w = r["ptrs"].get(c, self.ptrs[c])
+            for v in range(lo, hi + 1):
+                idx = self.first_idx[c].get(v)
+                if idx is not None and not (e > idx or (e == idx and w > 0)):
+                    n += 1
+        return n
 
     def reserve(self, p, req_fit):
         """Room kept for a commentary placed after another: all of what the page owes it,
@@ -927,33 +954,60 @@ class Engine:
             self.tick()
             base = dict(self.col_w)
             best = self.search_page(pos, pre)
-            # keep the translation in step with the text: widen the column a little on a
-            # page where it falls behind, narrow it where it runs out
+            # the translation of every verse on the page begins on the page. In this order:
+            # a wider column (within its limit), a little more room between the words of the
+            # text, the rest of the translation under the text, and last less text
             if self.sides and not best["at_end"]:
-                lag = self.page_lag(best)
+                miss = self.page_unstarted(best)
                 short = not best["col_full"]
-                if lag > 1 or short:
-                    sign = 1 if lag > 1 else -1
-                    # where the translation falls behind (a long Targum on a song or a blessing)
-                    # the column may widen past the usual cap, on that page only
-                    steps = (1.5, 3, 5, 8, 12, 16) if lag > 1 else (1.5, 3)
-                    for step in steps:
+                ok = lambda q: (q["col_full"] or q["at_end"]) and (q["start_ok"] or not best["start_ok"])
+                if miss:
+                    prev = None
+                    for step in (1.5, 3, 5, 8, 12, 20):
                         for c in self.sides:
-                            top = (LAG_MAX if lag > 1 else AUTO_MAX) if self.comms[c]["autoW"] else 60.0
-                            self.col_w[c] = min(top, max(12.0, base[c] + sign * step))
+                            top = AUTO_MAX if self.comms[c]["autoW"] else base[c]
+                            self.col_w[c] = min(top, max(12.0, base[c] + step))
+                        if self.col_w == prev:
+                            break
+                        prev = dict(self.col_w)
                         cand = self.search_page(pos, pre)
-                        lag2 = self.page_lag(cand)
-                        ok = (cand["col_full"] or cand["at_end"]) and (cand["start_ok"] or not best["start_ok"])
-                        if ok and (lag2 < lag or (short and sign < 0)):
-                            best, lag, short = cand, lag2, False
+                        m2 = self.page_unstarted(cand)
+                        if ok(cand) and m2 < miss:
+                            best, miss = cand, m2
                             best["col_w"] = dict(self.col_w)
-                            if lag <= 1:
+                            if not miss:
                                 break
                     self.col_w = dict(best.get("col_w", base))
-                if lag > 1:
-                    # still behind: end the text on this page earlier, so that no more than one
-                    # verse waits for its translation
-                    best = self.shorten_for_lag(pos, pre, best)
+                    for tries in (("tight",), ("band",)):
+                        if not miss:
+                            break
+                        if tries[0] == "tight":
+                            self.text_tight = LOOSE
+                        else:
+                            self.allow_band = True
+                        cand = self.search_page(pos, pre)
+                        m2 = self.page_unstarted(cand)
+                        if ok(cand) and m2 < miss:
+                            best, miss = cand, m2
+                            best["col_w"] = dict(self.col_w)
+                        else:
+                            self.text_tight = 1.0 if tries[0] == "tight" else self.text_tight
+                            self.allow_band = False
+                    if miss:
+                        best = self.shorten_for_lag(pos, pre, best)
+                    self.allow_band, self.text_tight = False, 1.0
+                elif short:
+                    # the translation runs out: a narrower column
+                    for step in (1.5, 3):
+                        for c in self.sides:
+                            top = AUTO_MAX if self.comms[c]["autoW"] else 60.0
+                            self.col_w[c] = min(top, max(12.0, base[c] - step))
+                        cand = self.search_page(pos, pre)
+                        if ok(cand) and not self.page_unstarted(cand):
+                            best = cand
+                            best["col_w"] = dict(self.col_w)
+                            break
+                    self.col_w = dict(best.get("col_w", base))
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
             if last and next_plain:
                 budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM
@@ -1148,10 +1202,10 @@ class Engine:
         while x > g0 and g - x <= 250:
             r = self.compose(pos, self.pos(x), False, pre)
             closes = lambda q: self.can_close(q, self.contentH - self.total_h(q))
-            if (r["col_full"] or r["at_end"]) and self.page_lag(r) <= 1:
+            if (r["col_full"] or r["at_end"]) and not self.page_unstarted(r):
                 if self.text_h_ok(r) and closes(r):
                     r2, x2 = self.end_on_full_line(pos, g0, x, r, pre)
-                    if self.page_lag(r2) <= 1 and (r2["col_full"] or r2["at_end"]) and closes(r2):
+                    if not self.page_unstarted(r2) and (r2["col_full"] or r2["at_end"]) and closes(r2):
                         r2["col_w"] = best.get("col_w")
                         return r2
                     r["col_w"] = best.get("col_w")
@@ -1161,23 +1215,6 @@ class Engine:
 
     def text_h_ok(self, r):
         return r["text_h"] >= self.min_text_h or r["at_end"]
-
-    def page_lag(self, r):
-        """How many verses completed on the page still wait for (the end of) their translation."""
-        b = r["b"]
-        last_text = -1
-        for i in range(min(b[0], len(self.items)) - 1, -1, -1):
-            if self.items[i]["type"] == "v":
-                last_text = self.items[i]["idx"]
-                break
-        lag = 0
-        for c in self.sides:
-            st = self.streams[c]
-            e, w = r["ptrs"].get(c, self.ptrs[c])
-            done_v = st[e - 1]["v"] if e > 0 else -1
-            behind = len({x["v"] for x in st[e:] if x["v"] <= last_text})
-            lag = max(lag, behind)
-        return lag
 
     def end_on_full_line(self, pos, g0, g, best, pre):
         """End the text on a full line: run on to the end of the line if the page allows it,
