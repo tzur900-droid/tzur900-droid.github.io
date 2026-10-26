@@ -20,7 +20,7 @@ from PySide6.QtGui import QGuiApplication  # noqa: E402
 
 app = QGuiApplication(sys.argv[:1])
 
-from perush.checks import check, describe, summary  # noqa: E402
+from perush.checks import Problem, check, describe, summary  # noqa: E402
 from perush.engine import Engine  # noqa: E402
 from perush.model import load_project  # noqa: E402
 from perush.textlayout import load_bundled_fonts  # noqa: E402
@@ -40,6 +40,9 @@ def main():
         eng = Engine(load_project(f))
         pages = eng.run()
         errors, known, warns = summary(check(eng, pages))
+        if "דף גמרא" in name and not eng.gm_mode:
+            # a sample of the Talmud page that isn't one tests nothing
+            errors.append(Problem("engine", -1, "", "קובץ הדוגמה של דף גמרא לא מוגדר כדף גמרא"))
         total_errors += len(errors)
         mark = "✗" if errors else "✓"
         print(f"{mark} {name}: {len(pages)} עמודים, {len(errors)} תקלות, {len(known)} חריגים מותרים, {len(warns)} אזהרות ({time.time() - t:.0f} שניות)")
