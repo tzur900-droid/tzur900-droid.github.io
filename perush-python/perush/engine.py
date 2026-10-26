@@ -30,6 +30,7 @@ from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, s
 EPS = 0.01
 # an automatic-width translation column: its share of the line stays within these (%)
 AUTO_MIN, AUTO_MAX = 20.0, 40.0
+LAG_MAX = 55.0     # how wide a translation column may grow on a page where it falls behind
 # the letter (פ / ס) at the end of an open / a closed section
 SECTION_FONT = "David Libre"
 
@@ -933,9 +934,12 @@ class Engine:
                 short = not best["col_full"]
                 if lag > 1 or short:
                     sign = 1 if lag > 1 else -1
-                    for step in (1.5, 3):
+                    # where the translation falls behind (a long Targum on a song or a blessing)
+                    # the column may widen past the usual cap, on that page only
+                    steps = (1.5, 3, 5, 8, 12, 16) if lag > 1 else (1.5, 3)
+                    for step in steps:
                         for c in self.sides:
-                            top = AUTO_MAX if self.comms[c]["autoW"] else 60.0
+                            top = (LAG_MAX if lag > 1 else AUTO_MAX) if self.comms[c]["autoW"] else 60.0
                             self.col_w[c] = min(top, max(12.0, base[c] + sign * step))
                         cand = self.search_page(pos, pre)
                         lag2 = self.page_lag(cand)
