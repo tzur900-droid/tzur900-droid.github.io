@@ -63,6 +63,17 @@ def font_box():
     return b
 
 
+def shrinkable(w):
+    """The settings shrink with the panel (a long choice or font name is cut, not the panel)."""
+    for child in w.findChildren(QComboBox):
+        if child.iconSize().width() > 32:
+            continue      # a list of pictures (the cover's ornaments) keeps its size
+        child.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        child.setMinimumContentsLength(8)
+    for child in w.findChildren(QAbstractSpinBox):
+        child.setMinimumWidth(70)
+
+
 def hint(html):
     l = QLabel(html)
     l.setWordWrap(True)
@@ -142,6 +153,7 @@ class CommEditor(QWidget):
         self.cols.valueChanged.connect(self.changed)
         self.font.currentFontChanged.connect(self.changed)
         self.size.valueChanged.connect(self.changed)
+        shrinkable(self)
         self.update_visibility()
 
     def update_visibility(self):
@@ -275,7 +287,11 @@ class MainWindow(QMainWindow):
         pdf = act("ייצוא PDF…", self.export, "Ctrl+P")
         tb.widgetForAction(pdf).setObjectName("primary")
         act("ייצוא כריכה…", self.export_cover)
-        tb.addSeparator()
+        # a second row for the view, so that the whole toolbar fits in a window of an ordinary screen
+        self.addToolBarBreak()
+        tb = QToolBar()
+        tb.setMovable(False)
+        self.addToolBar(tb)
         tb.addWidget(QLabel(" תצוגה: "))
         self.zoom_box = QComboBox()
         for z in (50, 75, 100, 125, 150, 200):
@@ -534,13 +550,9 @@ class MainWindow(QMainWindow):
         lay.addStretch(1)
         area.setWidget(w)
         side.addTab(area, "עימוד")
-        # the settings shrink with the panel (a long choice or font name is cut, not the panel)
-        for child in w.findChildren(QComboBox):
-            child.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-            child.setMinimumContentsLength(8)
-        for child in w.findChildren(QAbstractSpinBox):
-            child.setMinimumWidth(70)
+        shrinkable(w)
         side.addTab(self.build_cover(), "כריכה")
+        shrinkable(self.cover_box)
         side.currentChanged.connect(lambda _: self.cover_timer.start())    # drawn to the width it is shown at
         # the mouse wheel scrolls the settings, it doesn't change a number or a choice it
         # happens to pass over (only one that was clicked first)
@@ -569,6 +581,7 @@ class MainWindow(QMainWindow):
         area = QScrollArea()
         area.setWidgetResizable(True)
         self.cover_area = area
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         w = QWidget()
         self.cover_box = w
         lay = QVBoxLayout(w)

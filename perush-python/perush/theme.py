@@ -21,11 +21,11 @@ QMainWindow, QDialog {{ background: {BG}; }}
 
 QToolBar {{
     background: {SURFACE}; border: none; border-bottom: 1px solid {BORDER};
-    padding: 6px 8px; spacing: 4px;
+    padding: 4px 6px; spacing: 2px;
 }}
 QToolBar::separator {{ background: {BORDER}; width: 1px; margin: 4px 6px; }}
 QToolButton {{
-    background: transparent; border: none; border-radius: 8px; padding: 6px 10px; color: {TEXT};
+    background: transparent; border: none; border-radius: 8px; padding: 5px 8px; color: {TEXT};
 }}
 QToolButton:hover {{ background: {ACCENT_SOFT}; color: {ACCENT_DARK}; }}
 QToolButton:pressed {{ background: #dfe3ff; }}
