@@ -62,6 +62,8 @@ def main():
     log(f"Qt מוכן · PySide6 {PySide6.__version__}")
     app.setApplicationName("perush")
     app.setLayoutDirection(Qt.RightToLeft)
+    from perush import theme
+    theme.apply(app)
     from perush.textlayout import load_bundled_fonts
     load_bundled_fonts(os.path.join(base_dir(), "fonts"))
     log("גופנים נטענו")

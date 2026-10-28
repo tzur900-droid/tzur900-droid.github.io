@@ -12,7 +12,8 @@ def draw_line(p, line, x_right, top):
     total = sum(w.w for w in ws)
     # the spaces of the line (none after a word that ends with a maqaf)
     gaps = sum(1 for w in ws[:-1] if not getattr(w, "join", False))
-    fill = 0.3 if getattr(line, "force", False) else 0.6
+    # a line that doesn't end its paragraph reaches the end of the line (unless it holds almost nothing)
+    fill = 0.2 if getattr(line, "force", False) else 0.35
     justify = (line.align == "justify" and not line.last and gaps > 0 and total >= line.width * fill)
     gap = (line.width - total) / gaps if justify else space(line.base)
     if gaps > 0 and total + gap * gaps > line.width:

@@ -251,16 +251,16 @@ class MainWindow(QMainWindow):
         books.setText("ספרים מוכנים ▾")
         books.setPopupMode(QToolButton.InstantPopup)
         books.setMenu(self.books_menu())
-        books.setStyleSheet("font-weight:bold;")
+        books.setObjectName("primary")
         tb.addWidget(books)
         act("דוגמה", self.load_example)
         prep = act("הכנת טקסט…", self.open_prepare)
-        tb.widgetForAction(prep).setStyleSheet("font-weight:bold;")
+        tb.widgetForAction(prep).setObjectName("primary")
         act("ייבוא מספריא…", self.import_sefaria)
         act("בדיקת התאמה", self.show_check)
         tb.addSeparator()
         pdf = act("ייצוא PDF…", self.export, "Ctrl+P")
-        tb.widgetForAction(pdf).setStyleSheet("font-weight:bold;")
+        tb.widgetForAction(pdf).setObjectName("primary")
         tb.addSeparator()
         tb.addWidget(QLabel(" תצוגה: "))
         self.zoom_box = QComboBox()
@@ -375,7 +375,7 @@ class MainWindow(QMainWindow):
         side = QTabWidget()
         self.side = side
         side.setDocumentMode(True)
-        side.setStyleSheet("QTabBar::tab { padding:6px 14px; font-size:13px; }")
+        pass
 
         box = QWidget()
         bl = QVBoxLayout(box)
@@ -406,8 +406,22 @@ class MainWindow(QMainWindow):
 
         area = QScrollArea()
         area.setWidgetResizable(True)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         w = QWidget()
         lay = QVBoxLayout(w)
+        # a small preview: the first page, laid out again a moment after each change of a setting
+        pbox = QGroupBox("תצוגה מקדימה (העמוד הראשון)")
+        pl = QVBoxLayout(pbox)
+        self.preview_lbl = QLabel("…")
+        self.preview_lbl.setAlignment(Qt.AlignCenter)
+        self.preview_lbl.setMinimumHeight(330)
+        pl.addWidget(self.preview_lbl)
+        lay.addWidget(pbox)
+        self.preview_timer = QTimer(self)
+        self.preview_timer.setSingleShot(True)
+        self.preview_timer.setInterval(300)
+        self.preview_timer.timeout.connect(self.update_preview)
+        self.preview_sig = None
         box = QGroupBox("עימוד")
         form = QFormLayout(box)
         self.page_size = QComboBox()
@@ -507,6 +521,12 @@ class MainWindow(QMainWindow):
         lay.addStretch(1)
         area.setWidget(w)
         side.addTab(area, "עימוד")
+        # the settings shrink with the panel (a long choice or font name is cut, not the panel)
+        for child in w.findChildren(QComboBox):
+            child.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            child.setMinimumContentsLength(8)
+        for child in w.findChildren(QAbstractSpinBox):
+            child.setMinimumWidth(70)
         # the mouse wheel scrolls the settings, it doesn't change a number or a choice it
         # happens to pass over (only one that was clicked first)
         self.wheel_guard = WheelGuard(self)
@@ -627,23 +647,23 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         self.info = QLabel("מעמד…")
-        self.info.setStyleSheet("padding:6px; color:#444;")
+        self.info.setObjectName("info")
         lay.addWidget(self.info)
         self.warn = QLabel()
         self.warn.setWordWrap(True)
         self.warn.setTextFormat(Qt.RichText)
         self.warn.linkActivated.connect(self.open_problem)
-        self.warn.setStyleSheet("background:#fff4e5; border:1px solid #f5c98b; color:#7c3a06; padding:6px; border-radius:6px;")
+        self.warn.setObjectName("warn")
         self.warn.hide()
         lay.addWidget(self.warn)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet("QScrollArea { background:#e9e6df; }")
         self.pages_box = QWidget()
-        self.pages_box.setStyleSheet("background:#e9e6df;")
+        self.pages_box.setObjectName("pages")
         self.pages_lay = QVBoxLayout(self.pages_box)
         self.pages_lay.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
-        self.pages_lay.setSpacing(18)
+        self.pages_lay.setSpacing(22)
+        self.pages_lay.setContentsMargins(20, 20, 20, 20)
         self.scroll.setWidget(self.pages_box)
         lay.addWidget(self.scroll, 1)
         bar = QHBoxLayout()
@@ -665,8 +685,12 @@ class MainWindow(QMainWindow):
         self.stale = stale
         self.stale_lbl.setText("יש שינויים שעוד לא עומדו — לחצו על עימוד מחדש" if stale else "")
         self.relayout_btn.setStyleSheet(
-            "QPushButton { background:#b45309; color:white; font-weight:bold; padding:4px 18px; border-radius:6px; }"
-            if stale else "QPushButton { padding:4px 18px; }")
+            "QPushButton { background:#ea580c; color:white; border:none; font-weight:600; padding:6px 20px; border-radius:8px; }"
+            "QPushButton:hover { background:#c2410c; }" if stale else "")
+        if not stale:
+            self.relayout_btn.setObjectName("primary")
+            self.relayout_btn.style().unpolish(self.relayout_btn)
+            self.relayout_btn.style().polish(self.relayout_btn)
 
     def request_relayout(self):
         self.generation += 1
@@ -699,6 +723,7 @@ class MainWindow(QMainWindow):
             self.tabs.addTab(CommEditor(c, self.changed), c["name"] or "—")
         self.loading = False
         self.update_statuses()
+        self.schedule_preview(force=True)
 
     def read_editor(self):
         p = self.project
@@ -718,6 +743,52 @@ class MainWindow(QMainWindow):
         for i in range(self.tabs.count()):
             self.tabs.setTabText(i, self.tabs.widget(i).comm["name"] or "—")
 
+    def layout_signature(self):
+        """The settings that change how the page looks (not the texts)."""
+        p = self.project
+        return json.dumps([{k: v for k, v in p.items() if k not in ("main", "comms")},
+                           [{k: v for k, v in c.items() if k != "text"} for c in p.get("comms", [])]],
+                          sort_keys=True, ensure_ascii=False, default=str)
+
+    def schedule_preview(self, force=False):
+        sig = self.layout_signature()
+        if force or sig != self.preview_sig:
+            self.preview_sig = sig
+            self.preview_timer.start()
+
+    def update_preview(self):
+        """Lay out only the first page of the book with the current settings, and show it small."""
+        class Enough(Exception):
+            pass
+
+        p = json.loads(json.dumps(self.project))
+        p["titlePage"] = False
+        eng = None
+
+        def progress(n):
+            if eng is not None and eng.pages and eng.pages[0] is not None:
+                raise Enough()
+
+        try:
+            eng = Engine(p, progress)
+            try:
+                eng.run()
+            except Enough:
+                pass
+            if not eng.pages:
+                self.preview_lbl.setText("אין טקסט")
+                return
+            r, chapter, parasha = eng.pages[0]
+            page = eng.finalize(r, chapter, parasha, model.heb(int(p.get("firstPage") or 1)), 0)
+            ratio = self.devicePixelRatioF()
+            k = 230 / page.width
+            pm = QPixmap.fromImage(page_image(page, k * ratio))
+            pm.setDevicePixelRatio(ratio)
+            self.preview_lbl.setPixmap(pm)
+        except Exception as e:  # the preview must never stop the program
+            _log(f"preview failed: {e}")
+            self.preview_lbl.setText("—")
+
     def update_layout_fields(self):
         """The settings of a Talmud page only when it is chosen."""
         gm = self.layout_box.currentData() == "gemara"
@@ -728,6 +799,7 @@ class MainWindow(QMainWindow):
         if self.loading:
             return
         self.read_editor()
+        self.schedule_preview()
         self.dirty = True
         self.edits = getattr(self, "edits", 0) + 1
         self.update_statuses()
@@ -849,8 +921,24 @@ class MainWindow(QMainWindow):
         self.info.setText("מעמד…")
         _log("מתחיל לעמד")
 
+        # the pages are shown as they are laid out, in their places (after the title pages)
+        lead = self.title_page_count()
+        shown = [0]
+        first = int(self.project.get("firstPage") or 1)
+        eng = None
+
         def progress(n):
             self.info.setText(f"מעמד… עמוד {n + 1}")
+            if eng is not None and len(eng.pages) > shown[0]:
+                keep = dict(eng.col_w)          # (setting out a page uses the widths it was laid out with)
+                # (while looking ahead the engine holds a place for the next page: None)
+                while shown[0] < len(eng.pages) and eng.pages[shown[0]] is not None:
+                    k = shown[0]
+                    r, chapter, parasha = eng.pages[k]
+                    page = eng.finalize(r, chapter, parasha, model.heb(first + k), k)
+                    self.set_page(lead + k, page)
+                    shown[0] += 1
+                eng.col_w = keep
             QApplication.processEvents()
             if self.generation != gen:
                 raise Cancelled()
@@ -869,10 +957,23 @@ class MainWindow(QMainWindow):
             self.warn.show()
             return
         self.running = False
-        self.pages = pages
         self.set_stale(getattr(self, "edits", 0) != edits)
         _log(f"עימוד: {len(pages)} עמודים")
-        self.show_pages()
+        if len(pages) - len(eng.pages) == lead:
+            # the pages shown while laying out are the book's pages: add the title pages and
+            # the last ones, and drop what is left of an earlier, longer layout
+            for k in range(shown[0], len(eng.pages)):
+                self.set_page(lead + k, pages[lead + k])
+            for k in range(lead):
+                self.set_page(k, pages[k])
+            while self.pages_lay.count() > len(pages):
+                item = self.pages_lay.takeAt(self.pages_lay.count() - 1)
+                if item.widget():
+                    item.widget().deleteLater()
+            self.pages = pages
+        else:
+            self.pages = pages
+            self.show_pages()
         _log("התצוגה מוכנה")
         sides = [f" · {self.project['comms'][c]['name']}: רוחב {round(eng.col_w[c])}%" for c in eng.sides]
         self.info.setText(f"{len(pages)} עמודים · {eng.count} פסוקים · {len(self.project['comms'])} פירושים{''.join(sides)}")
@@ -910,6 +1011,42 @@ class MainWindow(QMainWindow):
             self.page_no.setValue(int(link[5:]) + 1)
             self.go_to_page()
 
+    def title_page_count(self):
+        """How many pages come before the text (the title page, the table of contents or a blank
+        page behind it), as Engine.title_pages makes them."""
+        p = self.project
+        if not p.get("titlePage"):
+            return 0
+        parashot = len(re.findall(r"(?m)^\s*#\s*פרש(ת|ה)\s", p.get("main", "")))
+        return 2 if (p.get("toc", True) and parashot >= 2) or p.get("bookMode") else 1
+
+    def page_label(self, n, page):
+        ratio = self.devicePixelRatioF()
+        pm = QPixmap.fromImage(page_image(page, self.zoom * 96 / 72 * ratio))
+        pm.setDevicePixelRatio(ratio)
+        lbl = PageLabel(self, n, self.zoom * 96 / 72)
+        lbl.setPixmap(pm)
+        lbl.setObjectName("page")
+        return lbl
+
+    def set_page(self, n, page):
+        """Show page n (in place of what was shown there, or after the last page)."""
+        while len(self.pages) <= n:
+            self.pages.append(None)
+        self.pages[n] = page
+        lbl = self.page_label(n, page)
+        if n < self.pages_lay.count():
+            old = self.pages_lay.itemAt(n).widget()
+            self.pages_lay.replaceWidget(old, lbl)
+            old.hide()
+            old.setParent(None)
+            old.deleteLater()
+        else:
+            while self.pages_lay.count() < n:
+                spacer = QLabel()
+                self.pages_lay.addWidget(spacer, 0, Qt.AlignHCenter)
+            self.pages_lay.addWidget(lbl, 0, Qt.AlignHCenter)
+
     def show_pages(self):
         while self.pages_lay.count():
             item = self.pages_lay.takeAt(0)
@@ -930,8 +1067,7 @@ class MainWindow(QMainWindow):
             pm.setDevicePixelRatio(ratio)
             lbl = PageLabel(self, n, self.zoom * 96 / 72)
             lbl.setPixmap(pm)
-            lbl.setFrameShape(QFrame.Box)
-            lbl.setStyleSheet("background:white; border:1px solid #c9c4b8;")
+            lbl.setObjectName("page")
             self.pages_lay.addWidget(lbl, 0, Qt.AlignHCenter)
 
     def page_clicked(self, n, x, y):

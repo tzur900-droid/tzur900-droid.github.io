@@ -199,7 +199,7 @@ def space_ratio(l):
     if gaps < 1 or l.align != "justify" or l.last:
         return 1.0
     total = sum(w.w for w in ws)
-    fill = 0.3 if getattr(l, "force", False) else 0.6
+    fill = 0.2 if getattr(l, "force", False) else 0.35       # (as render.draw_line)
     if total < l.width * fill:
         return 1.0
     return (l.width - total) / gaps / space(l.base)
@@ -295,6 +295,8 @@ class Engine:
         self.col_w = {}
         self.memo = {}
         self.ew_cache = {}
+        self.iw_cache = {}
+        self.br_cache = {}
         self.last_breath = 0.0
         # set while a page is chosen: the translation may go on under the text (band), the
         # text's words a little further apart
@@ -348,7 +350,7 @@ class Engine:
             if P["numbers"] and frm == 0:
                 # the verse's number goes with its first word, never alone at the end of a line
                 para.append(Word(it["label"], bold, width(bold, it["label"]), ("l", i), glue=True))
-            para.extend(words_of(it["words"][frm:to], self.main, lambda k, i=i, frm=frm: (i, frm + k)))
+            para.extend(self.item_words(i, it)[frm:to])
             und = []
             if to == len(it["words"]) and it["idx"] >= 0:
                 for u in self.unders:
@@ -373,6 +375,15 @@ class Engine:
             specs[-1].force = True
         return specs
 
+    def item_words(self, i, it):
+        """The words of a verse of the text (made once: they are measured with the text's style)."""
+        key = id(it)        # (a haftara's verses are numbered in a list of their own)
+        ws = self.iw_cache.get(key)
+        if ws is None:
+            ws = words_of(it["words"], self.main, lambda k: (i, k))
+            self.iw_cache[key] = ws
+        return ws
+
     def is_inline(self, it):
         return (it["type"] == "h" and self.P.get("inlineChapters")
                 and re.match(r"^פרק\s+\S+$", it["text"]) is not None)
@@ -394,6 +405,12 @@ class Engine:
             else:
                 out.append(dict(e, start=0, cont=False, j=j))
         return out
+
+    def lst_key(self, c, lst):
+        """What a list of a commentary's passages is: which passages, from which word."""
+        if not lst:
+            return (c,)
+        return (c, lst[0]["j"], lst[0]["start"] if lst[0]["cont"] else 0, lst[-1]["j"])
 
     def entry_words(self, c, lst):
         """The words of the entries in lst: each entry's label (bold), then its words. A
@@ -432,12 +449,32 @@ class Engine:
     def done(self, c, ptr):
         return ptr[0] >= self.sec_end.get(c, len(self.streams[c]))
 
-    def take(self, words, base, lh, w, max_lines, tight=1.0, width_at=None):
+    def broken(self, key, words, base, lh, w, tight=1.0):
+        """break_lines of words at the fixed width w, kept by key (the commentary and the
+        passages the words are made of), since a page is tried many times with the same."""
+        k = (key, round(w, 3), lh, tight)
+        hit = self.br_cache.get(k)
+        if hit is None:
+            lines = break_lines(words, base, lh, full_width(w), tight=tight)
+            pos, hit = 0, []
+            for l in lines:
+                hit.append((pos, pos + len(l.words), l.right, l.width, l.natural, l.last))
+                pos += len(l.words)
+            if len(self.br_cache) > 20000:
+                self.br_cache.clear()
+            self.br_cache[k] = hit
+        return [Line(words[a:b], right, width_, nat, lh, base, "justify", last, n * lh)
+                for n, (a, b, right, width_, nat, last) in enumerate(hit)]
+
+    def take(self, words, base, lh, w, max_lines, tight=1.0, width_at=None, key=None):
         """The first max_lines lines of words at width w (or in the shape width_at; a new
         entry is not started with fewer than three of its words). Returns (lines, number of
-        words taken)."""
+        words taken). key: what the words are (see broken)."""
         shape = width_at or full_width(w)
-        lines = break_lines(words, base, lh, shape, tight=tight)
+        if key is not None and width_at is None:
+            lines = self.broken(key, words, base, lh, w, tight)
+        else:
+            lines = break_lines(words, base, lh, shape, tight=tight)
         if len(lines) <= max_lines:
             return lines, len(words)
         lines = lines[:max(0, max_lines)]
@@ -470,15 +507,18 @@ class Engine:
         return self.W * self.col_w[c] / 100 - self.gap / 2
 
     def width_at(self, heights):
+        cols = [(heights.get(c, 0), self.side_of(c) == "right", self.side_width(c) + self.gap) for c in self.sides]
+        W = self.W
+
         def f(y):
             right = left = 0.0
-            for c in self.sides:
-                if heights.get(c, 0) > y + EPS:
-                    if self.side_of(c) == "right":
-                        right += self.side_width(c) + self.gap
+            for h, on_right, w in cols:
+                if h > y + EPS:
+                    if on_right:
+                        right += w
                     else:
-                        left += self.side_width(c) + self.gap
-            return right, self.W - right - left
+                        left += w
+            return right, W - right - left
         return f
 
     def title_h(self, c):
@@ -594,7 +634,7 @@ class Engine:
             ptr = self.ptrs[c]
             lst = self.list_from(c, ptr, max_v)
             words = self.entry_words(c, lst)
-            lines = break_lines(words, self.style[c], self.side_lh[c], full_width(self.side_width(c)))
+            lines = self.broken(self.lst_key(c, lst), words, self.style[c], self.side_lh[c], self.side_width(c))
             th = self.title_h(c) if lines else 0.0
             info[c] = {"lst": lst, "words": words, "nat": lines, "th": th, "ptr": ptr}
             heights[c] = 1e9 if lines and segs else 0.0
@@ -609,6 +649,13 @@ class Engine:
                 # as many lines as are closest to the height of the text (their spacing is
                 # then opened or closed by at most half a line over the column)
                 cap = max(1, int(round((text_h - inf["th"]) / self.side_lh[c])))
+                nat = inf["nat"]
+                if 1 < len(nat) <= cap and sum(w.w for w in nat[-1].words) < nat[-1].width * 0.5:
+                    # the translation ends on the page with a word or two on its last line: they
+                    # go up into the lines above (a little closer), so the column ends flush
+                    tighter = break_lines(inf["words"], self.style[c], self.side_lh[c], full_width(self.side_width(c)), tight=0.8)
+                    if len(tighter) < len(nat):
+                        inf["nat"] = tighter
                 if len(inf["nat"]) >= cap:
                     inf["k"], inf["mode"] = cap, "full"
                 else:
@@ -685,12 +732,38 @@ class Engine:
         for l in r["text"]:
             if getattr(l, "kind", "p") == "p":
                 l.words = split_maqaf(l.words)
+        text = [l for l in r["text"] if getattr(l, "kind", "p") == "p"]
+        if text and not r["at_end"] and "gm" not in r and text[-1].last:
+            # the text goes on on the next page but its last line here is short: it ends flush
+            # (the words spread over the paragraph's lines, or a word or two left alone go up)
+            k = len(r["text"])
+            while k > 0 and getattr(r["text"][k - 1], "kind", "p") == "p" and (k == len(r["text"]) or not r["text"][k - 1].last):
+                k -= 1
+            run = r["text"][k:]
+            before = list(run)
+            if flush_end(run, fold=True):
+                gone = [l for l in before if l not in run]
+                r["text"] = [l for l in r["text"] if l not in gone]
+                r["text_h"] = restack(r["text"])
+                self.recompute_top(r)
         even_paragraphs(r["text"])
         ends_here = lambda c: r["at_end"] and self.done(c, r["ptrs"][c]) and not r.get("more")
         for c, s in r["side"].items():
-            # (the column keeps its number of lines: the text beside it is laid out around it)
+            # the column may lose a line only where nothing is laid out under it (the text
+            # beside it ends higher); otherwise it keeps its lines
             if not ends_here(c):
-                flush_end(s["col"])
+                lowest = s["col"] and not s["band"] and s["h"] >= r["text_h"] - EPS
+                saved = [(l, list(l.words), l.last, getattr(l, "force", False)) for l in s["col"]]
+                h0, top0 = s["h"], r["top_h"]
+                if flush_end(s["col"], fold=bool(lowest)):
+                    s["h"] = s["th"] + len(s["col"]) * s["slh"]
+                    self.recompute_top(r)
+                    if not self.fills(r):
+                        s["col"][:] = [l for l, _, _, _ in saved]
+                        for l, ws, last, force in saved:
+                            l.words, l.last, l.force = ws, last, force
+                        s["h"], r["top_h"] = h0, top0
+                        flush_end(s["col"])
                 flush_end(s["band"])
             even_paragraphs(s["col"])
             even_paragraphs(s["band"])
@@ -718,6 +791,16 @@ class Engine:
                 if getattr(l, "kind", "p") == "p":
                     l.words = split_maqaf(l.words)
             even_paragraphs(r["post"]["lines"])
+
+    def side_end_fill(self, r):
+        """How full the last line of a translation column that ends on the page is (1 when it
+        doesn't end on the page, or ends with a full line)."""
+        fill = 1.0
+        for c, s in r["side"].items():
+            col = s["col"]
+            if len(col) > 1 and col[-1].last:
+                fill = min(fill, sum(w.w for w in col[-1].words) / col[-1].width)
+        return fill
 
     def thin_text(self, r):
         """Whether the page has only one line of text (no heading) over its commentaries."""
@@ -919,7 +1002,7 @@ class Engine:
             req_h = 0.0
             if req:
                 rw = self.entry_words(c, req)
-                req_h = self.section_h(c, len(break_lines(rw, self.style[c], self.note_lh[c], full_width(self.note_col_w(c)))))
+                req_h = self.section_h(c, len(self.broken(self.lst_key(c, req), rw, self.style[c], self.note_lh[c], self.note_col_w(c))))
             plans.append((c, ptr, req, alll, req_h))
         req_total = sum(p[4] for p in plans if p[2]) + 1.2 * PT_PER_MM * max(0, sum(1 for p in plans if p[2]) - 1)
         r["req_fit"] = r.get("req_fit", True) and top_fits and req_total <= room + EPS
@@ -941,14 +1024,16 @@ class Engine:
                 rows = 1
             lines, ntake = ([], 0)
             if rows >= 1:
-                lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"], tight)
+                lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"], tight,
+                                         key=self.lst_key(c, alll))
             if later and (not lines or ntake < len(words)):
                 # too long for the room left after the first lines of the ones after it: if it
                 # is too long for all the room, it takes all of it, and the ones after it begin
                 # on the next page (RULES.md, rule 5)
                 full = int((room - gap_ - self.note_pad() - self.note_title_h(c) + EPS) // nlh)
                 if full >= 1:
-                    l2, n2 = self.take(words, self.style[c], nlh, self.note_col_w(c), full * self.comms[c]["cols"], tight)
+                    l2, n2 = self.take(words, self.style[c], nlh, self.note_col_w(c), full * self.comms[c]["cols"], tight,
+                                       key=self.lst_key(c, alll))
                     if l2 and n2 < len(words):
                         lines, ntake = l2, n2
                         deferred.add(None)
@@ -1465,6 +1550,28 @@ class Engine:
                         best["col_w"] = dict(self.col_w)
                         break
                 self.col_w = dict(best.get("col_w", base))
+        if self.sides and not best["at_end"] and self.side_end_fill(best) < 0.85:
+            # the translation ends on the page with a short last line: a slightly narrower (or
+            # wider) column, so that it fills its lines and ends flush — the nearest width that
+            # does, else the one whose last line comes out fullest
+            found, fill0 = None, self.side_end_fill(best)
+            for step in (-1, 1, -2, 2, -3, -4, -5, -6):
+                for c in self.sides:
+                    top = AUTO_MAX if self.comms[c]["autoW"] else base[c] + 3
+                    low = AUTO_MIN if self.comms[c]["autoW"] else base[c] - 6
+                    self.col_w[c] = min(top, max(low, best["state"][0].get(c, base[c]) + step))
+                cand = self.search_page(pos, pre)
+                if not ((cand["col_full"] or cand["at_end"]) and (cand["start_ok"] or not best["start_ok"])
+                        and not self.page_unstarted(cand) and self.fills(cand)):
+                    continue
+                f = self.side_end_fill(cand)
+                if f > fill0 + 0.1:
+                    found, fill0 = cand, f
+                    if f >= 0.85:
+                        break
+            if found is not None:
+                best = found
+            self.col_w = dict(base)
         if self.thin_text(best) and not best["at_end"]:
             # a line of text alone over a page of commentary: rather a page of commentary only
             only = self.compose(pos, pos, False, pre, comm_only=True)
