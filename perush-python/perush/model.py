@@ -105,6 +105,7 @@ COMM_DEFAULTS = {
     "width": 32,
     "autoW": True,
     "cols": 2,
+    "dhOnly": None,        # only the dibbur hamatchil bold (None = by the name: yes for the Ramban)
     "text": "",
 }
 
@@ -225,11 +226,35 @@ def tokenize(text):
 _DH = re.compile(r"^(.{1,90}?)\s+[-–—]\s+(.*)$", re.S)
 
 
-def entry_tokens(raw):
-    """A commentary entry: the words before ' - ' (the dibbur hamatchil) are bold."""
+def dh_only(comm):
+    """Whether only the dibbur hamatchil of each passage is bold. The Ramban quotes Rashi, with
+    Rashi's own bold headwords, and the verse's words again: there only the first is bold."""
+    v = comm.get("dhOnly")
+    if v is None:
+        return comm.get("name", "").replace('"', "").replace("״", "").startswith("רמבן")
+    return bool(v)
+
+
+# the dibbur hamatchil begins within the first few words of a passage ('טעם …', 'אמר הכתוב בכאן …')
+DH_START = 8
+
+
+def entry_tokens(raw, only_dh=False):
+    """A commentary entry: the words before ' - ' (the dibbur hamatchil) are bold. With only_dh,
+    of the words marked **bold** only the first bold stretch (the dibbur hamatchil) stays bold."""
     raw = raw.strip()
     if "**" in raw:
-        return tokenize(raw)
+        toks = tokenize(raw)
+        if only_dh:
+            start = next((i for i, (_, b) in enumerate(toks) if b), None)
+            end = start
+            if start is not None:
+                while end < len(toks) and toks[end][1]:
+                    end += 1
+                if start >= DH_START:
+                    start = end = 0
+            toks = [(w, b and start <= i < end) for i, (w, b) in enumerate(toks)]
+        return toks
     m = _DH.match(raw)
     if m:
         return [(w, True) for w in m.group(1).split()] + [(w, False) for w in m.group(2).split()]

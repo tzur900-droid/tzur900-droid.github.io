@@ -24,7 +24,7 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from .model import entry_tokens, heb, page_mm, parse_comm, parse_main
+from .model import dh_only, entry_tokens, heb, page_mm, parse_comm, parse_main
 from .textlayout import (PT_PER_MM, Line, Style, Word, break_lines, even_lines, full_width, space, split_maqaf, width,
                          words_of)
 
@@ -269,6 +269,7 @@ class Engine:
         self.unders = [i for i, c in enumerate(self.comms) if c["place"] == "under"]
         self.bottoms = [i for i, c in enumerate(self.comms) if i not in self.sides + self.unders + self.gm]
         self.style = {i: Style(c["font"], float(c["size"])) for i, c in enumerate(self.comms)}
+        self.dh_only = {i: dh_only(c) for i, c in enumerate(self.comms)}
         self.side_lh = {i: self.comms[i]["size"] * self.lh_k for i in self.sides}
         self.note_lh = {i: self.comms[i]["size"] * self.note_k for i in self.bottoms + self.gm}
 
@@ -282,11 +283,11 @@ class Engine:
                     continue
                 first[v] = len(st)
                 if i in self.sides:
-                    st.append({"v": v, "label": labels[v], "tokens": [t for r in raws for t in entry_tokens(r)], "note": False})
+                    st.append({"v": v, "label": labels[v], "tokens": [t for r in raws for t in entry_tokens(r, self.dh_only[i])], "note": False})
                 else:
                     for k, r in enumerate(raws):
                         # the verse's letter only before its first passage, not before each one
-                        st.append({"v": v, "label": f"({labels[v]})" if k == 0 else "", "tokens": entry_tokens(r), "note": True,
+                        st.append({"v": v, "label": f"({labels[v]})" if k == 0 else "", "tokens": entry_tokens(r, self.dh_only[i]), "note": True,
                                    "p": k})
             self.streams[i], self.first_idx[i] = st, first
         self.ptrs = {i: (0, 0) for i in self.streams}
@@ -357,7 +358,7 @@ class Engine:
                     ent = self.parsed[u][it["idx"]]
                     if ent:
                         st = self.style[u]
-                        toks = [t for r in ent for t in entry_tokens(r)]
+                        toks = [t for r in ent for t in entry_tokens(r, self.dh_only[u])]
                         und.append(Spec(words_of(toks, st), st, st.size * self.note_k, mt=0.3 * PT_PER_MM, kind="u"))
             if to == len(it["words"]) and it.get("sec"):
                 # the end of an open / a closed section: its letter, bold, in another font, the
@@ -554,7 +555,7 @@ class Engine:
         for c in self.sides:
             if not self.comms[c]["autoW"]:
                 continue
-            toks = [t for v, raws in enumerate(self.parsed[c]) if v in verses for r in raws for t in entry_tokens(r)]
+            toks = [t for v, raws in enumerate(self.parsed[c]) if v in verses for r in raws for t in entry_tokens(r, self.dh_only[c])]
             if not toks:
                 continue
             sw = words_of(toks, self.style[c])
