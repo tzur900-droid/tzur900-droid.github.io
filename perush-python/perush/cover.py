@@ -1,0 +1,413 @@
+"""The cover of a book: the front, the spine and the back in one spread, as the printer
+wants it for a soft (glued) binding. A Hebrew book opens from the right, so laid out flat
+the front is on the left, the spine in the middle and the back on the right.
+
+The background goes on past the trim by the bleed; the spine's width is worked out from
+the number of pages and the thickness of the paper. All sizes are in points.
+"""
+import math
+import os
+from dataclasses import dataclass
+
+from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt
+from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen, QPolygonF
+
+from .model import page_mm
+from .textlayout import PT_PER_MM, Style, qfont, width
+
+MM = PT_PER_MM
+
+# (name, background, ink): the ink is the frame, the ornaments and the letters
+PALETTES = {
+    "bordeaux": ("בורדו וזהב", "#5e1a24", "#d4af5a"),
+    "navy": ("כחול כהה וזהב", "#14284b", "#d4af5a"),
+    "green": ("ירוק כהה וזהב", "#1e3b2f", "#d4af5a"),
+    "black": ("שחור וכסף", "#1a1a1a", "#c8c8c8"),
+    "brown": ("חום ושמנת", "#4a2e1f", "#efe3c8"),
+    "cream": ("שמנת וחום", "#f2ead8", "#5a3a22"),
+    "custom": ("צבעים לבחירה", "", ""),
+}
+
+SPINE_DIRS = {
+    "down": "מלמעלה למטה (קוראים בהטיית הראש ימינה)",
+    "up": "מלמטה למעלה (קוראים בהטיית הראש שמאלה)",
+    "across": "שורות לרוחב השדרה (לספר עבה)",
+}
+
+SLUG = 8 * MM          # the room for the crop marks outside the bleed
+FRAME = 9 * MM         # the outer frame, from the trim (and from the fold of the spine)
+FRAME_GAP = 2.5 * MM   # between the outer frame and the inner one
+
+
+def colors(P):
+    """(background, ink) of the project's cover."""
+    key = P.get("coverPalette") or "bordeaux"
+    if key in PALETTES and key != "custom":
+        return PALETTES[key][1], PALETTES[key][2]
+    return P.get("coverBg") or "#5e1a24", P.get("coverInk") or "#d4af5a"
+
+
+def spine_mm(P, n_pages):
+    """The width of the spine: as given, or a leaf (two pages) of paper for every two pages."""
+    if float(P.get("coverSpineW") or 0) > 0:
+        return float(P["coverSpineW"])
+    leaves = math.ceil(max(0, n_pages) / 2)
+    return round(leaves * float(P.get("coverPaper") or 0.1), 1)
+
+
+@dataclass
+class Cover:
+    P: dict
+    title: str
+    sub: list            # the lines under the name on the front
+    n_pages: int
+    w: float             # the trimmed page
+    h: float
+    spine: float
+    bleed: float
+    slug: float
+
+    @property
+    def width(self):
+        return 2 * (self.slug + self.bleed + self.w) + self.spine
+
+    @property
+    def height(self):
+        return 2 * (self.slug + self.bleed) + self.h
+
+    @property
+    def x0(self):        # the trim's left edge (the left edge of the front)
+        return self.slug + self.bleed
+
+    @property
+    def y0(self):
+        return self.slug + self.bleed
+
+    def panels(self):
+        """The trimmed front, spine and back: (x, y, w, h)."""
+        x, y = self.x0, self.y0
+        return ((x, y, self.w, self.h), (x + self.w, y, self.spine, self.h),
+                (x + self.w + self.spine, y, self.w, self.h))
+
+    def size_mm(self):
+        return self.width / MM, self.height / MM
+
+
+def make_cover(P, n_pages, sub_lines=()):
+    """The cover of project P, whose book has n_pages pages. sub_lines: the lines under the
+    name on the title page (used when the cover has none of its own)."""
+    wmm, hmm = page_mm(P)
+    title = (P.get("coverTitle") or "").strip() or (P.get("title") or "").strip()
+    own = [l.strip() for l in str(P.get("coverSub") or "").split("\n") if l.strip()]
+    return Cover(P, title, own or list(sub_lines), n_pages, wmm * MM, hmm * MM, spine_mm(P, n_pages) * MM,
+                 max(0.0, float(P.get("coverBleed") or 0)) * MM, SLUG if P.get("coverMarks") else 0.0)
+
+
+# ---------------------------------------------------------------- text
+
+def wrap(text, st, w):
+    """Words into lines no wider than w (a word wider than w gets a line of its own)."""
+    lines, cur = [], []
+    for word in text.split():
+        trial = " ".join(cur + [word])
+        if cur and width(st, trial) > w:
+            lines.append(" ".join(cur))
+            cur = [word]
+        else:
+            cur.append(word)
+    if cur:
+        lines.append(" ".join(cur))
+    return lines
+
+
+def fit(text, family, size, bold, w, max_lines, least=6.0):
+    """The largest size (from size down) at which text fits in max_lines lines of width w."""
+    while size > least:
+        st = Style(family, size, bold)
+        lines = wrap(text, st, w)
+        if len(lines) <= max_lines and all(width(st, l) <= w for l in lines):
+            return st, lines
+        size *= 0.94
+    st = Style(family, least, bold)
+    return st, wrap(text, st, w)
+
+
+def draw_text(p, text, st, cx, baseline):
+    """A line centred on cx."""
+    p.setFont(qfont(st))
+    p.drawText(QPointF(cx - width(st, text) / 2, baseline), text)
+
+
+def ascent(st):
+    from .textlayout import metrics
+    return metrics(st).ascent()
+
+
+# ---------------------------------------------------------------- drawing
+
+def pen(color, lw, style=Qt.SolidLine):
+    pn = QPen(QColor(color))
+    pn.setWidthF(lw)
+    pn.setStyle(style)
+    return pn
+
+
+def diamond(p, cx, cy, r, color):
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+    p.drawPolygon(QPolygonF([QPointF(cx, cy - r), QPointF(cx + r, cy), QPointF(cx, cy + r), QPointF(cx - r, cy)]))
+    p.setBrush(Qt.NoBrush)
+
+
+def frames(p, x, y, w, h, ink):
+    """The double frame of a panel, with a diamond in each corner of the inner one."""
+    p.setBrush(Qt.NoBrush)
+    p.setPen(pen(ink, 1.8))
+    p.drawRect(QRectF(x + FRAME, y + FRAME, w - 2 * FRAME, h - 2 * FRAME))
+    i = FRAME + FRAME_GAP
+    p.setPen(pen(ink, 0.6))
+    p.drawRect(QRectF(x + i, y + i, w - 2 * i, h - 2 * i))
+    for cx in (x + i, x + w - i):
+        for cy in (y + i, y + h - i):
+            diamond(p, cx, cy, 1.6 * MM, ink)
+
+
+def ornament(p, cx, cy, half, ink):
+    """A line, a diamond, a line (as under the name on the title page)."""
+    p.setPen(pen(ink, 0.9))
+    p.drawLine(QPointF(cx - half, cy), QPointF(cx - 4 * MM, cy))
+    p.drawLine(QPointF(cx + 4 * MM, cy), QPointF(cx + half, cy))
+    diamond(p, cx, cy, 2.4 * MM, ink)
+    diamond(p, cx - half - 2 * MM, cy, 1.1 * MM, ink)
+    diamond(p, cx + half + 2 * MM, cy, 1.1 * MM, ink)
+
+
+def image(path):
+    if not path or not os.path.isfile(path):
+        return None
+    img = QImage(path)
+    return None if img.isNull() else img
+
+
+def draw_image(p, img, x, y, w, h, align="center"):
+    """img inside the box (x, y, w, h), keeping its shape; returns the rect it took."""
+    k = min(w / img.width(), h / img.height())
+    iw, ih = img.width() * k, img.height() * k
+    ix = x + (w - iw) / 2 if align == "center" else (x if align == "left" else x + w - iw)
+    r = QRectF(ix, y + (h - ih) / 2, iw, ih)
+    p.drawImage(r, img)
+    return r
+
+
+def draw_front(p, c, x, y, w, h, ink, family):
+    frames(p, x, y, w, h, ink)
+    p.setPen(QColor(ink))
+    inner = w - 2 * (FRAME + FRAME_GAP + 9 * MM)
+    cx = x + w / 2
+    big, tlines = fit(c.title or " ", family, w * 0.15, True, inner, 3)
+    t_lh = big.size * 1.25
+    subs = []
+    for k, text in enumerate(c.sub):
+        first = k == 0 and len(c.sub) > 1
+        st, ls = fit(text, family, big.size * (0.42 if first else 0.34), first, inner, 3)
+        subs.append((st, ls))
+    # the block: the name, the ornament, the lines under it; centred a little above the middle
+    gap = 7 * MM
+    total = len(tlines) * t_lh + gap * 2 + sum(len(ls) * st.size * 1.45 + 2 * MM for st, ls in subs)
+    top = y + h * 0.42 - total / 2
+    yy = top
+    for l in tlines:
+        draw_text(p, l, big, cx, yy + ascent(big) + (t_lh - big.size * 1.1) / 2)
+        yy += t_lh
+    ornament(p, cx, yy + gap, min(inner * 0.32, 45 * MM), ink)
+    yy += gap * 2
+    p.setPen(QColor(ink))
+    for st, ls in subs:
+        for l in ls:
+            draw_text(p, l, st, cx, yy + ascent(st))
+            yy += st.size * 1.45
+        yy += 2 * MM
+    foot = (c.P.get("coverFoot") or "").strip()
+    if foot:
+        st, ls = fit(foot, family, big.size * 0.3, False, inner, 2)
+        lh = st.size * 1.4
+        yy = y + h - FRAME - FRAME_GAP - 9 * MM - len(ls) * lh
+        p.setPen(QColor(ink))
+        for l in ls:
+            draw_text(p, l, st, cx, yy + ascent(st))
+            yy += lh
+
+
+def draw_back(p, c, x, y, w, h, ink, family):
+    frames(p, x, y, w, h, ink)
+    pad = FRAME + FRAME_GAP + 9 * MM
+    inner = w - 2 * pad
+    bottom = y + h - pad
+    code = image(c.P.get("coverBarcode"))
+    if code:
+        # at the foot, on the side of the spine, on white (a barcode needs its quiet zone)
+        bw, bh = min(42 * MM, inner * 0.45), 26 * MM
+        k = min(bw / code.width(), bh / code.height())
+        iw, ih = code.width() * k, code.height() * k
+        r = QRectF(x + pad, bottom - ih, iw, ih)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("white"))
+        p.drawRect(r.adjusted(-1.5 * MM, -1.5 * MM, 1.5 * MM, 1.5 * MM))
+        p.setBrush(Qt.NoBrush)
+        p.drawImage(r, code)
+        bottom = r.top() - 8 * MM
+    text = str(c.P.get("coverBack") or "").strip()
+    if not text:
+        return
+    paras = [t.strip() for t in text.split("\n")]
+    room = bottom - (y + pad)
+    size = max(9.0, w / MM * 0.085)
+    while True:
+        st = Style(family, size)
+        lh = size * 1.6
+        lines = []
+        for t in paras:
+            lines.extend(wrap(t, st, inner) if t else [""])
+        if len(lines) * lh <= room or size <= 7:
+            break
+        size *= 0.95
+    total = len(lines) * lh
+    # in the upper part of the room, but no higher than its top
+    yy = y + pad + max(0.0, (room - total) * 0.35)
+    p.setPen(QColor(ink))
+    for l in lines:
+        if l:
+            draw_text(p, l, st, x + w / 2, yy + ascent(st) + (lh - size * 1.1) / 2)
+        yy += lh
+
+
+def draw_spine(p, c, x, y, w, h, ink, family):
+    if w < 3 * MM:
+        return
+    band = 13 * MM
+    logo = image(c.P.get("coverLogo"))
+    logo_h = min(16 * MM, max(6 * MM, w * 1.2)) if logo else 0.0
+    p.setBrush(Qt.NoBrush)
+    tops = (y + band, y + h - band - logo_h)
+    for k, by in enumerate(tops):
+        d = 1.6 * MM if k == 0 else -1.6 * MM
+        p.setPen(pen(ink, 1.4))
+        p.drawLine(QPointF(x, by), QPointF(x + w, by))
+        p.setPen(pen(ink, 0.5))
+        p.drawLine(QPointF(x, by + d), QPointF(x + w, by + d))
+    if logo:
+        draw_image(p, logo, x + 1.5 * MM, y + h - band - logo_h + 3 * MM, w - 3 * MM, logo_h - 3 * MM)
+    title = (c.P.get("coverSpine") or "").strip() or c.title
+    sub = (c.P.get("coverSpineSub") or "").strip()
+    a, b = tops[0] + 6 * MM, tops[1] - 6 * MM          # the room for the text, down the spine
+    p.setPen(QColor(ink))
+    if c.P.get("coverSpineDir") == "across":
+        inner = w - 3 * MM
+        yy = a + 4 * MM
+        size = min(w * 0.5, 34.0)
+        for text, bold in ((title, True), (sub, False)):
+            if not text:
+                continue
+            st, ls = fit(text, family, size, bold, inner, 4)
+            for l in ls:
+                draw_text(p, l, st, x + w / 2, yy + ascent(st))
+                yy += st.size * 1.3
+            yy += 3 * MM
+            size = st.size * 0.55          # the line after the name, smaller than it
+        return
+    length = b - a
+    size = min(w * 0.55, 40.0)          # the letters across the spine: about half its width
+    while size > 4:
+        st, sst = Style(family, size, True), Style(family, size * 0.62)
+        gap = size * 1.2 if sub else 0
+        total = width(st, title) + (gap + width(sst, sub) if sub else 0)
+        if total <= length:
+            break
+        size *= 0.95
+    p.save()
+    p.translate(x + w / 2, (a + b) / 2)
+    p.rotate(-90 if c.P.get("coverSpineDir", "down") != "up" else 90)
+    # one line along the spine: the name, then (smaller) the line after it; the text begins
+    # at the right of the rotated line, as Hebrew does
+    from .textlayout import metrics
+    base = metrics(st).tightBoundingRect("אבגדהמש").height() / 2   # the letters centred across the spine
+    xr = total / 2
+    p.setFont(qfont(st))
+    p.drawText(QPointF(xr - width(st, title), base), title)
+    if sub:
+        p.setFont(qfont(sst))
+        p.drawText(QPointF(xr - width(st, title) - gap - width(sst, sub), base * sst.size / st.size), sub)
+        diamond(p, xr - width(st, title) - gap / 2, 0, st.size * 0.12, ink)
+    p.restore()
+
+
+def draw_marks(p, c):
+    """Crop marks at the corners of the trim, and the folds of the spine at its top and foot."""
+    p.setPen(pen("black", 0.3))
+    L, R = c.x0, c.x0 + 2 * c.w + c.spine
+    T, B = c.y0, c.y0 + c.h
+    near, far = c.bleed + 1 * MM, c.bleed + c.slug
+    for x in (L, R):
+        for yy, s in ((T, -1), (B, 1)):
+            p.drawLine(QPointF(x, yy + s * near), QPointF(x, yy + s * far))
+    for yy in (T, B):
+        for x, s in ((L, -1), (R, 1)):
+            p.drawLine(QPointF(x + s * near, yy), QPointF(x + s * far, yy))
+    for x in (c.x0 + c.w, c.x0 + c.w + c.spine):
+        p.drawLine(QPointF(x, T - near), QPointF(x, T - far))
+        p.drawLine(QPointF(x, B + near), QPointF(x, B + far))
+
+
+def draw_guides(p, c):
+    """On screen only: the trim and the folds of the spine, dashed."""
+    p.setBrush(Qt.NoBrush)
+    p.setPen(pen("#22d3ee", 0.8, Qt.DashLine))
+    p.drawRect(QRectF(c.x0, c.y0, 2 * c.w + c.spine, c.h))
+    for x in (c.x0 + c.w, c.x0 + c.w + c.spine):
+        p.drawLine(QPointF(x, c.y0), QPointF(x, c.y0 + c.h))
+
+
+def draw_cover(p, c, guides=False):
+    bg, ink = colors(c.P)
+    family = c.P.get("coverFont") or c.P.get("mainFont") or "Frank Ruhl Libre"
+    p.setLayoutDirection(Qt.RightToLeft)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(bg))
+    p.drawRect(QRectF(c.slug, c.slug, c.width - 2 * c.slug, c.height - 2 * c.slug))
+    p.setBrush(Qt.NoBrush)
+    front, spine, back = c.panels()
+    draw_front(p, c, *front, ink, family)
+    draw_spine(p, c, *spine, ink, family)
+    draw_back(p, c, *back, ink, family)
+    if c.slug:
+        draw_marks(p, c)
+    if guides:
+        draw_guides(p, c)
+
+
+def cover_image(c, zoom=1.0):
+    """The cover as an image (zoom = pixels per point), with the trim and folds marked."""
+    img = QImage(max(1, int(c.width * zoom)), max(1, int(c.height * zoom)), QImage.Format_ARGB32_Premultiplied)
+    img.fill(QColor("white"))
+    dpm = round(72 / 0.0254)      # a point of type is a point of the page, as in the layout
+    img.setDotsPerMeterX(dpm)
+    img.setDotsPerMeterY(dpm)
+    p = QPainter(img)
+    p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
+    p.scale(zoom, zoom)
+    draw_cover(p, c, guides=True)
+    p.end()
+    return img
+
+
+def export_cover(c, path, title=""):
+    """The cover as a PDF of one page, its size the whole spread with the bleed (in colour)."""
+    writer = QPdfWriter(path)
+    writer.setResolution(72)
+    writer.setTitle((title or "עימוד פירושים") + " — כריכה")
+    writer.setCreator("עימוד פירושים")
+    size = QPageSize(QSizeF(c.width / MM, c.height / MM), QPageSize.Millimeter, "cover", QPageSize.ExactMatch)
+    writer.setPageLayout(QPageLayout(size, QPageLayout.Portrait, QMarginsF(0, 0, 0, 0), QPageLayout.Millimeter))
+    p = QPainter(writer)
+    draw_cover(p, c)
+    p.end()

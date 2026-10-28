@@ -71,6 +71,24 @@ DEFAULTS = {
     "layout": "mg",
     "gmBand": 4,             # a Talmud page: lines of the commentaries above the text
     "gmMain": 40,            # a Talmud page: the text column's share of the width (%)
+    # the cover (a separate PDF: back, spine and front in one spread, with bleed)
+    "coverPalette": "bordeaux",  # a key of cover.PALETTES, or "custom" (coverBg / coverInk)
+    "coverBg": "#5e1a24",
+    "coverInk": "#d4af5a",
+    "coverFont": "",         # "" = the font of the text
+    "coverTitle": "",        # the name on the front ("" = the title of the book)
+    "coverSub": "",          # the lines under it, one per line ("" = as on the title page)
+    "coverFoot": "",         # a line at the foot of the front (a publisher, a year)
+    "coverSpine": "",        # the name on the spine ("" = the name on the front)
+    "coverSpineSub": "",     # smaller, after it on the spine (a volume, the commentaries)
+    "coverSpineDir": "down", # the spine's text: "down" (top to bottom), "up", or "across" (lines across it)
+    "coverBack": "",         # the text on the back (a description, a dedication)
+    "coverBarcode": "",      # an image put at the foot of the back (a barcode); a file path
+    "coverLogo": "",         # an image at the foot of the spine (a publisher's logo); a file path
+    "coverPaper": 0.1,       # the thickness of a leaf (two pages), mm: the spine is worked out from it
+    "coverSpineW": 0,        # the width of the spine, mm (0 = from the pages and the paper)
+    "coverBleed": 3,         # the background goes on past the edge by this much (mm), for the trim
+    "coverMarks": False,     # crop marks outside the bleed
 }
 
 COMM_DEFAULTS = {
