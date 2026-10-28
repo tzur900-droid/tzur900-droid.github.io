@@ -12,8 +12,8 @@
 <header class="top">
   <h1>מחולל גופנים עבריים</h1>
   <ol class="steps">
-    <li><b>בוחרים סגנון</b> (ספר, כותרת, נקי…) ומזיזים את המחוונים. כל האותיות משתנות יחד.</li>
-    <li><b>רוצים לשנות אות אחת?</b> לוחצים עליה ב"עריכת אות" וגוררים את הנקודות שעל הקווים שלה.</li>
+    <li><b>בוחרים סגנון</b> (או מערבבים שניים) ומזיזים את המחוונים. כל האותיות משתנות יחד.</li>
+    <li><b>רוצים לשנות אות?</b> לוחצים עליה ב"עריכת אות", ובוחרים צורה מהאפשרויות או גוררים נקודות. אותו חלק משתנה בכל האותיות.</li>
     <li><b>כותבים שם ולוחצים "הורדת הגופן".</b> לוחצים פעמיים על הקובץ שירד ובוחרים "התקנה" — והגופן מופיע בוורד ובכל תוכנה.</li>
   </ol>
 </header>
@@ -23,6 +23,10 @@
     <section>
       <h2>סגנון מוכן</h2>
       <div class="chips" id="presets"></div>
+      <div class="mix">
+        <div class="lbl"><span>ערבוב שני סגנונות</span><span class="val" id="mix-v"></span></div>
+        <div class="mix-row"><select id="mix-a" aria-label="סגנון ראשון"></select><input type="range" id="mix-t" min="0" max="100" value="50" aria-label="כמה מכל סגנון"><select id="mix-b" aria-label="סגנון שני"></select></div>
+      </div>
       <button type="button" class="btn ghost wide" id="surprise">🎲 הפתעה — גופן אקראי (אבל לא מוזר)</button>
     </section>
 
@@ -71,13 +75,33 @@
 
     <section class="editor" aria-label="עריכת אות">
       <h2>עריכת אות</h2>
-      <p class="hint">לוחצים על אות, ואז גוררים את הנקודות. <span class="key on"></span> נקודה על הקו —
-        מזיזה אותו. <span class="key off"></span> ריבוע קטן — מכופף את העיקול. השינוי נשמר באות גם כשמזיזים את המחוונים.</p>
       <div class="letters" id="letters"></div>
+
+      <h3>1. לבחור צורה</h3>
+      <p class="hint">לוחצים על אחת הצורות, והאות מקבלת אותה. לא מצאת? "אפשרויות חדשות", או "עוד בכיוון הזה" לגרסאות קרובות לאות כמו שהיא עכשיו.</p>
+      <div class="variants" id="ed-variants"></div>
+      <div class="row">
+        <button type="button" class="btn ghost small" id="ed-more">🔀 אפשרויות חדשות</button>
+        <button type="button" class="btn ghost small" id="ed-like">🎯 עוד בכיוון הזה</button>
+      </div>
+
+      <h3>2. או לגרור בעצמך</h3>
+      <p class="hint">גוררים את הנקודות. <span class="key on"></span> נקודה על הקו, <span class="key off"></span> ריבוע מכופף את העיקול.
+        הנקודה נצמדת לקווי העזר (המקווקווים). <b>Shift</b> בזמן הגרירה = רק ישר לצדדים או רק למעלה ולמטה.</p>
+      <div class="toggles">
+        <label><input type="checkbox" id="ed-sync" checked> לשנות את אותו חלק בכל האותיות</label>
+        <label><input type="checkbox" id="ed-snap" checked> הצמדה לקווים</label>
+      </div>
+      <p class="part" id="ed-part">מצביעים על נקודה כדי לראות לאיזה חלק של האות היא שייכת.</p>
       <div class="ed-wrap"><svg id="ed-svg" role="img" aria-label="האות בעריכה"></svg></div>
-      <button type="button" class="btn primary wide apply" id="ed-apply">✨ לעשות את כל האותיות בסגנון של האותיות שערכתי</button>
-      <p class="status" id="ed-msg" role="status">משנים אות אחת או כמה, ולוחצים כאן: כל שאר האותיות מקבלות את אותם שינויים
-        בחלקים הדומים (ראש הגג, הפינות, הרגליים, הבסיס…).</p>
+
+      <h3>3. לראות אותה במילים</h3>
+      <div class="ed-wrap line-wrap"><svg id="ed-line" role="img" aria-label="האות בתוך שורה"></svg></div>
+      <label class="field">מילים לבדיקה
+        <input type="text" id="ed-words" value="בראשית ברא שלום" autocomplete="off">
+      </label>
+      <div id="ed-checks" class="checks"></div>
+
       <div class="row">
         <button type="button" class="btn ghost small" id="ed-undo">↶ ביטול</button>
         <button type="button" class="btn ghost small" id="ed-reset">החזרת האות למקור</button>

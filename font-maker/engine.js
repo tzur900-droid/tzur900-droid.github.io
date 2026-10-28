@@ -26,6 +26,10 @@
     spacing: 1.0,  // space between letters
     descender: 0.42, // length of the final letters below the line, part of the height
     ascender: 0.42,  // height of lamed above the letters, part of the height
+    pen: 0,          // roundness of the pen: 0 a flat rectangle, 1 an oval (round ends and joins)
+    heel: 0.5,       // length of the heel of bet and mem, beyond the stem
+    overhang: 0.5,   // how far the roof of dalet and he reaches past the stem
+    headShape: 0.5,  // shape of the head: 0 a square block, 0.5 a wedge, 1 a round drop
   };
 
   // ---------------------------------------------------------------- paths
@@ -281,14 +285,18 @@
       const hw = S + T * 1.1 * s;      // along the roof
       const hd = T * 0.7 * s;          // below the roof
       const yb = y0 - T + 1;           // underside of the roof
-      const rr = Math.min(S * 0.6, hw * 0.3);
+      const hs = this.ctx.prm.headShape;
+      // the tip: almost square for a block, round for a drop
+      const rr = hs <= 0.5 ? Math.max(1, Math.min(S * 0.6, hw * 0.3) * (hs / 0.5)) : Math.min(S * 0.6, hw * 0.3) + (hw * 0.5 - Math.min(S * 0.6, hw * 0.3)) * (hs - 0.5) * 2;
+      // the underside: straight for a block, a hollow curve for a wedge, a full curve for a drop
+      const f = hs <= 0.5 ? 0.9 + (0.3 - 0.9) * (hs / 0.5) : 0.3 - 0.3 * (hs - 0.5) * 2;
       const xt = xa + S * 0.12;
       // the head moves with the roof it hangs on
       const roof = this.strokes.findIndex((st) => Math.abs(st.path.start[0] - x) < 1 && Math.abs(st.path.start[1] - (y0 - T / 2)) < 1);
       const i = this.shape([
         lineSeg([xa, y0], [xt, yb - hd + rr]),
         [[xt, yb - hd + rr], [xt, yb - hd + rr * 0.45], [xt + rr * 0.45, yb - hd], [xt + rr, yb - hd]],
-        [[xt + rr, yb - hd], [xt + rr + (hw - rr) * 0.3, yb - hd * 0.9], [xa + hw * 0.6, yb], [xa + hw, yb]],
+        [[xt + rr, yb - hd], [xt + rr + (hw - rr) * f, yb - hd * (hs > 0.5 ? 1 : 0.9)], [xa + hw * (hs > 0.5 ? 0.95 : 0.6), yb - hd * (hs > 0.5 ? (hs - 0.5) * 1.2 : 0)], [xa + hw, yb]],
         lineSeg([xa + hw, yb], [xa + hw, y0]),
         lineSeg([xa + hw, y0], [xa, y0]),
       ]);
@@ -324,7 +332,7 @@
     },
     bet(d, c) {
       const { t, b, S, H, r, s } = c, W = d.W;
-      const heel = H * (0.05 + 0.06 * s);
+      const heel = H * (0.01 + 0.2 * c.prm.heel) * (0.4 + 0.6 * s);
       const xr = W - heel - S / 2;
       d.P(0, t).R(xr, t, 0, -1, r).L(xr, b);
       d.P(0, b).L(W, b);
@@ -344,7 +352,7 @@
     },
     dalet(d, c) {
       const { t, S, H } = c, W = d.W;
-      const xr = W - W * 0.13 - S / 2;
+      const xr = W - W * 0.26 * c.prm.overhang - S / 2;
       d.P(0, t).L(W, t);
       d.P(xr, t).L(xr, c.b);
       d.head(0);
@@ -353,11 +361,11 @@
     },
     he(d, c) {
       const { t, S, H, T } = c, W = d.W;
-      const xr = W - W * 0.07 - S / 2;
+      const xr = W - W * 0.14 * c.prm.overhang - S / 2;
       d.P(0, t).L(W, t);
       d.P(xr, t).L(xr, c.b);
       const xl = S * 0.75 + W * 0.04;
-      d.P(xl, H - T * 1.5 - H * 0.12).L(xl, c.b);
+      d.P(xl, H - T * 1.5 - T * 0.7 * c.s - H * 0.12).L(xl, c.b); // clear of the head above it
       d.head(0);
       d.anchors.dagesh = [W * 0.48, H * 0.45];
     },
@@ -432,7 +440,7 @@
     },
     mem(d, c) {
       const { t, b, S, H, r, s } = c, W = d.W;
-      const heel = H * 0.04 * s;
+      const heel = H * 0.08 * c.prm.heel * s;
       const xr = W - heel - S / 2, xl = S / 2 + W * 0.03;
       d.P(W * 0.36, t).R(xr, t, 0, -1, r).L(xr, b);
       d.P(W * 0.36, b).L(W, b);
@@ -529,7 +537,7 @@
       const { t, S, H, r } = c, W = d.W;
       const xr = W - S / 2, xl = S * 0.75 + W * 0.04;
       d.P(0, t).R(xr, t, 0, -1, r).L(xr, c.b);
-      d.P(xl, H - c.T * 1.5 - H * 0.16).L(xl, c.b - c.D);
+      d.P(xl, H - c.T * 1.5 - c.T * 0.7 * c.s - H * 0.14).L(xl, c.b - c.D);
       d.head(0);
       d.anchors.dagesh = [W * 0.55, H * 0.45];
       d.anchors.below = [W * 0.6, 0];
@@ -762,10 +770,19 @@
     const rot = (v) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
     const { T, S } = ctx;
     const tall = swap ? T * 0.8 : T, wide = swap ? T * 0.8 : S;
-    const cut = Math.min(1, Math.max(0, (1.8 - ctx.prm.contrast) / 0.8)) * 0.3 * Math.min(T, S);
-    const gens = swap ? [[tall - 2 * cut, 0], [0, S - 2 * cut]] : [[0, tall - 2 * cut], [wide - 2 * cut, 0]];
-    if (cut > 0.5) gens.push([cut, cut], [cut, -cut]);
-    const g = gens.map(rot);
+    // the pen is a mix of a rectangle and an oval of the same size (an oval made of 8 short lines);
+    // with little contrast it is a little round anyway, so slanted strokes stay as thick as the rest
+    const q = Math.max(ctx.prm.pen || 0, Math.min(1, Math.max(0, (1.8 - ctx.prm.contrast) / 0.8)) * 0.6);
+    const pw = swap ? tall : wide, ph = swap ? S : tall;
+    const gens = [[pw * (1 - q), 0], [0, ph * (1 - q)]];
+    if (q > 0.01) {
+      const n = 8, k = 2 * Math.sin(Math.PI / (2 * n)) / 2;
+      for (let i = 0; i < n; i++) {
+        const t = (i * Math.PI) / n + Math.PI / (2 * n);
+        gens.push([pw * q * k * Math.cos(t) * 1.0, ph * q * k * Math.sin(t)]);
+      }
+    }
+    const g = gens.filter((v) => Math.hypot(v[0], v[1]) > 0.3).map(rot);
     // Vertices of the zonotope, in order around it.
     const dirs = [];
     for (const v of g) dirs.push(v, [-v[0], -v[1]]);
@@ -932,11 +949,65 @@
         .includes(p.name)).map((p) => ({ name: p.name, char: String.fromCharCode(p.uni) })));
   }
 
+  // A name for a part of a letter, from its role (see pointRoles), for the letter editor.
+  function partName(role) {
+    if (!role) return "";
+    const [zone, dirs, ctl] = role.split("|");
+    const [din, dout] = dirs.split(">");
+    const side = { L: "משמאל", R: "מימין", C: "באמצע" }[zone.slice(-1)];
+    const z = zone.slice(0, -1);
+    const end = din === "o" || dout === "o";
+    const d = end ? (din === "o" ? dout : din) : "";
+    const flat = d === "R" || d === "L";
+    let name;
+    if (end) {
+      if (z === "asc") name = "ראש הלמ״ד";
+      else if (z === "desc") name = "קצה הזנב";
+      else if (z === "top") name = flat ? "קצה הגג " + side : "ראש הקו " + side;
+      else if (z === "base") name = flat ? "קצה הבסיס " + side : "רגל " + side;
+      else name = "קצה הקו " + side;
+    } else if (z === "top") name = "הפינה העליונה " + side;
+    else if (z === "base") name = "הפינה התחתונה " + side;
+    else name = "כיפוף " + side;
+    return ctl ? "העיקול של " + name : name;
+  }
+
+  // Checks of the letters against the usual shape of Hebrew letters, for the letter editor:
+  // a letter much wider or narrower than its usual width, or reaching out of its lines.
+  function checkLetters(prmIn) {
+    const prm = Object.assign({}, DEFAULTS, prmIn || {});
+    const names = Object.keys(prm.edits || {}).filter((n) => LETTERS[n]);
+    if (!names.length) return [];
+    const now = buildGlyphs(prm, { only: names, bare: true }).glyphs;
+    const was = buildGlyphs(Object.assign({}, prm, { edits: {} }), { only: names, bare: true }).glyphs;
+    const H = prm.height, out = [];
+    const bounds = (g) => {
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const c of g.contours) for (const sg of c) for (const p of sg) {
+        x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+      }
+      return { w: x1 - x0, y0, y1 };
+    };
+    now.forEach((g, i) => {
+      const a = bounds(g), b = bounds(was[i]);
+      const r = a.w / b.w;
+      if (r > 1.3) out.push({ name: g.name, text: "רחבה בהרבה מהרגיל (" + Math.round(r * 100) + "%)" });
+      else if (r < 0.75) out.push({ name: g.name, text: "צרה בהרבה מהרגיל (" + Math.round(r * 100) + "%)" });
+      if (a.y1 > b.y1 + H * 0.2) out.push({ name: g.name, text: "בולטת מעל השורה" });
+      if (a.y0 < b.y0 - H * 0.2) out.push({ name: g.name, text: "יורדת מתחת לשורה" });
+    });
+    return out;
+  }
+
   // All glyphs of the font with their outlines (overlapping contours) and anchors.
-  // opts.only: build just this glyph (for the letter editor), with its skeleton.
+  // opts.only: build just this glyph (for the letter editor), with its skeleton; or a list of
+  // glyphs, without skeletons. opts.bare: no marks, space or .notdef.
   function buildGlyphs(prmIn, opts) {
     opts = opts || {};
-    const only = opts.only;
+    const list = Array.isArray(opts.only) ? opts.only : null;
+    const only = list ? null : opts.only;
+    const skip = (name) => (list ? !list.includes(name) : only && name !== only);
+    const bare = !!(only || list || opts.bare);
     const prm = Object.assign({}, DEFAULTS, prmIn || {});
     const c = makeCtx(prm);
     const sb = Math.round((0.045 * c.H + 0.3 * c.T) * prm.spacing);
@@ -946,7 +1017,7 @@
 
     function add(name, uni, width, draw, opts) {
       opts = opts || {};
-      if (only && name !== only) return;
+      if (skip(name)) return;
       const cc = opts.swap ? Object.assign({}, c, { t: c.H - c.S / 2, b: c.S / 2 }) : c;
       const d = new Drawing(cc, width);
       if (opts.swap) d.swap = true;
@@ -990,6 +1061,7 @@
           segs: st.path.segs.map((sg) => sg.t),
         }));
         g.slant = sl;
+        g.T = c.T;
         g.H = c.H;
         g.D = c.D;
         g.A = c.A;
@@ -998,7 +1070,7 @@
     }
 
     // .notdef: an empty box
-    if (!only) {
+    if (!bare) {
       const w = c.H * 0.6, th = Math.max(20, c.S);
       glyphs.push({
         name: ".notdef", unicode: undefined, advance: Math.round(w + 2 * sb),
@@ -1009,7 +1081,7 @@
         anchors: null,
       });
     }
-    if (!only) glyphs.push({ name: "space", unicode: 0x20, advance: Math.round(c.H * 0.42 * prm.spacing ** 0.5), contours: [], anchors: null });
+    if (!bare) glyphs.push({ name: "space", unicode: 0x20, advance: Math.round(c.H * 0.42 * prm.spacing ** 0.5), contours: [], anchors: null });
 
     for (const [name, uni, f] of HEBREW) {
       add(name, uni, f * c.H * prm.width, LETTERS[name], { base: true });
@@ -1019,7 +1091,7 @@
     for (const p of PUNCT) add(p.name, p.uni, p.width(c), p.draw);
 
     // Vowel points: no width of their own; they are placed on the letter by the 'mark' feature.
-    const marks = only ? {} : markShapes(c);
+    const marks = bare ? {} : markShapes(c);
     for (const name in marks) {
       const [uni, cls, shapes] = marks[name];
       glyphs.push({
@@ -1349,5 +1421,5 @@
     return out;
   }
 
-  global.FontMaker = { DEFAULTS, buildGlyphs, makeFont, unite, editableGlyphs, styleFrom };
+  global.FontMaker = { DEFAULTS, buildGlyphs, makeFont, unite, editableGlyphs, styleFrom, pointRoles, partName, checkLetters };
 })(typeof window !== "undefined" ? window : globalThis);
