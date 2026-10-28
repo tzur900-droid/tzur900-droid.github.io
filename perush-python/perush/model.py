@@ -78,6 +78,8 @@ DEFAULTS = {
     "coverFrame": "double",  # the ornaments: keys of cover.FRAMES, CORNERS and DIVIDERS
     "coverCorner": "diamond",
     "coverDivider": "line",
+    "coverCornerImg": "",    # an ornament of your own: an image file, drawn as for the top right corner
+    "coverDividerImg": "",   # an ornament of your own under the name
     "coverFont": "",         # "" = the font of the text
     "coverTitle": "",        # the name on the front ("" = the title of the book)
     "coverSub": "",          # the lines under it, one per line ("" = as on the title page)

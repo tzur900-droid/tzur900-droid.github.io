@@ -168,6 +168,7 @@ FRAMES = {
     "triple": "מסגרת משולשת (דק-עבה-דק)",
     "notched": "כפולה עם פינות קעורות",
     "dotted": "קו ונקודות",
+    "chain": "שרשרת יהלומים",
     "none": "בלי מסגרת",
 }
 CORNERS = {
@@ -177,6 +178,10 @@ CORNERS = {
     "star": "מגן דוד",
     "bracket": "זווית",
     "fan": "רבע עיגול",
+    "pomegranate": "רימון",
+    "scroll": "סלסול",
+    "leaves": "עלים",
+    "image": "תמונה משלך",
     "none": "בלי",
 }
 DIVIDERS = {
@@ -187,6 +192,11 @@ DIVIDERS = {
     "dots": "שורת נקודות",
     "star": "קווים ומגן דוד",
     "rosette": "קווים ופרח",
+    "pomegranate": "קווים ורימון",
+    "menorah": "קווים ומנורה",
+    "scroll": "סלסולים",
+    "vine": "ענף עלים",
+    "image": "תמונה משלך",
     "none": "בלי",
 }
 
@@ -224,7 +234,104 @@ def star(p, cx, cy, r, ink, lw):
         p.drawPolygon(QPolygonF(pts))
 
 
-def corner(p, cx, cy, sx, sy, ink, bg, kind):
+def pomegranate(p, cx, cy, r, ink, bg):
+    """A pomegranate, r the radius of its body: the crown on top, a leaf on each side."""
+    from PySide6.QtGui import QPainterPath
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(ink))
+    by = cy + r * 0.25
+    p.drawEllipse(QPointF(cx, by), r, r * 0.95)
+    crown = QPainterPath()
+    top = by - r * 0.95
+    crown.moveTo(cx - r * 0.42, top + r * 0.25)
+    for k, dx in enumerate((-0.42, -0.28, -0.14, 0, 0.14, 0.28, 0.42)):
+        crown.lineTo(cx + dx * r, top - (r * 0.55 if k % 2 == 0 else r * 0.2))
+    crown.lineTo(cx + r * 0.42, top + r * 0.25)
+    crown.closeSubpath()
+    p.drawPath(crown)
+    for sgn in (-1, 1):
+        p.save()
+        p.translate(cx + sgn * r * 0.55, top + r * 0.05)
+        p.rotate(sgn * -35)
+        p.drawEllipse(QRectF(0 if sgn > 0 else -r * 0.9, -r * 0.16, r * 0.9, r * 0.32))
+        p.restore()
+    p.setBrush(Qt.NoBrush)
+
+
+def menorah(p, cx, cy, h, ink):
+    """The menorah of seven branches, h high, standing on its foot at cy + h / 2."""
+    top = cy - h / 2 + h * 0.16           # where the branches end (under the lights)
+    foot = cy + h / 2
+    arm = h * 0.5
+    lw = max(0.6, h * 0.045)
+    p.setBrush(Qt.NoBrush)
+    p.setPen(pen(ink, lw))
+    p.drawLine(QPointF(cx, top), QPointF(cx, foot - h * 0.08))
+    for k in (1, 2, 3):
+        r = arm * k / 3
+        p.drawArc(QRectF(cx - r, top - r, 2 * r, 2 * r), 180 * 16, 180 * 16)
+    p.setPen(pen(ink, lw * 1.4))
+    p.drawLine(QPointF(cx - h * 0.18, foot), QPointF(cx + h * 0.18, foot))
+    p.drawLine(QPointF(cx - h * 0.1, foot - h * 0.08), QPointF(cx + h * 0.1, foot - h * 0.08))
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(ink))
+    for k in range(-3, 4):
+        x = cx + arm * k / 3
+        p.drawEllipse(QRectF(x - h * 0.035, top - h * 0.15, h * 0.07, h * 0.12))
+    p.setBrush(Qt.NoBrush)
+
+
+def spiral(x, y, r, turns, sgn_x, sgn_y, start=0.0):
+    """The points of a curl winding in from radius r around (x, y)."""
+    pts = []
+    n = int(40 * turns)
+    for k in range(n + 1):
+        t = k / n
+        a = start + t * turns * 2 * math.pi
+        rr = r * (1 - 0.8 * t)
+        pts.append(QPointF(x + sgn_x * rr * math.cos(a), y + sgn_y * rr * math.sin(a)))
+    return pts
+
+
+def leaf(p, x, y, length, angle, ink):
+    """An almond-shaped leaf from (x, y), pointing at angle (degrees)."""
+    from PySide6.QtGui import QPainterPath
+    p.save()
+    p.translate(x, y)
+    p.rotate(angle)
+    path = QPainterPath()
+    path.moveTo(0, 0)
+    path.quadTo(QPointF(length / 2, -length * 0.4), QPointF(length, 0))
+    path.quadTo(QPointF(length / 2, length * 0.4), QPointF(0, 0))
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(ink))
+    p.drawPath(path)
+    p.setBrush(Qt.NoBrush)
+    p.restore()
+
+
+def scroll_arm(p, x0, y0, x1, sgn, ink, lw=0.9):
+    """A gentle curve from x0 out to x1 (on the side sgn) that ends in a curl, and a smaller
+    curl hanging from its middle: the scrollwork of old title pages."""
+    from PySide6.QtGui import QPainterPath
+    r, r2 = 2.4 * MM, 1.4 * MM
+    ex = x1 - sgn * r
+    path = QPainterPath()
+    path.moveTo(x0, y0)
+    path.cubicTo(QPointF(x0 + (ex - x0) * 0.3, y0 - r * 0.6), QPointF(x0 + (ex - x0) * 0.7, y0 - r * 0.6), QPointF(ex, y0))
+    p.setPen(pen(ink, lw))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(path)
+    p.drawPolyline(spiral(ex, y0 + r, r, 1.25, sgn, 1, -math.pi / 2))
+    mx, my = (x0 + ex) / 2, y0 - r * 0.45
+    p.drawPolyline(spiral(mx, my + r2, r2, 1.1, -sgn, 1, -math.pi / 2))
+
+
+def own_image(P, key):
+    return image(P.get(key))
+
+
+def corner(p, cx, cy, sx, sy, ink, bg, kind, P=None):
     """The ornament of a corner of the frame at (cx, cy); (sx, sy) points into the panel."""
     if kind == "diamond":
         diamond(p, cx, cy, 1.6 * MM, ink)
@@ -252,6 +359,40 @@ def corner(p, cx, cy, sx, sy, ink, bg, kind):
             p.setPen(pen(ink, lw))
             p.drawArc(QRectF(cx - r, cy - r, 2 * r, 2 * r), int(start * 16), 90 * 16)
         dot(p, cx + sx * 2.2 * MM, cy + sy * 2.2 * MM, 0.8 * MM, ink)
+    elif kind == "pomegranate":
+        pomegranate(p, cx + sx * 3.2 * MM, cy + sy * 3.2 * MM, 2.0 * MM, ink, bg)
+        diamond(p, cx, cy, 1.0 * MM, ink)
+    elif kind == "scroll":
+        # a curl in the corner, its arms running along the two sides
+        p.setPen(pen(ink, 0.9))
+        p.setBrush(Qt.NoBrush)
+        d = 2.4 * MM
+        p.drawLine(QPointF(cx + sx * d * 2, cy + sy * d), QPointF(cx + sx * 14 * MM, cy + sy * d))
+        p.drawLine(QPointF(cx + sx * d, cy + sy * d * 2), QPointF(cx + sx * d, cy + sy * 14 * MM))
+        p.drawPolyline(spiral(cx + sx * 4.6 * MM, cy + sy * 4.6 * MM, 2.4 * MM, 1.3, sx, sy, math.pi))
+        dot(p, cx + sx * 15 * MM, cy + sy * d, 0.6 * MM, ink)
+        dot(p, cx + sx * d, cy + sy * 15 * MM, 0.6 * MM, ink)
+    elif kind == "leaves":
+        # leaves along the two sides from the corner, a berry in it
+        for k in range(3):
+            o = (3.5 + k * 3.6) * MM
+            ln = (3.4 - k * 0.6) * MM
+            leaf(p, cx + sx * o, cy + sy * 2.2 * MM, ln, math.degrees(math.atan2(sy * 0.5, sx)), ink)
+            leaf(p, cx + sx * 2.2 * MM, cy + sy * o, ln, math.degrees(math.atan2(sy, sx * 0.5)), ink)
+        dot(p, cx + sx * 2 * MM, cy + sy * 2 * MM, 1.3 * MM, ink)
+    elif kind == "image":
+        img = own_image(P or {}, "coverCornerImg")
+        if img:
+            # drawn as for the top right corner; turned over for the others
+            S = 16 * MM
+            k = min(S / img.width(), S / img.height())
+            p.save()
+            p.translate(cx, cy)
+            p.scale(sx, sy)
+            p.translate(img.width() * k, 0)
+            p.scale(-1, 1)
+            p.drawImage(QRectF(0, 0, img.width() * k, img.height() * k), img)
+            p.restore()
 
 
 def notched_rect(x1, y1, x2, y2, r):
@@ -298,6 +439,17 @@ def frames(p, P, x, y, w, h, ink, bg):
         dots.setDashPattern([0.01, 3.2])      # round dots, in units of the line's width
         p.setPen(dots)
         p.drawRect(rect(i))
+    elif kind == "chain":
+        p.setPen(pen(ink, 1.4))
+        p.drawRect(rect(o))
+        x1, y1, x2, y2 = x + i, y + i, x + w - i, y + h - i
+        for a, b, horiz in (((x1, y1), (x2, y1), True), ((x1, y2), (x2, y2), True),
+                            ((x1, y1), (x1, y2), False), ((x2, y1), (x2, y2), False)):
+            length = (b[0] - a[0]) if horiz else (b[1] - a[1])
+            n = max(1, round(length / (3.2 * MM)))
+            for k in range(n + 1):
+                t = a[0] + length * k / n if horiz else a[1] + length * k / n
+                diamond(p, t if horiz else a[0], a[1] if horiz else t, 0.8 * MM, ink)
     elif kind != "none":
         p.setPen(pen(ink, 1.8))
         p.drawRect(rect(o))
@@ -307,7 +459,7 @@ def frames(p, P, x, y, w, h, ink, bg):
     if kind != "none":
         for cx, sx in ((x + i, 1), (x + w - i, -1)):
             for cy, sy in ((y + i, 1), (y + h - i, -1)):
-                corner(p, cx, cy, sx, sy, ink, bg, kind)
+                corner(p, cx, cy, sx, sy, ink, bg, kind, P)
 
 
 def ornament(p, P, cx, cy, half, ink, bg):
@@ -357,6 +509,37 @@ def ornament(p, P, cx, cy, half, ink, bg):
         star(p, cx, cy, 3.4 * MM, ink, 0.8)
         diamond(p, cx - half - 2 * MM, cy, 1.1 * MM, ink)
         diamond(p, cx + half + 2 * MM, cy, 1.1 * MM, ink)
+    elif kind == "pomegranate":
+        lines(5 * MM)
+        pomegranate(p, cx, cy, 2.6 * MM, ink, bg)
+        diamond(p, cx - half - 2 * MM, cy, 1.1 * MM, ink)
+        diamond(p, cx + half + 2 * MM, cy, 1.1 * MM, ink)
+    elif kind == "menorah":
+        lines(6.5 * MM)
+        menorah(p, cx, cy - 1 * MM, 11 * MM, ink)
+        diamond(p, cx - half - 2 * MM, cy, 1.1 * MM, ink)
+        diamond(p, cx + half + 2 * MM, cy, 1.1 * MM, ink)
+    elif kind == "scroll":
+        diamond(p, cx, cy, 1.8 * MM, ink)
+        for sgn in (-1, 1):
+            scroll_arm(p, cx + sgn * 3 * MM, cy, cx + sgn * half, sgn, ink)
+    elif kind == "vine":
+        p.setPen(pen(ink, 0.8))
+        p.drawLine(QPointF(cx - half, cy), QPointF(cx + half, cy))
+        dot(p, cx, cy, 1.4 * MM, ink)
+        for sgn in (-1, 1):
+            x, k = 3.2 * MM, 0
+            while x < half - 2 * MM:
+                up = -1 if k % 2 == 0 else 1
+                size = 3.6 * MM * (1 - 0.45 * x / half)
+                leaf(p, cx + sgn * x, cy, size, (180 if sgn < 0 else 0) + sgn * up * 40, ink)
+                x += 3.4 * MM
+                k += 1
+            dot(p, cx + sgn * half, cy, 0.7 * MM, ink)
+    elif kind == "image":
+        img = own_image(P, "coverDividerImg")
+        if img:
+            draw_image(p, img, cx - half - 3 * MM, cy - 7 * MM, 2 * half + 6 * MM, 14 * MM)
     elif kind == "rosette":
         lines(5.5 * MM)
         rosette(p, cx, cy, 4 * MM, ink, bg)
@@ -378,6 +561,18 @@ def sample(kind, key, bg, ink, w=96, h=40):
     k = h / (16 * MM)         # 16 mm of the cover in the height of the picture
     p.scale(k, k)
     W, H = w / k, h / k
+    if key == "image":
+        # a picture of a picture: a frame with a mountain and a sun
+        p.setPen(pen(ink, 0.5, Qt.DashLine))
+        r = QRectF(W / 2 - 7 * MM, H / 2 - 5 * MM, 14 * MM, 10 * MM)
+        p.drawRect(r)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(ink))
+        p.drawPolygon(QPolygonF([QPointF(r.left() + 2 * MM, r.bottom() - 1.5 * MM), QPointF(r.center().x() - 1 * MM, r.top() + 4 * MM),
+                                 QPointF(r.right() - 2 * MM, r.bottom() - 1.5 * MM)]))
+        dot(p, r.right() - 3.2 * MM, r.top() + 2.6 * MM, 1.1 * MM, ink)
+        p.end()
+        return img
     if kind == "divider":
         ornament(p, {"coverDivider": key}, W / 2, H / 2, W * 0.36, ink, bg)
     elif kind == "corner":

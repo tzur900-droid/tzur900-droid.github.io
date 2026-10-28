@@ -586,6 +586,12 @@ class MainWindow(QMainWindow):
             box_.currentIndexChanged.connect(self.cover_changed)
             form.addRow(label, box_)
             self.cv_orn[key] = (box_, kind)
+        # an ornament of your own: shown only when "תמונה משלך" is chosen
+        self.cv_corner_img = self.image_row(form, "תמונת הפינה:", "coverCornerImg")
+        self.cv_divider_img = self.image_row(form, "תמונה מתחת לשם:", "coverDividerImg")
+        self.cv_corner_img.setToolTip("ציירו את העיטור כמו שהוא בפינה הימנית העליונה; בשאר הפינות הוא מתהפך מעצמו. "
+                                      "תמונת PNG עם רקע שקוף נראית הכי טוב.")
+        self.cv_divider_img.setToolTip("תמונת PNG עם רקע שקוף נראית הכי טוב.")
         lay.addWidget(box)
 
         box = QGroupBox("חזית")
@@ -698,6 +704,7 @@ class MainWindow(QMainWindow):
         row.addWidget(pick)
         row.addWidget(clear)
         form.addRow(label, row)
+        name.form_row = (form, row)
         return name
 
     def pick_cover_color(self, key):
@@ -763,7 +770,11 @@ class MainWindow(QMainWindow):
             for box_, kind in self.cv_orn.values():
                 for i in range(box_.count()):
                     box_.setItemIcon(i, QIcon(QPixmap.fromImage(cover.sample(kind, box_.itemData(i), bg, ink, 144, 60))))
-        for e, key in ((self.cv_logo, "coverLogo"), (self.cv_barcode, "coverBarcode")):
+        for e, key in (("coverCorner", self.cv_corner_img), ("coverDivider", self.cv_divider_img)):
+            form, row = key.form_row
+            form.setRowVisible(row, self.project.get(e) == "image")
+        for e, key in ((self.cv_logo, "coverLogo"), (self.cv_barcode, "coverBarcode"),
+                       (self.cv_corner_img, "coverCornerImg"), (self.cv_divider_img, "coverDividerImg")):
             path = self.project.get(key) or ""
             e.setText(os.path.basename(path) + ("" if not path or os.path.isfile(path) else "  (הקובץ לא נמצא)"))
             e.setToolTip(path)
