@@ -9,6 +9,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from PySide6.QtCore import QStandardPaths
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetricsF, QImage
 
 PT_PER_MM = 72 / 25.4
@@ -28,6 +29,13 @@ def load_bundled_fonts(folder):
                 fid = QFontDatabase.addApplicationFont(os.path.join(folder, name))
                 families.update(QFontDatabase.applicationFontFamilies(fid))
     return sorted(families)
+
+
+def user_fonts_dir():
+    """Fonts of your own (from your computer, ones that may not ship with the program): a folder in
+    Documents, loaded every time the program starts."""
+    docs = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) or os.path.expanduser("~")
+    return os.path.join(docs, "עימוד פירושים", "גופנים")
 
 
 def ref_device():

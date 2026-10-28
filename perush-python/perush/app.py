@@ -2,6 +2,7 @@
 import html
 import json
 import re
+import shutil
 import os
 
 import sys
@@ -20,6 +21,7 @@ from . import cover, model
 from .checks import check, describe, summary
 from .engine import Cancelled, Engine
 from .render import export_pdf, page_image
+from .textlayout import user_fonts_dir
 
 APP_NAME = "עימוד פירושים"
 
@@ -514,6 +516,10 @@ class MainWindow(QMainWindow):
         self.sp["gutter"].setToolTip("בצורת ספר: תוספת לשוליים בצד הפנימי, שנבלע בכריכה")
         form.addRow("תוספת לשוליים הפנימיים (כריכה):", self.sp["gutter"])
         form.addRow("גופן הטקסט:", self.main_font)
+        add_font = QPushButton("הוספת גופן מהמחשב…")
+        add_font.setToolTip("קובץ גופן (ttf או otf) מהמחשב: הוא נשמר בתיקייה 'גופנים' במסמכים, ומופיע בכל רשימות הגופנים")
+        add_font.clicked.connect(self.add_fonts)
+        form.addRow("", add_font)
         form.addRow("גודל הטקסט:", self.sp["mainSize"])
         form.addRow("מרווח שורות:", self.sp["lineHeight"])
         form.addRow("רווח בין טורים:", self.sp["colGap"])
@@ -1152,6 +1158,38 @@ class MainWindow(QMainWindow):
         self.save_recovery()
         self.update_title()
         self.request_relayout()
+
+    def add_fonts(self):
+        """Fonts from the computer: copied to the fonts folder in Documents (loaded at every start)
+        and shown at once in every list of fonts."""
+        paths, _ = QFileDialog.getOpenFileNames(self, "הוספת גופן", "", "גופנים (*.ttf *.otf *.TTF *.OTF)")
+        if not paths:
+            return
+        folder = user_fonts_dir()
+        os.makedirs(folder, exist_ok=True)
+        added, failed = [], []
+        for path in paths:
+            target = os.path.join(folder, os.path.basename(path))
+            try:
+                if os.path.abspath(path) != os.path.abspath(target):
+                    shutil.copyfile(path, target)
+            except OSError:
+                target = path
+            fid = QFontDatabase.addApplicationFont(target)
+            families = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
+            if families:
+                added += [f for f in families if f not in added]
+            else:
+                failed.append(os.path.basename(path))
+        msg = ""
+        if added:
+            hebrew = [f for f in added if QFontDatabase.Hebrew in QFontDatabase.writingSystems(f)]
+            msg += "נוספו הגופנים: " + ", ".join(added) + "\n(הם יופיעו בכל רשימות הגופנים, גם בפעמים הבאות)"
+            if len(hebrew) < len(added):
+                msg += "\n\nשים לב: " + ", ".join(f for f in added if f not in hebrew) + " בלי אותיות עבריות."
+        if failed:
+            msg += ("\n\n" if msg else "") + "לא הצלחתי לקרוא: " + ", ".join(failed)
+        QMessageBox.information(self, APP_NAME, msg)
 
     def my_projects_dir(self):
         """Where projects without a file of their own are kept (a new one, or a ready one

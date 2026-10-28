@@ -65,8 +65,9 @@ def main():
     app.setLayoutDirection(Qt.RightToLeft)
     from perush import theme
     theme.apply(app)
-    from perush.textlayout import load_bundled_fonts
+    from perush.textlayout import load_bundled_fonts, user_fonts_dir
     load_bundled_fonts(os.path.join(base_dir(), "fonts"))
+    load_bundled_fonts(user_fonts_dir())
     log("גופנים נטענו")
 
     if len(sys.argv) > 3 and sys.argv[1] == "--import":
