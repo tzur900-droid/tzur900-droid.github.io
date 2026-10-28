@@ -232,3 +232,5 @@ code { background: var(--accent-soft); padding: 0 4px; border-radius: 4px; }
 #ed-svg .pt.off { fill: var(--sheet); stroke: var(--accent); }
 #ed-svg .hit { fill: transparent; cursor: grab; }
 #ed-svg .hit:hover + .pt, #ed-svg .pt.drag { fill: var(--text); }
+.apply { margin-top: 10px; }
+.letters button.edited:not(.hand)::after { background: var(--muted); opacity: 0.6; }

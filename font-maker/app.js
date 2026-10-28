@@ -30,7 +30,7 @@
   ];
 
   const STORE = "font-maker-settings";
-  let prm = Object.assign({}, D, { edits: {} });
+  let prm = Object.assign({}, D, { edits: {}, hand: [] });
 
   const $ = (id) => document.getElementById(id);
 
@@ -71,6 +71,7 @@
         }
       }
     }
+    out.hand = Array.isArray(p && p.hand) ? p.hand.filter((n) => typeof n === "string" && out.edits[n]) : [];
     return out;
   }
 
@@ -104,7 +105,7 @@
       b.textContent = p.name;
       b.dataset.i = i;
       b.addEventListener("click", () => {
-        prm = Object.assign({}, D, p.prm, { edits: prm.edits });
+        prm = Object.assign({}, D, p.prm, { edits: prm.edits, hand: prm.hand });
         markPreset(i);
         syncControls();
         changed();
@@ -112,13 +113,13 @@
       chips.appendChild(b);
     });
     $("surprise").addEventListener("click", () => {
-      prm = Object.assign(surprise(), { edits: prm.edits });
+      prm = Object.assign(surprise(), { edits: prm.edits, hand: prm.hand });
       markPreset(null);
       syncControls();
       changed();
     });
     $("reset").addEventListener("click", () => {
-      prm = Object.assign({}, D, { edits: prm.edits });
+      prm = Object.assign({}, D, { edits: prm.edits, hand: prm.hand });
       markPreset(0);
       syncControls();
       changed();
@@ -217,13 +218,16 @@
     svg.addEventListener("pointercancel", endDrag);
     $("ed-undo").addEventListener("click", () => {
       if (!undo.length) return;
-      prm.edits = JSON.parse(undo.pop());
+      const u = JSON.parse(undo.pop());
+      prm.edits = u.edits;
+      prm.hand = u.hand;
       changed();
     });
     $("ed-reset").addEventListener("click", () => {
       if (!prm.edits[current]) return;
       pushUndo();
       delete prm.edits[current];
+      prm.hand = prm.hand.filter((n) => n !== current);
       changed();
     });
     $("ed-reset-all").addEventListener("click", () => {
@@ -231,13 +235,27 @@
       if (!confirm("להחזיר את כל האותיות שערכת לצורה המקורית?")) return;
       pushUndo();
       prm.edits = {};
+      prm.hand = [];
+      changed();
+    });
+    $("ed-apply").addEventListener("click", () => {
+      const hebrew = FontMaker.editableGlyphs().slice(0, 27).map((g) => g.name);
+      const sources = prm.hand.filter((n) => hebrew.includes(n));
+      if (!sources.length) {
+        $("ed-msg").textContent = "קודם משנים אות אחת לפחות (גוררים נקודות), ואז לוחצים כאן.";
+        return;
+      }
+      pushUndo();
+      prm.edits = FontMaker.styleFrom(prm, sources);
+      const names = sources.map((n) => FontMaker.editableGlyphs().find((g) => g.name === n).char).join(" ");
+      $("ed-msg").textContent = "כל האותיות קיבלו את השינויים של: " + names + ". לא אהבת? ↶ ביטול.";
       changed();
     });
     drawEditor();
   }
 
   function pushUndo() {
-    undo.push(JSON.stringify(prm.edits));
+    undo.push(JSON.stringify({ edits: prm.edits, hand: prm.hand }));
     if (undo.length > 60) undo.shift();
   }
 
@@ -262,6 +280,7 @@
     document.querySelectorAll("#letters button").forEach((b) => {
       b.classList.toggle("on", b.dataset.name === current);
       b.classList.toggle("edited", !!(prm.edits && prm.edits[b.dataset.name]));
+      b.classList.toggle("hand", prm.hand.includes(b.dataset.name));
     });
     const g = FontMaker.buildGlyphs(prm, { only: current }).glyphs[0];
     if (!g) return;
@@ -347,6 +366,7 @@
     }
     pushUndo();
     const ed = (prm.edits[current] = prm.edits[current] || {});
+    if (!prm.hand.includes(current)) prm.hand.push(current);
     drag = {
       group, from: fontPoint(ev),
       base: group.map(([s, p]) => (ed[s + "." + p] || [0, 0]).slice()),
@@ -373,8 +393,11 @@
     drag = null;
     const ed = prm.edits[current];
     for (const k in ed) if (!ed[k][0] && !ed[k][1]) delete ed[k];
-    if (!Object.keys(ed).length) delete prm.edits[current];
-    if (undo.length && undo[undo.length - 1] === JSON.stringify(prm.edits)) undo.pop();
+    if (!Object.keys(ed).length) {
+      delete prm.edits[current];
+      prm.hand = prm.hand.filter((n) => n !== current);
+    }
+    if (undo.length && undo[undo.length - 1] === JSON.stringify({ edits: prm.edits, hand: prm.hand })) undo.pop();
     changed();
   }
 

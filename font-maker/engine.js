@@ -846,6 +846,84 @@
     }
   }
 
+  // The part of the letter every point belongs to, in words common to all the letters: where it
+  // is (top, base, below the line, above the letters; right, middle, left) and which way its
+  // stroke goes from it. A change made to a part of one letter can then be made to the same part
+  // of the others: the head at the start of a roof, a rounded corner, the foot of a stem...
+  function dirClass(dx, dy) {
+    if (Math.hypot(dx, dy) < 0.5) return "o";
+    const a = Math.atan2(dy, dx) / (Math.PI / 4);
+    return ["R", "UR", "U", "UL", "L", "DL", "D", "DR"][((Math.round(a) % 8) + 8) % 8];
+  }
+
+  function pointRoles(prmIn) {
+    const prm = Object.assign({}, DEFAULTS, prmIn || {});
+    const c = makeCtx(prm);
+    const out = {};
+    for (const [name, , f] of HEBREW) {
+      const W = f * c.H * prm.width;
+      const d = new Drawing(c, W);
+      LETTERS[name](d, c);
+      const roles = {};
+      d.strokes.forEach((st, si) => {
+        const P = pathPoints(st.path).map((p) => ({ v: p.get(), on: p.on }));
+        const zone = (v) => {
+          const y = v[1], x = v[0] / W;
+          const vz = y > c.H + c.H * 0.1 ? "asc" : y < -c.H * 0.1 ? "desc" : y > c.H * 0.72 ? "top" : y < c.H * 0.28 ? "base" : "mid";
+          return vz + (x < 0.3 ? "L" : x > 0.7 ? "R" : "C");
+        };
+        // direction from point i towards the next point that is somewhere else
+        const toward = (i, step) => {
+          for (let j = i + step; j >= 0 && j < P.length; j += step) {
+            const dx = P[j].v[0] - P[i].v[0], dy = P[j].v[1] - P[i].v[1];
+            if (Math.hypot(dx, dy) > 0.5) return dirClass(dx, dy);
+          }
+          return "o";
+        };
+        const onKey = P.map((p, i) => (p.on ? zone(p.v) + "|" + toward(i, -1) + ">" + toward(i, 1) : null));
+        P.forEach((p, i) => {
+          if (p.on) roles[si + "." + i] = onKey[i];
+          else if (P[i - 1] && P[i - 1].on) roles[si + "." + i] = onKey[i - 1] + "|c1";
+          else roles[si + "." + i] = onKey[i + 1] + "|c2";
+        });
+      });
+      out[name] = { W, roles };
+    }
+    return out;
+  }
+
+  // Makes the other letters like the ones changed by hand: every part that was moved in the
+  // letters of `sources` is moved the same way in every other letter that has that part
+  // (sideways moves grow with the width of the letter). Returns the new hand changes.
+  function styleFrom(prm, sources) {
+    const R = pointRoles(prm);
+    const moves = {};
+    for (const name of sources) {
+      const ed = prm.edits && prm.edits[name];
+      if (!ed || !R[name]) continue;
+      for (const k in ed) {
+        const role = R[name].roles[k];
+        if (!role) continue;
+        (moves[role] = moves[role] || []).push([ed[k][0] / R[name].W, ed[k][1]]);
+      }
+    }
+    const edits = Object.assign({}, prm.edits);
+    for (const name in R) {
+      if (sources.includes(name)) continue;
+      const e = {};
+      for (const k in R[name].roles) {
+        const m = moves[R[name].roles[k]];
+        if (!m) continue;
+        const dx = m.reduce((a, v) => a + v[0], 0) / m.length * R[name].W;
+        const dy = m.reduce((a, v) => a + v[1], 0) / m.length;
+        if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) e[k] = [Math.round(dx), Math.round(dy)];
+      }
+      if (Object.keys(e).length) edits[name] = e;
+      else delete edits[name];
+    }
+    return edits;
+  }
+
   // Letters, digits and signs whose points can be moved by hand.
   function editableGlyphs() {
     return HEBREW.map(([n, u]) => ({ name: n, char: String.fromCharCode(u) }))
@@ -1271,5 +1349,5 @@
     return out;
   }
 
-  global.FontMaker = { DEFAULTS, buildGlyphs, makeFont, unite, editableGlyphs };
+  global.FontMaker = { DEFAULTS, buildGlyphs, makeFont, unite, editableGlyphs, styleFrom };
 })(typeof window !== "undefined" ? window : globalThis);
