@@ -54,6 +54,15 @@ def hebrew_edit(font_family="Frank Ruhl Libre", size=13):
     return e
 
 
+def font_box():
+    """A list of the Hebrew fonts: a click anywhere on it opens the list under it (typing a letter jumps to it)."""
+    b = QFontComboBox()
+    b.setWritingSystem(QFontDatabase.Hebrew)
+    b.setEditable(False)
+    b.setMaxVisibleItems(20)
+    return b
+
+
 def hint(html):
     l = QLabel(html)
     l.setWordWrap(True)
@@ -88,8 +97,7 @@ class CommEditor(QWidget):
         self.cols = QSpinBox()
         self.cols.setRange(1, 3)
         self.cols.setValue(int(comm["cols"]))
-        self.font = QFontComboBox()
-        self.font.setWritingSystem(QFontDatabase.Hebrew)
+        self.font = font_box()
         self.font.setCurrentFont(QFont(comm["font"]))
         self.size = QDoubleSpinBox()
         self.size.setRange(5, 30)
@@ -433,8 +441,7 @@ class MainWindow(QMainWindow):
         self.page_size = QComboBox()
         for k, (name, _, _) in model.PAGE_SIZES.items():
             self.page_size.addItem(name, k)
-        self.main_font = QFontComboBox()
-        self.main_font.setWritingSystem(QFontDatabase.Hebrew)
+        self.main_font = font_box()
 
         def dspin(lo, hi, step, suffix=""):
             s = QDoubleSpinBox()
@@ -591,8 +598,7 @@ class MainWindow(QMainWindow):
         row.addWidget(self.cv_bg)
         row.addWidget(self.cv_ink)
         form.addRow("צבע חופשי:", row)
-        self.cv_font = QFontComboBox()
-        self.cv_font.setWritingSystem(QFontDatabase.Hebrew)
+        self.cv_font = font_box()
         form.addRow("גופן:", self.cv_font)
         # the ornaments: each list shows a small picture of each choice, in the cover's colours
         self.cv_orn = {}

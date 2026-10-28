@@ -1,5 +1,9 @@
 """The look of the program: a calm, light, modern theme (Qt's Fusion style and one style sheet)."""
-from PySide6.QtGui import QColor, QFont, QPalette
+import os
+import tempfile
+
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPalette, QPen
 
 BG = "#f4f5f8"         # the window
 SURFACE = "#ffffff"    # cards, fields, the toolbar
@@ -47,7 +51,9 @@ QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QFontCo
     border: 1px solid {ACCENT};
 }}
 QSpinBox, QDoubleSpinBox {{ padding: 3px 4px; min-height: 24px; }}
-QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox {{ combobox-popup: 0; }}
+QComboBox::drop-down {{ border: none; width: 24px; }}
+QComboBox::down-arrow {{ image: url(ARROW); width: 10px; height: 10px; }}
 QComboBox QAbstractItemView {{
     background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 8px;
     selection-background-color: {ACCENT_SOFT}; selection-color: {ACCENT_DARK}; padding: 4px;
@@ -114,4 +120,18 @@ def apply(app):
     f = QFont(app.font())
     f.setPointSizeF(max(f.pointSizeF(), 10))
     app.setFont(f)
-    app.setStyleSheet(STYLE)
+    app.setStyleSheet(STYLE.replace("ARROW", arrow_file()))
+
+
+def arrow_file():
+    """The little arrow of a list (a style sheet takes a picture only from a file)."""
+    path = os.path.join(tempfile.gettempdir(), "perush-arrow.png")
+    img = QImage(20, 20, QImage.Format_ARGB32)
+    img.fill(Qt.transparent)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(QPen(QColor(MUTED), 3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.drawPolyline([QPointF(3, 7), QPointF(10, 14), QPointF(17, 7)])
+    p.end()
+    img.save(path)
+    return path.replace(os.sep, "/")
