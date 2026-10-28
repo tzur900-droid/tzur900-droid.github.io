@@ -38,6 +38,7 @@ NAMES = {
     "spaces": "רווחים גדולים בין המילים",
     "text": "סימן משובש בטקסט",
     "number": "מספר פסוק לבד בסוף שורה",
+    "short_end": "פירוש שנגמר בשורה קצרה באמצע העמוד",
     "engine": "הודעה מהעימוד",
 }
 
@@ -79,6 +80,13 @@ def check(eng, pages):
         if late:
             sev = "exception" if r.get("late_ok") else "error"
             add("comm_start", n, ", ".join(f"{name} על {where(eng, v)}" for name, v in late), sev)
+        # a commentary (or the Onkelos column) that ends in the middle of the page ends on a full line
+        ends = [(s["c"], s["lines"]) for s in r.get("sections", [])] + [(c, s["col"]) for c, s in r.get("side", {}).items()] \
+            + list(r.get("gm", {}).items())
+        for c, lines in ends:
+            if (len(lines) > 1 and lines[-1].last and sum(w.w for w in lines[-1].words) < lines[-1].width * 0.5
+                    and not (r.get("at_end") and eng.done(c, r["ptrs"][c]))):
+                add("short_end", n, eng.comms[c]["name"], "warning")
         text = [l for l in r.get("text", []) if l.kind == "p"]
         heads = any(l.kind == "h" for l in r.get("text", []))
         if len(text) == 1 and r.get("sections") and not heads:
@@ -177,6 +185,8 @@ def late_commentaries(eng, r):
     if lo is None or hi is None or hi < 0:
         return out
     for c in eng.bottoms + eng.gm:
+        if c in r.get("deferred", ()):
+            continue      # the commentary before it fills the page: it begins on the next one
         ptr = r["ptrs"].get(c)
         if ptr is None:
             continue

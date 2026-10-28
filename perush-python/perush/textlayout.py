@@ -159,13 +159,19 @@ def break_lines(words, base, lh, width_at, y0=0.0, align="justify", tight=1.0):
     i, n, y = 0, len(words), y0
     while i < n:
         right, w = width_at(y)
-        cur = [words[i]]
-        nat = words[i].w
+        prev = words[i]
+        nat = prev.w
         j = i + 1
-        while j < n and nat + gap_after(words[j - 1], sp) + words[j].w <= w + 0.01:
-            nat += gap_after(words[j - 1], sp) + words[j].w
-            cur.append(words[j])
+        limit = w + 0.01
+        while j < n:
+            nxt = words[j]
+            add = (0.0 if prev.join else sp) + nxt.w     # no space after a maqaf
+            if nat + add > limit:
+                break
+            nat += add
+            prev = nxt
             j += 1
+        cur = words[i:j]
         while j < n and len(cur) > 1 and cur[-1].glue:
             # a word that belongs with the next one goes down with it
             j -= 1
@@ -233,8 +239,12 @@ def even_lines(lines, slack=10):
         k += len(l.words)
     free_last = lines[-1].last
     INF = float("inf")
-    # spaces already even (no line wider than twice a normal space): nothing to do
+    # spaces already even (no line wider than twice a normal space, none over-full): nothing to do
     worst = 0.0
+    for l in lines:
+        g = sum(1 for w in l.words[:-1] if not w.join)
+        if sum(w.w for w in l.words) + g * s * 0.8 > l.width + 0.01:
+            worst = 99.0
     for k, l in enumerate(lines):
         g = sum(1 for w in l.words[:-1] if not w.join)
         if k == n_lines - 1 and free_last or g < 1:

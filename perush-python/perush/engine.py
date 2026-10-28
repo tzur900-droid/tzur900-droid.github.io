@@ -39,6 +39,7 @@ LOOSE = 1.12
 GOOD, MARGIN = 60.0, 25.0
 LOOK_AHEAD = 1      # how many pages ahead each page looks
 GM_STRETCH = 0.2    # a Talmud page: how much more room each line may take to fill the page
+MIN_START_ROWS = 3  # a commentary under another doesn't begin at the foot of a page with fewer rows
 # the letter (פ / ס) at the end of an open / a closed section
 SECTION_FONT = "David Libre"
 
@@ -136,6 +137,49 @@ def even_paragraphs(lines):
             if run:
                 even_lines(run)
             run = []
+
+
+def flush_end(lines, fold=False):
+    """A paragraph whose last line is short ends flush instead: its words are spread over its
+    lines (the last one justified too), as long as no space opens wider than it was or than
+    3.5 normal spaces. fold: if that can't be done and the last line holds a word or two, they
+    go up into the lines above (one line less). Returns True if the number of lines changed."""
+    if len(lines) < 2 or not lines[-1].last or lines[-1].align != "justify":
+        return False
+    if sum(w.w for w in lines[-1].words) >= lines[-1].width * 0.9:
+        return False
+
+    def attempt(ls):
+        keep = [list(l.words) for l in ls]
+        widest = max([space_ratio(l) for l in ls[:-1]] + [1.0])
+        ls[-1].last = False
+        for slack in (8, 30):         # a narrow search first (most columns need no more)
+            even_lines(ls, slack=slack)
+            if sum(w.w for w in ls[-1].words) >= ls[-1].width * 0.5:
+                break
+        ls[-1].force = True
+        fits = all(sum(w.w for w in l.words) + sum(1 for w in l.words[:-1] if not w.join) * space(l.base) * 0.8
+                   <= l.width + 0.01 for l in ls)
+        if (fits and sum(w.w for w in ls[-1].words) >= ls[-1].width * 0.5
+                and max(map(space_ratio, ls)) <= max(3.5, widest)):
+            return True
+        for l, ws in zip(ls, keep):
+            l.words = ws
+        ls[-1].last, ls[-1].force = True, False
+        return False
+
+    if attempt(lines):
+        return False
+    if fold and sum(w.w for w in lines[-1].words) < lines[-1].width * 0.35:
+        last = lines.pop()
+        lines[-1].words = lines[-1].words + last.words      # one line over-full, for now
+        lines[-1].last = True
+        if attempt(lines):
+            return True
+        lines[-1].words = lines[-1].words[:len(lines[-1].words) - len(last.words)]
+        lines[-1].last = False
+        lines.append(last)
+    return False
 
 
 def line_start(line):
@@ -642,27 +686,32 @@ class Engine:
             if getattr(l, "kind", "p") == "p":
                 l.words = split_maqaf(l.words)
         even_paragraphs(r["text"])
-        for s in r["side"].values():
+        ends_here = lambda c: r["at_end"] and self.done(c, r["ptrs"][c]) and not r.get("more")
+        for c, s in r["side"].items():
+            # (the column keeps its number of lines: the text beside it is laid out around it)
+            if not ends_here(c):
+                flush_end(s["col"])
+                flush_end(s["band"])
             even_paragraphs(s["col"])
             even_paragraphs(s["band"])
         for s in r["sections"]:
+            if not ends_here(s["c"]):
+                saved = [(l, list(l.words), l.last, getattr(l, "force", False)) for l in s["lines"]]
+                h0 = s["h"]
+                if flush_end(s["lines"], fold=True):
+                    s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
+                    if s["h"] < h0 - EPS and not self.fills(r):
+                        # one row less would leave room the page can't spread: as it was
+                        s["lines"][:] = [l for l, _, _, _ in saved]
+                        for l, ws, last, force in saved:
+                            l.words, l.last, l.force = ws, last, force
+                        s["h"] = h0
+                        flush_end(s["lines"])
             even_paragraphs(s["lines"])
         for c, lines in r.get("gm", {}).items():
-            # a Talmud page: a column ends flush with a full line, the words spread over its
-            # lines, unless that would open the spaces too wide (or the commentary ends here)
-            if lines and lines[-1].last and not (r["at_end"] and self.done(c, r["ptrs"][c]) and not r.get("more")):
-                keep = [list(l.words) for l in lines]
-                widest = max([space_ratio(l) for l in lines[:-1]] + [1.0])
-                lines[-1].last = False
-                even_lines(lines, slack=30)
-                lines[-1].force = True
-                if (sum(w.w for w in lines[-1].words) >= lines[-1].width * 0.5
-                        and max(map(space_ratio, lines)) <= max(3.5, widest)):
-                    lines[-1].force = True
-                else:
-                    for l, ws in zip(lines, keep):
-                        l.words = ws
-                    lines[-1].last, lines[-1].force = True, False
+            # a Talmud page: a column ends flush with a full line
+            if not (r["at_end"] and self.done(c, r["ptrs"][c]) and not r.get("more")):
+                flush_end(lines)
             even_paragraphs(lines)
         if r.get("post"):
             for l in r["post"]["lines"]:
@@ -875,31 +924,52 @@ class Engine:
         req_total = sum(p[4] for p in plans if p[2]) + 1.2 * PT_PER_MM * max(0, sum(1 for p in plans if p[2]) - 1)
         r["req_fit"] = r.get("req_fit", True) and top_fits and req_total <= room + EPS
         placed_any = False
+        deferred = set()       # commentaries that begin on the next page: one before them fills this one
         for n, (c, ptr, req, alll, req_h) in enumerate(plans):
             r["ptrs"][c] = ptr
+            if deferred:
+                deferred.add(c)
+                continue
             if not alll:
                 continue
-            later = sum(self.reserve(p, r["req_fit"]) for p in plans[n + 1:])
-            budget = room - later - (1.2 * PT_PER_MM if placed_any else 0.0)
             nlh = self.note_lh[c]
-            rows = int((budget - self.note_pad() - self.note_title_h(c) + EPS) // nlh)
+            gap_ = 1.2 * PT_PER_MM if placed_any else 0.0
+            words = self.entry_words(c, alll)
+            later = sum(self.reserve(p, r["req_fit"]) for p in plans[n + 1:])
+            rows = int((room - later - gap_ - self.note_pad() - self.note_title_h(c) + EPS) // nlh)
             if force and not placed_any and rows < 1:
                 rows = 1
-            if rows < 1:
-                continue
-            words = self.entry_words(c, alll)
-            lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"], tight)
+            lines, ntake = ([], 0)
+            if rows >= 1:
+                lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"], tight)
+            if later and (not lines or ntake < len(words)):
+                # too long for the room left after the first lines of the ones after it: if it
+                # is too long for all the room, it takes all of it, and the ones after it begin
+                # on the next page (RULES.md, rule 5)
+                full = int((room - gap_ - self.note_pad() - self.note_title_h(c) + EPS) // nlh)
+                if full >= 1:
+                    l2, n2 = self.take(words, self.style[c], nlh, self.note_col_w(c), full * self.comms[c]["cols"], tight)
+                    if l2 and n2 < len(words):
+                        lines, ntake = l2, n2
+                        deferred.add(None)
             if not lines:
+                continue
+            if placed_any and ntake < len(words) and math.ceil(len(lines) / self.comms[c]["cols"]) < MIN_START_ROWS:
+                # a commentary that would begin with a line or two at the foot of the page and go
+                # on to the next: it begins on the next page instead (RULES.md, rule 5)
+                deferred.add(c)
                 continue
             h = self.section_h(c, len(lines))
             r["sections"].append({"c": c, "lines": lines, "nlh": nlh, "cut": ntake < len(words), "h": h})
             room -= h + (1.2 * PT_PER_MM if placed_any else 0.0)
             placed_any = True
             r["ptrs"][c] = self.advance(ptr, words, ntake, len(alll))
-        # every commentary of a verse whose text is on the page begins on the page
+        # every commentary of a verse whose text is on the page begins on the page (but one
+        # after a commentary that fills the page begins on the next)
         r["start_ok"] = True
         r["late_v"] = set()
-        for c, ptr, alll in [(p[0], p[1], p[3]) for p in plans] + list(extra):
+        r["deferred"] = {c for c in deferred if c is not None}
+        for c, ptr, alll in [(p[0], p[1], p[3]) for p in plans if p[0] not in deferred] + list(extra):
             e, w = r["ptrs"][c]
             for v in {x["v"] for x in alll}:
                 idx = self.first_idx[c].get(v)
