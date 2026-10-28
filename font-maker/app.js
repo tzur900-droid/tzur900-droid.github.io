@@ -1,0 +1,242 @@
+// The page of the font maker: the settings, the live preview and the download.
+(function () {
+  "use strict";
+
+  const D = FontMaker.DEFAULTS;
+
+  const SLIDERS = [
+    { key: "weight", label: "עובי", min: 0.05, max: 0.26, step: 0.005, fmt: (v) => Math.round(v * 100) },
+    { key: "contrast", label: "ניגודיות", help: "כמה הקווים העומדים דקים מהשוכבים", min: 1, max: 4, step: 0.05, fmt: (v) => v.toFixed(1) },
+    { key: "width", label: "רוחב", min: 0.75, max: 1.3, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
+    { key: "height", label: "גובה האותיות", min: 440, max: 640, step: 5, fmt: (v) => v },
+    { key: "round", label: "עיגול הפינות", min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
+    { key: "serif", label: "תגים", help: "הראש שבקצה הגג של האותיות. 0 = גופן נקי", min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
+    { key: "angle", label: "זווית הקולמוס", help: "כמו סופר שמטה את הקולמוס", min: -20, max: 20, step: 1, fmt: (v) => v + "°" },
+    { key: "slant", label: "נטייה", min: -14, max: 14, step: 0.5, fmt: (v) => v + "°" },
+    { key: "spacing", label: "ריווח בין האותיות", min: 0.6, max: 1.8, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
+    { key: "descender", label: "אורך הסופיות (ך ן ף ץ ק)", min: 0.25, max: 0.6, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
+    { key: "ascender", label: "גובה הלמ״ד", min: 0.25, max: 0.6, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
+  ];
+
+  const PRESETS = [
+    { name: "ספר", prm: {} },
+    { name: "כותרת כבדה", prm: { weight: 0.22, contrast: 1.9, width: 1.08, round: 0.25, serif: 0.45, spacing: 0.95 } },
+    { name: "נקי", prm: { weight: 0.11, contrast: 1.1, width: 0.98, round: 0.5, serif: 0, spacing: 1.05 } },
+    { name: "עדין", prm: { weight: 0.075, contrast: 2.2, round: 0.4, serif: 0.6, spacing: 1.08 } },
+    { name: "קולמוס", prm: { weight: 0.14, contrast: 3.2, angle: 14, serif: 0.9, round: 0.6 } },
+    { name: "מרובע", prm: { weight: 0.15, contrast: 2.0, round: 0, serif: 0.35, width: 1.05 } },
+    { name: "צר", prm: { weight: 0.13, width: 0.8, spacing: 0.9 } },
+    { name: "נטוי", prm: { weight: 0.12, slant: 9, width: 0.94 } },
+  ];
+
+  const STORE = "font-maker-settings";
+  let prm = Object.assign({}, D);
+
+  const $ = (id) => document.getElementById(id);
+
+  // ---------------------------------------------------------------- settings
+
+  function load() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE) || "null");
+      if (saved && saved.prm) {
+        prm = sanitize(saved.prm);
+        if (saved.family) $("family").value = saved.family;
+        if (saved.style) document.querySelector(`input[name=style][value=${saved.style}]`).checked = true;
+      }
+    } catch (e) { /* no storage: start from the defaults */ }
+  }
+
+  function store() {
+    try {
+      localStorage.setItem(STORE, JSON.stringify({ prm, family: $("family").value, style: style() }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function sanitize(p) {
+    const out = Object.assign({}, D);
+    for (const s of SLIDERS) {
+      const v = Number(p && p[s.key]);
+      if (isFinite(v)) out[s.key] = Math.min(s.max, Math.max(s.min, v));
+    }
+    return out;
+  }
+
+  function style() {
+    return document.querySelector("input[name=style]:checked").value;
+  }
+
+  // ---------------------------------------------------------------- controls
+
+  function buildControls() {
+    const box = $("sliders");
+    for (const s of SLIDERS) {
+      const wrap = document.createElement("div");
+      wrap.className = "slider";
+      wrap.innerHTML = `<label class="lbl" for="s-${s.key}"><span>${s.label}</span><span class="val" id="v-${s.key}"></span></label>
+        <input type="range" id="s-${s.key}" min="${s.min}" max="${s.max}" step="${s.step}">` +
+        (s.help ? `<small>${s.help}</small>` : "");
+      box.appendChild(wrap);
+      const input = wrap.querySelector("input");
+      input.addEventListener("input", () => {
+        prm[s.key] = Number(input.value);
+        markPreset(null);
+        changed();
+      });
+    }
+    const chips = $("presets");
+    PRESETS.forEach((p, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.textContent = p.name;
+      b.dataset.i = i;
+      b.addEventListener("click", () => {
+        prm = Object.assign({}, D, p.prm);
+        markPreset(i);
+        syncControls();
+        changed();
+      });
+      chips.appendChild(b);
+    });
+    $("surprise").addEventListener("click", () => {
+      prm = surprise();
+      markPreset(null);
+      syncControls();
+      changed();
+    });
+    $("reset").addEventListener("click", () => {
+      prm = Object.assign({}, D);
+      markPreset(0);
+      syncControls();
+      changed();
+    });
+    $("family").addEventListener("input", store);
+    document.querySelectorAll("input[name=style]").forEach((r) => r.addEventListener("change", store));
+    $("size").addEventListener("input", () => document.documentElement.style.setProperty("--pv-size", $("size").value + "px"));
+    $("download").addEventListener("click", download);
+    $("save-settings").addEventListener("click", saveSettings);
+    $("load-settings").addEventListener("change", loadSettings);
+  }
+
+  function markPreset(i) {
+    document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", String(i) === c.dataset.i));
+  }
+
+  function syncControls() {
+    for (const s of SLIDERS) {
+      $("s-" + s.key).value = prm[s.key];
+      $("v-" + s.key).textContent = s.fmt(prm[s.key]);
+    }
+  }
+
+  // A random font that still looks like a font: every setting stays in its sensible middle.
+  function surprise() {
+    const r = (a, b) => a + Math.random() * (b - a);
+    const p = Object.assign({}, D, {
+      weight: r(0.08, 0.2),
+      contrast: r(1.2, 3.2),
+      width: r(0.88, 1.12),
+      round: r(0.1, 0.65),
+      serif: Math.random() < 0.25 ? 0 : r(0.3, 0.95),
+      angle: Math.random() < 0.5 ? 0 : Math.round(r(-6, 14)),
+      slant: Math.random() < 0.85 ? 0 : Math.round(r(4, 10)),
+      spacing: r(0.92, 1.15),
+      height: Math.round(r(510, 570) / 5) * 5,
+    });
+    if (p.contrast < 1.5) p.serif = Math.min(p.serif, 0.4);
+    return sanitize(p);
+  }
+
+  // ---------------------------------------------------------------- preview
+
+  let face = null, timer = 0, busy = false, again = false;
+
+  function changed() {
+    syncControls();
+    store();
+    clearTimeout(timer);
+    timer = setTimeout(render, 60);
+  }
+
+  async function render() {
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      const buf = FontMaker.makeFont(prm, { family: "Preview" });
+      const f = new FontFace("Preview", buf);
+      await f.load();
+      document.fonts.add(f);
+      if (face) document.fonts.delete(face);
+      face = f;
+    } catch (e) {
+      $("status").textContent = "שגיאה בתצוגה: " + e.message;
+    }
+    busy = false;
+    if (again) { again = false; render(); }
+  }
+
+  // ---------------------------------------------------------------- files
+
+  function fileName(ext) {
+    const fam = ($("family").value || "My Hebrew").replace(/[^A-Za-z0-9]+/g, "") || "MyHebrew";
+    return fam + "-" + style() + ext;
+  }
+
+  function save(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  }
+
+  function download() {
+    const btn = $("download");
+    btn.disabled = true;
+    $("status").textContent = "בונה את הגופן… (כמה שניות)";
+    setTimeout(() => {
+      try {
+        const buf = FontMaker.makeFont(prm, { family: $("family").value, style: style(), merge: true });
+        save(new Blob([buf], { type: "font/otf" }), fileName(".otf"));
+        $("status").textContent = "הגופן ירד: " + fileName(".otf");
+      } catch (e) {
+        $("status").textContent = "לא הצלחתי לבנות את הגופן: " + e.message;
+      }
+      btn.disabled = false;
+    }, 30);
+  }
+
+  function saveSettings() {
+    const data = { app: "font-maker", version: 1, family: $("family").value, style: style(), prm };
+    save(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), fileName(".json"));
+  }
+
+  function loadSettings(ev) {
+    const file = ev.target.files[0];
+    if (!file) return;
+    file.text().then((txt) => {
+      const data = JSON.parse(txt);
+      prm = sanitize(data.prm || data);
+      if (data.family) $("family").value = data.family;
+      if (data.style === "Bold" || data.style === "Regular") {
+        document.querySelector(`input[name=style][value=${data.style}]`).checked = true;
+      }
+      markPreset(null);
+      changed();
+      $("status").textContent = "ההגדרות נטענו.";
+    }).catch(() => {
+      $("status").textContent = "הקובץ הזה אינו קובץ הגדרות של המחולל.";
+    });
+    ev.target.value = "";
+  }
+
+  // ---------------------------------------------------------------- start
+
+  buildControls();
+  load();
+  syncControls();
+  markPreset(JSON.stringify(sanitize({})) === JSON.stringify(prm) ? 0 : null);
+  render();
+})();

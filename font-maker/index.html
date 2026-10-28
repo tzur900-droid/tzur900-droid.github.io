@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>מחולל גופנים</title>
+<meta name="description" content="יוצרים גופן עברי חדש: מזיזים מחוונים, רואים את האותיות משתנות, ומורידים קובץ גופן.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <h1>מחולל גופנים עבריים</h1>
+  <p>מזיזים את המחוונים, רואים את האותיות משתנות, ומורידים קובץ גופן (OTF) שאפשר להתקין ולהשתמש בו בכל תוכנה.</p>
+</header>
+
+<main class="layout">
+  <aside class="panel" aria-label="הגדרות הגופן">
+    <section>
+      <h2>סגנון מוכן</h2>
+      <div class="chips" id="presets"></div>
+      <button type="button" class="btn ghost wide" id="surprise">🎲 הפתעה — גופן אקראי (אבל לא מוזר)</button>
+    </section>
+
+    <section>
+      <h2>צורת האותיות</h2>
+      <div id="sliders"></div>
+      <button type="button" class="btn ghost small" id="reset">איפוס להגדרות הספר</button>
+    </section>
+
+    <section>
+      <h2>שמירה</h2>
+      <label class="field">שם הגופן (באותיות אנגליות)
+        <input type="text" id="family" value="My Hebrew" maxlength="40" dir="ltr" autocomplete="off">
+      </label>
+      <div class="field">משקל בקובץ
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="style" value="Regular" checked> רגיל</label>
+          <label><input type="radio" name="style" value="Bold"> מודגש</label>
+        </div>
+        <small>כדי לקבל משפחה: מורידים גופן "רגיל", מעבים, ומורידים שוב באותו שם כ"מודגש". אז כפתור ההדגשה בתוכנות משתמש בו.</small>
+      </div>
+      <button type="button" class="btn primary wide" id="download">⬇ הורדת הגופן</button>
+      <p class="status" id="status" role="status"></p>
+      <div class="row">
+        <button type="button" class="btn ghost small" id="save-settings">שמירת ההגדרות לקובץ</button>
+        <label class="btn ghost small file">טעינת הגדרות<input type="file" id="load-settings" accept=".json,application/json"></label>
+      </div>
+    </section>
+  </aside>
+
+  <section class="preview" aria-label="תצוגה">
+    <div class="preview-bar">
+      <label>גודל <input type="range" id="size" min="14" max="120" value="44"></label>
+      <span class="hint">אפשר לכתוב בתוך התצוגה</span>
+    </div>
+    <div class="sheet">
+      <div class="alphabet pv">אבגדהוזחטיכךלמםנןסעפףצץקרשת</div>
+      <div class="custom pv" id="custom" contenteditable="true" spellcheck="false">בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ׃</div>
+      <div class="page">
+        <div class="pv pv-title">פרשת בראשית</div>
+        <p class="pv pv-body">וַיֹּאמֶר אֱלֹהִים יְהִי אוֹר וַיְהִי אוֹר. וַיַּרְא אֱלֹהִים אֶת הָאוֹר כִּי טוֹב, וַיַּבְדֵּל אֱלֹהִים בֵּין הָאוֹר וּבֵין הַחֹשֶׁךְ.</p>
+        <p class="pv pv-small">בראשית - אמר רבי יצחק לא היה צריך להתחיל את התורה אלא מהחדש הזה לכם, שהיא מצוה ראשונה שנצטוו בה ישראל. ומה טעם פתח בבראשית? משום כח מעשיו הגיד לעמו (תהלים קיא, ו).</p>
+        <p class="pv pv-tiny">טקסט קטן מאוד, כמו בהערות שוליים: 1234567890 — "מירכאות", (סוגריים) [ומרובעים] וסימנים: ? ! ; ׳ ״</p>
+      </div>
+    </div>
+
+    <details class="help">
+      <summary>איך משתמשים בגופן?</summary>
+      <ul>
+        <li><b>בווינדוס:</b> לוחצים פעמיים על הקובץ שהורד ובוחרים <b>התקנה</b>. מעכשיו הגופן מופיע ברשימת הגופנים בכל התוכנות (וורד, תוכנת העימוד…).</li>
+        <li><b>בתוכנת עימוד הפירושים:</b> אפשר גם להעתיק את הקובץ לתיקייה <code>fonts</code> שבתיקיית התוכנה. בפתיחה הבאה הגופן מופיע ברשימה.</li>
+        <li><b>בטלפון או באתר:</b> קובץ OTF עובד גם באתרים (CSS) ובאפליקציות עיצוב.</li>
+        <li>בגופן יש את כל האותיות והסופיות, ניקוד מלא (עם מיקום אוטומטי מתחת לאות ומעליה), ספרות וסימני פיסוק. טעמי המקרא ואותיות לטיניות אינם בגופן; תוכנות לוקחות אותם מגופן אחר.</li>
+        <li>הגופן שלך — אפשר להשתמש בו, לשתף אותו ולמכור ספרים שמודפסים בו, בלי הגבלה.</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<script src="lib/opentype.min.js"></script>
+<script src="lib/paper-core.min.js"></script>
+<script src="lib/clipper.min.js"></script>
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
