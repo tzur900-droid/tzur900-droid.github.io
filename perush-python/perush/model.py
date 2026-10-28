@@ -75,6 +75,9 @@ DEFAULTS = {
     "coverPalette": "bordeaux",  # a key of cover.PALETTES, or "custom" (coverBg / coverInk)
     "coverBg": "#5e1a24",
     "coverInk": "#d4af5a",
+    "coverFrame": "double",  # the ornaments: keys of cover.FRAMES, CORNERS and DIVIDERS
+    "coverCorner": "diamond",
+    "coverDivider": "line",
     "coverFont": "",         # "" = the font of the text
     "coverTitle": "",        # the name on the front ("" = the title of the book)
     "coverSub": "",          # the lines under it, one per line ("" = as on the title page)

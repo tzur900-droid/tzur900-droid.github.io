@@ -159,27 +159,235 @@ def diamond(p, cx, cy, r, color):
     p.setBrush(Qt.NoBrush)
 
 
-def frames(p, x, y, w, h, ink):
-    """The double frame of a panel, with a diamond in each corner of the inner one."""
+# ---------------------------------------------------------------- the ornaments
+# Each kind of ornament is a list to choose from; all are drawn in the ink of the cover.
+
+FRAMES = {
+    "double": "מסגרת כפולה",
+    "single": "מסגרת פשוטה",
+    "triple": "מסגרת משולשת (דק-עבה-דק)",
+    "notched": "כפולה עם פינות קעורות",
+    "dotted": "קו ונקודות",
+    "none": "בלי מסגרת",
+}
+CORNERS = {
+    "diamond": "יהלום",
+    "circle": "עיגול",
+    "rosette": "פרח",
+    "star": "מגן דוד",
+    "bracket": "זווית",
+    "fan": "רבע עיגול",
+    "none": "בלי",
+}
+DIVIDERS = {
+    "line": "קו ויהלום",
+    "diamonds": "שלושה יהלומים",
+    "double": "קו כפול",
+    "wave": "גל",
+    "dots": "שורת נקודות",
+    "star": "קווים ומגן דוד",
+    "rosette": "קווים ופרח",
+    "none": "בלי",
+}
+
+
+def dot(p, cx, cy, r, color):
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+    p.drawEllipse(QPointF(cx, cy), r, r)
     p.setBrush(Qt.NoBrush)
-    p.setPen(pen(ink, 1.8))
-    p.drawRect(QRectF(x + FRAME, y + FRAME, w - 2 * FRAME, h - 2 * FRAME))
-    i = FRAME + FRAME_GAP
-    p.setPen(pen(ink, 0.6))
-    p.drawRect(QRectF(x + i, y + i, w - 2 * i, h - 2 * i))
-    for cx in (x + i, x + w - i):
-        for cy in (y + i, y + h - i):
-            diamond(p, cx, cy, 1.6 * MM, ink)
 
 
-def ornament(p, cx, cy, half, ink):
-    """A line, a diamond, a line (as under the name on the title page)."""
-    p.setPen(pen(ink, 0.9))
-    p.drawLine(QPointF(cx - half, cy), QPointF(cx - 4 * MM, cy))
-    p.drawLine(QPointF(cx + 4 * MM, cy), QPointF(cx + half, cy))
-    diamond(p, cx, cy, 2.4 * MM, ink)
-    diamond(p, cx - half - 2 * MM, cy, 1.1 * MM, ink)
-    diamond(p, cx + half + 2 * MM, cy, 1.1 * MM, ink)
+def rosette(p, cx, cy, r, ink, bg):
+    """Four petals (and four smaller between them), a heart in the background colour."""
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(ink))
+    for k, (rr, wide) in enumerate(((r, 0.38), (r * 0.7, 0.3))):
+        for a in range(4):
+            p.save()
+            p.translate(cx, cy)
+            p.rotate(a * 90 + k * 45)
+            p.drawEllipse(QRectF(0, -rr * wide / 2, rr, rr * wide))
+            p.restore()
+    p.setBrush(Qt.NoBrush)
+    dot(p, cx, cy, r * 0.22, bg)
+    dot(p, cx, cy, r * 0.11, ink)
+
+
+def star(p, cx, cy, r, ink, lw):
+    """A Magen David: two triangles."""
+    p.setPen(pen(ink, lw))
+    p.setBrush(Qt.NoBrush)
+    for a0 in (-90, 90):
+        pts = [QPointF(cx + r * math.cos(math.radians(a0 + k * 120)), cy + r * math.sin(math.radians(a0 + k * 120)))
+               for k in range(3)]
+        p.drawPolygon(QPolygonF(pts))
+
+
+def corner(p, cx, cy, sx, sy, ink, bg, kind):
+    """The ornament of a corner of the frame at (cx, cy); (sx, sy) points into the panel."""
+    if kind == "diamond":
+        diamond(p, cx, cy, 1.6 * MM, ink)
+    elif kind == "circle":
+        dot(p, cx, cy, 1.5 * MM, ink)
+        dot(p, cx, cy, 0.6 * MM, bg)
+    elif kind == "rosette":
+        rosette(p, cx, cy, 3 * MM, ink, bg)
+    elif kind == "star":
+        star(p, cx, cy, 2.6 * MM, ink, 0.7)
+    elif kind == "bracket":
+        # an angle inside the corner, its arms ending in small diamonds
+        d, L = 2.2 * MM, 11 * MM
+        p.setPen(pen(ink, 1.0))
+        p.drawLine(QPointF(cx + sx * d, cy + sy * d), QPointF(cx + sx * L, cy + sy * d))
+        p.drawLine(QPointF(cx + sx * d, cy + sy * d), QPointF(cx + sx * d, cy + sy * L))
+        diamond(p, cx + sx * L + sx * 1.2 * MM, cy + sy * d, 0.9 * MM, ink)
+        diamond(p, cx + sx * d, cy + sy * L + sy * 1.2 * MM, 0.9 * MM, ink)
+        diamond(p, cx, cy, 1.2 * MM, ink)
+    elif kind == "fan":
+        # quarter circles from the corner, into the panel
+        p.setBrush(Qt.NoBrush)
+        start = {(1, 1): 270, (-1, 1): 180, (-1, -1): 90, (1, -1): 0}[(sx, sy)]
+        for r, lw in ((7 * MM, 1.0), (5 * MM, 0.5)):
+            p.setPen(pen(ink, lw))
+            p.drawArc(QRectF(cx - r, cy - r, 2 * r, 2 * r), int(start * 16), 90 * 16)
+        dot(p, cx + sx * 2.2 * MM, cy + sy * 2.2 * MM, 0.8 * MM, ink)
+
+
+def notched_rect(x1, y1, x2, y2, r):
+    """A rectangle whose corners are cut inward in quarter circles."""
+    from PySide6.QtGui import QPainterPath
+    path = QPainterPath()
+    box = lambda cx, cy: QRectF(cx - r, cy - r, 2 * r, 2 * r)
+    path.moveTo(x1 + r, y1)
+    path.arcTo(box(x2, y1), 180, 90)
+    path.arcTo(box(x2, y2), 90, 90)
+    path.arcTo(box(x1, y2), 0, 90)
+    path.arcTo(box(x1, y1), 270, 90)
+    path.closeSubpath()
+    return path
+
+
+def frames(p, P, x, y, w, h, ink, bg):
+    """The frame of a panel (front or back), and the ornaments in the corners of its inner line."""
+    kind = P.get("coverFrame") or "double"
+    o, i = FRAME, FRAME + FRAME_GAP
+    p.setBrush(Qt.NoBrush)
+    rect = lambda d: QRectF(x + d, y + d, w - 2 * d, h - 2 * d)
+    if kind == "single":
+        p.setPen(pen(ink, 1.2))
+        p.drawRect(rect(i))
+    elif kind == "triple":
+        p.setPen(pen(ink, 0.5))
+        p.drawRect(rect(o - 1.2 * MM))
+        p.setPen(pen(ink, 2.2))
+        p.drawRect(rect(o + 0.4 * MM))
+        p.setPen(pen(ink, 0.5))
+        p.drawRect(rect(i))
+    elif kind == "notched":
+        p.setPen(pen(ink, 1.8))
+        p.drawRect(rect(o))
+        p.setPen(pen(ink, 0.7))
+        p.drawPath(notched_rect(x + i, y + i, x + w - i, y + h - i, 5 * MM))
+    elif kind == "dotted":
+        p.setPen(pen(ink, 1.4))
+        p.drawRect(rect(o))
+        dots = QPen(QColor(ink))
+        dots.setWidthF(1.3)
+        dots.setCapStyle(Qt.RoundCap)
+        dots.setDashPattern([0.01, 3.2])      # round dots, in units of the line's width
+        p.setPen(dots)
+        p.drawRect(rect(i))
+    elif kind != "none":
+        p.setPen(pen(ink, 1.8))
+        p.drawRect(rect(o))
+        p.setPen(pen(ink, 0.6))
+        p.drawRect(rect(i))
+    kind = P.get("coverCorner") or "diamond"
+    if kind != "none":
+        for cx, sx in ((x + i, 1), (x + w - i, -1)):
+            for cy, sy in ((y + i, 1), (y + h - i, -1)):
+                corner(p, cx, cy, sx, sy, ink, bg, kind)
+
+
+def ornament(p, P, cx, cy, half, ink, bg):
+    """The divider under the name on the front, half as wide as half on each side."""
+    kind = P.get("coverDivider") or "line"
+    if kind == "none":
+        return
+
+    def lines(gap, lw=0.9):
+        p.setPen(pen(ink, lw))
+        p.drawLine(QPointF(cx - half, cy), QPointF(cx - gap, cy))
+        p.drawLine(QPointF(cx + gap, cy), QPointF(cx + half, cy))
+
+    if kind == "diamonds":
+        lines(10 * MM, 0.6)
+        for dx, r in ((-6 * MM, 1.3 * MM), (0, 2.4 * MM), (6 * MM, 1.3 * MM)):
+            diamond(p, cx + dx, cy, r, ink)
+    elif kind == "double":
+        p.setPen(pen(ink, 1.2))
+        p.drawLine(QPointF(cx - half, cy - 0.8 * MM), QPointF(cx + half, cy - 0.8 * MM))
+        p.setPen(pen(ink, 0.5))
+        p.drawLine(QPointF(cx - half * 0.8, cy + 0.8 * MM), QPointF(cx + half * 0.8, cy + 0.8 * MM))
+    elif kind == "wave":
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath()
+        n = max(2, int(2 * half / (6 * MM)))
+        step = 2 * half / n
+        path.moveTo(cx - half, cy)
+        for k in range(n):
+            x0 = cx - half + k * step
+            amp = 1.3 * MM if k % 2 == 0 else -1.3 * MM
+            path.quadTo(QPointF(x0 + step / 2, cy - 2 * amp), QPointF(x0 + step, cy))
+        p.setPen(pen(ink, 0.9))
+        p.drawPath(path)
+        diamond(p, cx - half - 2 * MM, cy, 1.0 * MM, ink)
+        diamond(p, cx + half + 2 * MM, cy, 1.0 * MM, ink)
+    elif kind == "dots":
+        k, x = 0, 0.0
+        while x <= half:
+            r = max(0.35 * MM, 1.5 * MM * (1 - x / half * 0.75))
+            for sgn in ((1,) if k == 0 else (1, -1)):
+                dot(p, cx + sgn * x, cy, r, ink)
+            k += 1
+            x += 3.6 * MM
+    elif kind == "star":
+        lines(5 * MM)
+        star(p, cx, cy, 3.4 * MM, ink, 0.8)
+        diamond(p, cx - half - 2 * MM, cy, 1.1 * MM, ink)
+        diamond(p, cx + half + 2 * MM, cy, 1.1 * MM, ink)
+    elif kind == "rosette":
+        lines(5.5 * MM)
+        rosette(p, cx, cy, 4 * MM, ink, bg)
+        diamond(p, cx - half - 2 * MM, cy, 1.1 * MM, ink)
+        diamond(p, cx + half + 2 * MM, cy, 1.1 * MM, ink)
+    else:
+        lines(4 * MM)
+        diamond(p, cx, cy, 2.4 * MM, ink)
+        diamond(p, cx - half - 2 * MM, cy, 1.1 * MM, ink)
+        diamond(p, cx + half + 2 * MM, cy, 1.1 * MM, ink)
+
+
+def sample(kind, key, bg, ink, w=96, h=40):
+    """A small picture of one ornament, for the list to choose it from."""
+    img = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+    img.fill(QColor(bg))
+    p = QPainter(img)
+    p.setRenderHints(QPainter.Antialiasing)
+    k = h / (16 * MM)         # 16 mm of the cover in the height of the picture
+    p.scale(k, k)
+    W, H = w / k, h / k
+    if kind == "divider":
+        ornament(p, {"coverDivider": key}, W / 2, H / 2, W * 0.36, ink, bg)
+    elif kind == "corner":
+        k0 = H / 2 - FRAME - FRAME_GAP - 1.5 * MM     # the corner a little above the middle, room round it
+        frames(p, {"coverFrame": "double", "coverCorner": key}, W / 2 - 7 * MM - FRAME - FRAME_GAP, k0, W * 3, H * 3, ink, bg)
+    else:
+        frames(p, {"coverFrame": key, "coverCorner": "none"}, -FRAME + 1.5 * MM, -FRAME + 1.5 * MM,
+               W + 2 * FRAME - 3 * MM, H * 3, ink, bg)
+    p.end()
+    return img
 
 
 def image(path):
@@ -199,8 +407,8 @@ def draw_image(p, img, x, y, w, h, align="center"):
     return r
 
 
-def draw_front(p, c, x, y, w, h, ink, family):
-    frames(p, x, y, w, h, ink)
+def draw_front(p, c, x, y, w, h, ink, bg, family):
+    frames(p, c.P, x, y, w, h, ink, bg)
     p.setPen(QColor(ink))
     inner = w - 2 * (FRAME + FRAME_GAP + 9 * MM)
     cx = x + w / 2
@@ -219,7 +427,7 @@ def draw_front(p, c, x, y, w, h, ink, family):
     for l in tlines:
         draw_text(p, l, big, cx, yy + ascent(big) + (t_lh - big.size * 1.1) / 2)
         yy += t_lh
-    ornament(p, cx, yy + gap, min(inner * 0.32, 45 * MM), ink)
+    ornament(p, c.P, cx, yy + gap, min(inner * 0.32, 45 * MM), ink, bg)
     yy += gap * 2
     p.setPen(QColor(ink))
     for st, ls in subs:
@@ -238,8 +446,8 @@ def draw_front(p, c, x, y, w, h, ink, family):
             yy += lh
 
 
-def draw_back(p, c, x, y, w, h, ink, family):
-    frames(p, x, y, w, h, ink)
+def draw_back(p, c, x, y, w, h, ink, bg, family):
+    frames(p, c.P, x, y, w, h, ink, bg)
     pad = FRAME + FRAME_GAP + 9 * MM
     inner = w - 2 * pad
     bottom = y + h - pad
@@ -376,9 +584,9 @@ def draw_cover(p, c, guides=False):
     p.drawRect(QRectF(c.slug, c.slug, c.width - 2 * c.slug, c.height - 2 * c.slug))
     p.setBrush(Qt.NoBrush)
     front, spine, back = c.panels()
-    draw_front(p, c, *front, ink, family)
+    draw_front(p, c, *front, ink, bg, family)
     draw_spine(p, c, *spine, ink, family)
-    draw_back(p, c, *back, ink, family)
+    draw_back(p, c, *back, ink, bg, family)
     if c.slug:
         draw_marks(p, c)
     if guides:

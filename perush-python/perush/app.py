@@ -6,8 +6,8 @@ import os
 
 import sys
 
-from PySide6.QtCore import QEvent, QObject, QSettings, QStandardPaths, Qt, QTimer, QUrl
-from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPixmap, QShortcut,
+from PySide6.QtCore import QEvent, QObject, QSettings, QSize, QStandardPaths, Qt, QTimer, QUrl
+from PySide6.QtGui import (QAction, QColor, QIcon, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPixmap, QShortcut,
                            QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
@@ -574,6 +574,18 @@ class MainWindow(QMainWindow):
         self.cv_font = QFontComboBox()
         self.cv_font.setWritingSystem(QFontDatabase.Hebrew)
         form.addRow("גופן:", self.cv_font)
+        # the ornaments: each list shows a small picture of each choice, in the cover's colours
+        self.cv_orn = {}
+        for key, kind, names, label in (("coverFrame", "frame", cover.FRAMES, "מסגרת:"),
+                                        ("coverCorner", "corner", cover.CORNERS, "עיטור בפינות:"),
+                                        ("coverDivider", "divider", cover.DIVIDERS, "עיטור מתחת לשם:")):
+            box_ = QComboBox()
+            box_.setIconSize(QSize(72, 30))
+            for k, name in names.items():
+                box_.addItem(name, k)
+            box_.currentIndexChanged.connect(self.cover_changed)
+            form.addRow(label, box_)
+            self.cv_orn[key] = (box_, kind)
         lay.addWidget(box)
 
         box = QGroupBox("חזית")
@@ -704,6 +716,9 @@ class MainWindow(QMainWindow):
         p = self.project
         self.cv_palette.setCurrentIndex(list(cover.PALETTES).index(p["coverPalette"]) if p["coverPalette"] in cover.PALETTES else 0)
         self.cv_font.setCurrentFont(QFont(p.get("coverFont") or p["mainFont"]))
+        for key, (box_, _) in self.cv_orn.items():
+            i = box_.findData(p.get(key))
+            box_.setCurrentIndex(max(0, i))
         self.cv_title.setText(p["coverTitle"])
         self.cv_sub.setPlainText(p["coverSub"])
         self.cv_foot.setText(p["coverFoot"])
@@ -722,6 +737,8 @@ class MainWindow(QMainWindow):
         p["coverPalette"] = self.cv_palette.currentData()
         font = self.cv_font.currentFont().family()
         p["coverFont"] = "" if font == p["mainFont"] else font
+        for key, (box_, _) in self.cv_orn.items():
+            p[key] = box_.currentData()
         p["coverTitle"] = self.cv_title.text()
         p["coverSub"] = self.cv_sub.toPlainText()
         p["coverFoot"] = self.cv_foot.text()
@@ -741,6 +758,11 @@ class MainWindow(QMainWindow):
         for b, c in ((self.cv_bg, bg), (self.cv_ink, ink)):
             text = "white" if QColor(c).lightness() < 128 else "black"
             b.setStyleSheet(f"QPushButton {{ background:{c}; color:{text}; padding:4px 12px; border:1px solid #888; border-radius:4px; }}")
+        if (bg, ink) != getattr(self, "orn_colors", None):
+            self.orn_colors = (bg, ink)
+            for box_, kind in self.cv_orn.values():
+                for i in range(box_.count()):
+                    box_.setItemIcon(i, QIcon(QPixmap.fromImage(cover.sample(kind, box_.itemData(i), bg, ink, 144, 60))))
         for e, key in ((self.cv_logo, "coverLogo"), (self.cv_barcode, "coverBarcode")):
             path = self.project.get(key) or ""
             e.setText(os.path.basename(path) + ("" if not path or os.path.isfile(path) else "  (הקובץ לא נמצא)"))
