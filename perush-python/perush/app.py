@@ -6,17 +6,17 @@ import os
 
 import sys
 
-from PySide6.QtCore import QEvent, QObject, QSettings, QStandardPaths, Qt, QTimer, QUrl
-from PySide6.QtGui import (QAction, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPixmap, QShortcut,
+from PySide6.QtCore import QEvent, QObject, QSettings, QSize, QStandardPaths, Qt, QTimer, QUrl
+from PySide6.QtGui import (QAction, QColor, QIcon, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPixmap, QShortcut,
                            QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
+    QAbstractSpinBox, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
-    QMenu, QToolBar, QToolButton, QVBoxLayout, QWidget,
+    QMenu, QSizePolicy, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import model
+from . import cover, model
 from .checks import check, describe, summary
 from .engine import Cancelled, Engine
 from .render import export_pdf, page_image
@@ -212,6 +212,11 @@ class MainWindow(QMainWindow):
         self.autosave.setSingleShot(True)
         self.autosave.setInterval(1500)
         self.autosave.timeout.connect(self.save_quietly)
+        self.cover_timer = QTimer(self)
+        self.cover_timer.setSingleShot(True)
+        self.cover_timer.setInterval(250)
+        self.cover_timer.timeout.connect(self.show_cover)
+        self.engine = None
 
         self.build_toolbar()
         split = QSplitter(Qt.Horizontal)
@@ -261,6 +266,7 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         pdf = act("ייצוא PDF…", self.export, "Ctrl+P")
         tb.widgetForAction(pdf).setObjectName("primary")
+        act("ייצוא כריכה…", self.export_cover)
         tb.addSeparator()
         tb.addWidget(QLabel(" תצוגה: "))
         self.zoom_box = QComboBox()
@@ -527,10 +533,12 @@ class MainWindow(QMainWindow):
             child.setMinimumContentsLength(8)
         for child in w.findChildren(QAbstractSpinBox):
             child.setMinimumWidth(70)
+        side.addTab(self.build_cover(), "כריכה")
+        side.currentChanged.connect(lambda _: self.cover_timer.start())    # drawn to the width it is shown at
         # the mouse wheel scrolls the settings, it doesn't change a number or a choice it
         # happens to pass over (only one that was clicked first)
         self.wheel_guard = WheelGuard(self)
-        for child in w.findChildren(QWidget):
+        for child in w.findChildren(QWidget) + self.cover_box.findChildren(QWidget):
             if isinstance(child, (QAbstractSpinBox, QComboBox)):
                 child.setFocusPolicy(Qt.StrongFocus)
                 child.installEventFilter(self.wheel_guard)
@@ -547,6 +555,314 @@ class MainWindow(QMainWindow):
         self.ded.textChanged.connect(self.changed)
         self.title_sub.textChanged.connect(self.changed)
         return side
+
+    def build_cover(self):
+        """The cover: the front, the spine and the back in one spread, for the printer. Its
+        settings are kept in the project; a change shows at once in the picture above them."""
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        self.cover_area = area
+        w = QWidget()
+        self.cover_box = w
+        lay = QVBoxLayout(w)
+        self.cover_view = QLabel()
+        self.cover_view.setAlignment(Qt.AlignCenter)
+        self.cover_view.setMinimumHeight(200)
+        self.cover_view.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # the picture follows the tab's width
+        lay.addWidget(self.cover_view)
+        self.cover_info = QLabel()
+        self.cover_info.setWordWrap(True)
+        self.cover_info.setStyleSheet("color:#444;")
+        lay.addWidget(self.cover_info)
+        lay.addWidget(hint("משמאל החזית, באמצע השדרה ומימין הגב (ספר עברי נפתח מימין). הקו המקווקו הוא קו החיתוך "
+                           "וקפלי השדרה — הוא לא מודפס. הרקע ממשיך מעבר לקו החיתוך (שוליים לחיתוך, bleed)."))
+
+        box = QGroupBox("עיצוב")
+        form = QFormLayout(box)
+        self.cv_palette = QComboBox()
+        for k, (name, _, _) in cover.PALETTES.items():
+            self.cv_palette.addItem(name, k)
+        form.addRow("צבעים:", self.cv_palette)
+        row = QHBoxLayout()
+        self.cv_bg = QPushButton("רקע")
+        self.cv_ink = QPushButton("עיטור וכיתוב")
+        self.cv_bg.clicked.connect(lambda: self.pick_cover_color("coverBg"))
+        self.cv_ink.clicked.connect(lambda: self.pick_cover_color("coverInk"))
+        row.addWidget(self.cv_bg)
+        row.addWidget(self.cv_ink)
+        form.addRow("צבע חופשי:", row)
+        self.cv_font = QFontComboBox()
+        self.cv_font.setWritingSystem(QFontDatabase.Hebrew)
+        form.addRow("גופן:", self.cv_font)
+        # the ornaments: each list shows a small picture of each choice, in the cover's colours
+        self.cv_orn = {}
+        for key, kind, names, label in (("coverFrame", "frame", cover.FRAMES, "מסגרת:"),
+                                        ("coverCorner", "corner", cover.CORNERS, "עיטור בפינות:"),
+                                        ("coverDivider", "divider", cover.DIVIDERS, "עיטור מתחת לשם:")):
+            box_ = QComboBox()
+            box_.setIconSize(QSize(72, 30))
+            for k, name in names.items():
+                box_.addItem(name, k)
+            box_.currentIndexChanged.connect(self.cover_changed)
+            form.addRow(label, box_)
+            self.cv_orn[key] = (box_, kind)
+        # an ornament of your own: shown only when "תמונה משלך" is chosen
+        self.cv_corner_img = self.image_row(form, "תמונת הפינה:", "coverCornerImg")
+        self.cv_divider_img = self.image_row(form, "תמונה מתחת לשם:", "coverDividerImg")
+        self.cv_corner_img.setToolTip("ציירו את העיטור כמו שהוא בפינה הימנית העליונה; בשאר הפינות הוא מתהפך מעצמו. "
+                                      "תמונת PNG עם רקע שקוף נראית הכי טוב.")
+        self.cv_divider_img.setToolTip("תמונת PNG עם רקע שקוף נראית הכי טוב.")
+        lay.addWidget(box)
+
+        box = QGroupBox("חזית")
+        form = QFormLayout(box)
+        self.cv_title = QLineEdit()
+        self.cv_title.setPlaceholderText("ריק = שם הספר")
+        form.addRow("שם:", self.cv_title)
+        self.cv_sub = QPlainTextEdit()
+        self.cv_sub.setMaximumHeight(60)
+        self.cv_sub.setPlaceholderText("ריק = כמו בשער (למשל: עם תרגום אונקלוס ורש\"י). שורה לכל שורה.")
+        form.addRow("שורות מתחת לשם:", self.cv_sub)
+        self.cv_foot = QLineEdit()
+        self.cv_foot.setPlaceholderText("למשל: ירושלים תשפ\"ז, או שם ההוצאה")
+        form.addRow("שורה בתחתית:", self.cv_foot)
+        lay.addWidget(box)
+
+        box = QGroupBox("שדרה")
+        form = QFormLayout(box)
+        self.cv_spine = QLineEdit()
+        self.cv_spine.setPlaceholderText("ריק = השם שבחזית")
+        form.addRow("שם:", self.cv_spine)
+        self.cv_spine_sub = QLineEdit()
+        self.cv_spine_sub.setPlaceholderText("למשל: רש\"י ואור החיים, או כרך א")
+        form.addRow("אחריו (קטן יותר):", self.cv_spine_sub)
+        self.cv_dir = QComboBox()
+        for k, name in cover.SPINE_DIRS.items():
+            self.cv_dir.addItem(name, k)
+        form.addRow("כיוון הכיתוב:", self.cv_dir)
+        self.cv_logo = self.image_row(form, "סמל (בתחתית השדרה):", "coverLogo")
+        lay.addWidget(box)
+
+        box = QGroupBox("גב")
+        form = QFormLayout(box)
+        self.cv_back = QPlainTextEdit()
+        self.cv_back.setMinimumHeight(110)
+        self.cv_back.setPlaceholderText("תיאור הספר, הקדשה… שורה ריקה = רווח בין פסקאות")
+        form.addRow("טקסט:", self.cv_back)
+        self.cv_barcode = self.image_row(form, "ברקוד (תמונה):", "coverBarcode")
+        lay.addWidget(box)
+
+        box = QGroupBox("מידות לדפוס (כריכה רכה)")
+        form = QFormLayout(box)
+        self.cv_paper = QDoubleSpinBox()
+        self.cv_paper.setRange(0.03, 0.5)
+        self.cv_paper.setSingleStep(0.01)
+        self.cv_paper.setDecimals(3)
+        self.cv_paper.setSuffix(" מ\"מ")
+        self.cv_paper.setToolTip("העובי של דף אחד (שני עמודים). בערך: נייר 70 גרם 0.09, 80 גרם 0.1, 90 גרם 0.11, "
+                                 "נייר דק (תנ\"כי) 0.05. בית הדפוס יודע לומר את המספר המדויק.")
+        form.addRow("עובי דף (2 עמודים):", self.cv_paper)
+        self.cv_spine_w = QDoubleSpinBox()
+        self.cv_spine_w.setRange(0, 120)
+        self.cv_spine_w.setSingleStep(0.5)
+        self.cv_spine_w.setDecimals(1)
+        self.cv_spine_w.setSuffix(" מ\"מ")
+        self.cv_spine_w.setSpecialValueText("לפי מספר העמודים")
+        form.addRow("רוחב השדרה:", self.cv_spine_w)
+        self.cv_bleed = QDoubleSpinBox()
+        self.cv_bleed.setRange(0, 10)
+        self.cv_bleed.setSingleStep(0.5)
+        self.cv_bleed.setDecimals(1)
+        self.cv_bleed.setSuffix(" מ\"מ")
+        form.addRow("שוליים לחיתוך (bleed):", self.cv_bleed)
+        self.cv_marks = QCheckBox("סימני חיתוך מחוץ לשוליים")
+        form.addRow(self.cv_marks)
+        lay.addWidget(box)
+
+        exp = QPushButton("ייצוא כריכה ל־PDF…")
+        exp.setStyleSheet("font-weight:bold; padding:6px;")
+        exp.clicked.connect(self.export_cover)
+        lay.addWidget(exp)
+        lay.addStretch(1)
+        area.setWidget(w)
+
+        for e in (self.cv_title, self.cv_foot, self.cv_spine, self.cv_spine_sub):
+            e.textChanged.connect(self.cover_changed)
+        for e in (self.cv_sub, self.cv_back):
+            e.textChanged.connect(self.cover_changed)
+        for e in (self.cv_palette, self.cv_dir):
+            e.currentIndexChanged.connect(self.cover_changed)
+        for e in (self.cv_paper, self.cv_spine_w, self.cv_bleed):
+            e.valueChanged.connect(self.cover_changed)
+        self.cv_marks.toggled.connect(self.cover_changed)
+        self.cv_font.currentFontChanged.connect(self.cover_changed)
+        return area
+
+    def image_row(self, form, label, key):
+        """A picture chosen from a file: its name, a button to choose it, and one to take it off."""
+        row = QHBoxLayout()
+        name = QLineEdit()
+        name.setReadOnly(True)
+        name.setPlaceholderText("אין")
+        pick = QPushButton("בחירה…")
+        clear = QPushButton("הסרה")
+
+        def choose():
+            start = os.path.dirname(self.project.get(key) or "") or self.settings.value("lastDir", "")
+            path, _ = QFileDialog.getOpenFileName(self, label.rstrip(":"), start, "תמונה (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
+            if path:
+                self.project[key] = path
+                self.cover_changed()
+
+        def take_off():
+            self.project[key] = ""
+            self.cover_changed()
+
+        pick.clicked.connect(choose)
+        clear.clicked.connect(take_off)
+        row.addWidget(name, 1)
+        row.addWidget(pick)
+        row.addWidget(clear)
+        form.addRow(label, row)
+        name.form_row = (form, row)
+        return name
+
+    def pick_cover_color(self, key):
+        bg, ink = cover.colors(self.project)
+        c = QColorDialog.getColor(QColor(bg if key == "coverBg" else ink), self, "בחירת צבע")
+        if not c.isValid():
+            return
+        self.project["coverBg"], self.project["coverInk"] = bg, ink
+        self.project[key] = c.name()
+        self.loading = True
+        self.cv_palette.setCurrentIndex(list(cover.PALETTES).index("custom"))
+        self.loading = False
+        self.cover_changed()
+
+    def fill_cover(self):
+        p = self.project
+        self.cv_palette.setCurrentIndex(list(cover.PALETTES).index(p["coverPalette"]) if p["coverPalette"] in cover.PALETTES else 0)
+        self.cv_font.setCurrentFont(QFont(p.get("coverFont") or p["mainFont"]))
+        for key, (box_, _) in self.cv_orn.items():
+            i = box_.findData(p.get(key))
+            box_.setCurrentIndex(max(0, i))
+        self.cv_title.setText(p["coverTitle"])
+        self.cv_sub.setPlainText(p["coverSub"])
+        self.cv_foot.setText(p["coverFoot"])
+        self.cv_spine.setText(p["coverSpine"])
+        self.cv_spine_sub.setText(p["coverSpineSub"])
+        self.cv_dir.setCurrentIndex(list(cover.SPINE_DIRS).index(p["coverSpineDir"]) if p["coverSpineDir"] in cover.SPINE_DIRS else 0)
+        self.cv_back.setPlainText(p["coverBack"])
+        self.cv_paper.setValue(float(p["coverPaper"] or 0.1))
+        self.cv_spine_w.setValue(float(p["coverSpineW"] or 0))
+        self.cv_bleed.setValue(float(p["coverBleed"]))
+        self.cv_marks.setChecked(bool(p["coverMarks"]))
+        self.show_cover_fields()
+
+    def read_cover(self):
+        p = self.project
+        p["coverPalette"] = self.cv_palette.currentData()
+        font = self.cv_font.currentFont().family()
+        p["coverFont"] = "" if font == p["mainFont"] else font
+        for key, (box_, _) in self.cv_orn.items():
+            p[key] = box_.currentData()
+        p["coverTitle"] = self.cv_title.text()
+        p["coverSub"] = self.cv_sub.toPlainText()
+        p["coverFoot"] = self.cv_foot.text()
+        p["coverSpine"] = self.cv_spine.text()
+        p["coverSpineSub"] = self.cv_spine_sub.text()
+        p["coverSpineDir"] = self.cv_dir.currentData()
+        p["coverBack"] = self.cv_back.toPlainText()
+        p["coverPaper"] = self.cv_paper.value()
+        p["coverSpineW"] = self.cv_spine_w.value()
+        p["coverBleed"] = self.cv_bleed.value()
+        p["coverMarks"] = self.cv_marks.isChecked()
+        self.show_cover_fields()
+
+    def show_cover_fields(self):
+        """The chosen colours on their buttons, and the names of the chosen pictures."""
+        bg, ink = cover.colors(self.project)
+        for b, c in ((self.cv_bg, bg), (self.cv_ink, ink)):
+            text = "white" if QColor(c).lightness() < 128 else "black"
+            b.setStyleSheet(f"QPushButton {{ background:{c}; color:{text}; padding:4px 12px; border:1px solid #888; border-radius:4px; }}")
+        if (bg, ink) != getattr(self, "orn_colors", None):
+            self.orn_colors = (bg, ink)
+            for box_, kind in self.cv_orn.values():
+                for i in range(box_.count()):
+                    box_.setItemIcon(i, QIcon(QPixmap.fromImage(cover.sample(kind, box_.itemData(i), bg, ink, 144, 60))))
+        for e, key in (("coverCorner", self.cv_corner_img), ("coverDivider", self.cv_divider_img)):
+            form, row = key.form_row
+            form.setRowVisible(row, self.project.get(e) == "image")
+        for e, key in ((self.cv_logo, "coverLogo"), (self.cv_barcode, "coverBarcode"),
+                       (self.cv_corner_img, "coverCornerImg"), (self.cv_divider_img, "coverDividerImg")):
+            path = self.project.get(key) or ""
+            e.setText(os.path.basename(path) + ("" if not path or os.path.isfile(path) else "  (הקובץ לא נמצא)"))
+            e.setToolTip(path)
+
+    def cover_changed(self, *_):
+        """A change on the cover: kept like any change, but the pages need no new layout."""
+        if self.loading:
+            return
+        self.read_cover()
+        self.dirty = True
+        self.save_recovery()
+        self.autosave.start()
+        self.cover_timer.start()
+
+    def current_cover(self):
+        subs = self.engine.title_lines() if self.engine else []
+        return cover.make_cover(self.project, len(self.pages), subs)
+
+    def show_cover(self):
+        """The cover drawn small in its tab, and its measures."""
+        if not hasattr(self, "cover_view"):
+            return
+        c = self.current_cover()
+        ratio = self.devicePixelRatioF()
+        room = max(240, self.cover_area.viewport().width() - 30)
+        k = room / c.width
+        img = cover.cover_image(c, k * ratio)
+        pm = QPixmap.fromImage(img)
+        pm.setDevicePixelRatio(ratio)
+        self.cover_view.setPixmap(pm)
+        w, h = c.size_mm()
+        spine = c.spine / cover.MM
+        note = ""
+        if spine < 5 and self.project.get("coverSpineDir") != "across":
+            note = " · השדרה צרה — אין בה מקום לכיתוב ברור" if spine < 3 else " · השדרה צרה: הכיתוב בה קטן"
+        if not self.pages:
+            note += " · עוד אין עמודים (מעמד…)"
+        self.cover_info.setText(f"<b>כריכה {w:.1f}×{h:.1f} מ\"מ</b> (כולל שוליים לחיתוך) · עמוד {c.w / cover.MM:.0f}×{c.h / cover.MM:.0f} · "
+                                f"שדרה {spine:.1f} מ\"מ לפי {len(self.pages)} עמודים{note}")
+
+    def export_cover(self):
+        if self.stale and not self.running:
+            self.request_relayout()     # the spine is as wide as the book is now
+        if self.running or not self.pages:
+            QMessageBox.information(self, APP_NAME, "העימוד עדיין רץ (רוחב השדרה תלוי במספר העמודים), נסו שוב בעוד רגע.")
+            return
+        for key, what in (("coverBarcode", "הברקוד"), ("coverLogo", "הסמל")):
+            path = self.project.get(key)
+            if path and not os.path.isfile(path):
+                if QMessageBox.question(self, APP_NAME, f"התמונה של {what} לא נמצאה:\n{path}\n\nלייצא בלעדיה?") != QMessageBox.Yes:
+                    return
+        base = os.path.splitext(self.path)[0] if self.path else os.path.join(self.settings.value("lastDir", ""), self.project["title"] or "עימוד")
+        path, _ = QFileDialog.getSaveFileName(self, "ייצוא כריכה", base + " - כריכה.pdf", "PDF (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        c = self.current_cover()
+        try:
+            cover.export_cover(c, path, self.project["title"])
+        except Exception as e:
+            QMessageBox.warning(self, APP_NAME, f"הייצוא נכשל:\n{e}")
+            return
+        self.settings.setValue("lastDir", os.path.dirname(path))
+        w, h = c.size_mm()
+        if QMessageBox.question(self, APP_NAME, f"נשמר: {path}\n\nגודל {w:.1f}×{h:.1f} מ\"מ, שדרה {c.spine / cover.MM:.1f} מ\"מ "
+                                f"({len(self.pages)} עמודים). כדאי לבדוק את רוחב השדרה מול בית הדפוס.\n\nלפתוח את הקובץ?") == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def open_prepare(self):
         """The window for preparing text (it keeps what was pasted while it is closed)."""
@@ -718,6 +1034,7 @@ class MainWindow(QMainWindow):
         self.update_layout_fields()
         self.ded.setPlainText(p.get("dedication", ""))
         self.title_sub.setText(p.get("titleSub", ""))
+        self.fill_cover()
         self.tabs.clear()
         for c in p["comms"]:
             self.tabs.addTab(CommEditor(c, self.changed), c["name"] or "—")
@@ -739,6 +1056,7 @@ class MainWindow(QMainWindow):
         self.update_layout_fields()
         p["dedication"] = self.ded.toPlainText()
         p["titleSub"] = self.title_sub.text()
+        self.read_cover()
         p["comms"] = [self.tabs.widget(i).comm for i in range(self.tabs.count())]
         for i in range(self.tabs.count()):
             self.tabs.setTabText(i, self.tabs.widget(i).comm["name"] or "—")
@@ -957,6 +1275,8 @@ class MainWindow(QMainWindow):
             self.warn.show()
             return
         self.running = False
+        self.engine = eng
+        self.cover_timer.start()
         self.set_stale(getattr(self, "edits", 0) != edits)
         _log(f"עימוד: {len(pages)} עמודים")
         if len(pages) - len(eng.pages) == lead:

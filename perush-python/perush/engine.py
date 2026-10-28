@@ -1376,10 +1376,10 @@ class Engine:
             return []
         return out
 
-    def title_pages(self, contents=()):
-        """The title page, and behind it the table of contents (or, in book form without one,
-        a blank page, so that the text still begins on a left-hand page)."""
-        from .titlepage import blank_page, title_page, toc_page, with_list
+    def title_lines(self):
+        """The lines under the name of the book on the title page (and on the cover): the
+        parasha of a one-parasha book, and what is in it ("עם תרגום אונקלוס ורש"י")."""
+        from .titlepage import with_list
         P = self.P
         lines = []
         parashot = [it["text"] for it in self.all_items if it["type"] == "h" and not it["noComm"]
@@ -1397,6 +1397,14 @@ class Engine:
             sub = ("עם " + with_list(names)) if names else ""
         if sub:
             lines.append(sub)
+        return lines
+
+    def title_pages(self, contents=()):
+        """The title page, and behind it the table of contents (or, in book form without one,
+        a blank page, so that the text still begins on a left-hand page)."""
+        from .titlepage import blank_page, title_page, toc_page
+        P = self.P
+        lines = self.title_lines()
         out = [title_page(self.page_w, self.page_h, self.m, P["mainFont"], P["title"] or "", lines, self.ded_lines)]
         if contents:
             # the back of the title page is a right-hand page: the binding is on its left

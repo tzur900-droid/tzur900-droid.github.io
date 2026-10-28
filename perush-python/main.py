@@ -2,6 +2,7 @@
 
     python main.py                       open the window
     python main.py project.json out.pdf  lay out a project straight to PDF (no window)
+    python main.py project.json out.pdf --cover   the book's cover to PDF (the spread, with bleed)
     python main.py --import OUT_DIR files…  convert Sefaria text files into project files
         (--comms onkelos,orhachaim chooses the commentaries; default onkelos,rashi,ramban)
 """
@@ -86,6 +87,16 @@ def main():
         from perush.model import load_project
         from perush.render import export_pdf
         project = load_project(args[0])
+        if "--cover" in sys.argv:
+            from perush.cover import export_cover, make_cover
+            from perush.engine import Engine
+            eng = Engine(project)
+            pages = eng.run()
+            c = make_cover(project, len(pages), eng.title_lines())
+            export_cover(c, args[1], project["title"])
+            w, h = c.size_mm()
+            print(f"כריכה {w:.1f}×{h:.1f} מ\"מ (שדרה {c.spine / 72 * 25.4:.1f} מ\"מ, {len(pages)} עמודים) נשמרה ב־{args[1]}")
+            return 0
         pages, warnings = layout_project(project)
         for w in warnings:
             print("⚠", w)
