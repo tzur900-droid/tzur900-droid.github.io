@@ -30,7 +30,7 @@
   ];
 
   const STORE = "font-maker-settings";
-  let prm = Object.assign({}, D);
+  let prm = Object.assign({}, D, { edits: {} });
 
   const $ = (id) => document.getElementById(id);
 
@@ -58,6 +58,18 @@
     for (const s of SLIDERS) {
       const v = Number(p && p[s.key]);
       if (isFinite(v)) out[s.key] = Math.min(s.max, Math.max(s.min, v));
+    }
+    out.edits = {};
+    const ed = p && p.edits;
+    if (ed && typeof ed === "object") {
+      for (const g in ed) {
+        for (const k in ed[g]) {
+          const v = ed[g][k];
+          if (/^\d+\.\d+$/.test(k) && Array.isArray(v) && isFinite(v[0]) && isFinite(v[1])) {
+            (out.edits[g] = out.edits[g] || {})[k] = [Number(v[0]), Number(v[1])];
+          }
+        }
+      }
     }
     return out;
   }
@@ -92,7 +104,7 @@
       b.textContent = p.name;
       b.dataset.i = i;
       b.addEventListener("click", () => {
-        prm = Object.assign({}, D, p.prm);
+        prm = Object.assign({}, D, p.prm, { edits: prm.edits });
         markPreset(i);
         syncControls();
         changed();
@@ -100,13 +112,13 @@
       chips.appendChild(b);
     });
     $("surprise").addEventListener("click", () => {
-      prm = surprise();
+      prm = Object.assign(surprise(), { edits: prm.edits });
       markPreset(null);
       syncControls();
       changed();
     });
     $("reset").addEventListener("click", () => {
-      prm = Object.assign({}, D);
+      prm = Object.assign({}, D, { edits: prm.edits });
       markPreset(0);
       syncControls();
       changed();
@@ -154,6 +166,7 @@
 
   function changed() {
     syncControls();
+    drawEditor();
     store();
     clearTimeout(timer);
     timer = setTimeout(render, 60);
@@ -174,6 +187,195 @@
     }
     busy = false;
     if (again) { again = false; render(); }
+  }
+
+  // ---------------------------------------------------------------- letter editor
+  //
+  // The skeleton of the letter (the middle of its strokes) is drawn over the letter, with a point
+  // at every place it can be bent. Dragging a point stores how far it moved; the settings still
+  // shape the letter, and the move is added on top.
+
+  const SVGNS = "http://www.w3.org/2000/svg";
+  let current = "alef", drag = null;
+  const undo = [];
+
+  function buildEditor() {
+    const box = $("letters");
+    for (const g of FontMaker.editableGlyphs()) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = g.char;
+      b.dataset.name = g.name;
+      b.title = g.name;
+      b.addEventListener("click", () => { current = g.name; drawEditor(); });
+      box.appendChild(b);
+    }
+    const svg = $("ed-svg");
+    svg.addEventListener("pointerdown", startDrag);
+    svg.addEventListener("pointermove", moveDrag);
+    svg.addEventListener("pointerup", endDrag);
+    svg.addEventListener("pointercancel", endDrag);
+    $("ed-undo").addEventListener("click", () => {
+      if (!undo.length) return;
+      prm.edits = JSON.parse(undo.pop());
+      changed();
+    });
+    $("ed-reset").addEventListener("click", () => {
+      if (!prm.edits[current]) return;
+      pushUndo();
+      delete prm.edits[current];
+      changed();
+    });
+    $("ed-reset-all").addEventListener("click", () => {
+      if (!Object.keys(prm.edits).length) return;
+      if (!confirm("להחזיר את כל האותיות שערכת לצורה המקורית?")) return;
+      pushUndo();
+      prm.edits = {};
+      changed();
+    });
+    drawEditor();
+  }
+
+  function pushUndo() {
+    undo.push(JSON.stringify(prm.edits));
+    if (undo.length > 60) undo.shift();
+  }
+
+  function el(name, attrs, parent) {
+    const e = document.createElementNS(SVGNS, name);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function contourPath(contours) {
+    let d = "";
+    for (const c of contours) {
+      d += `M${c[0][0][0]} ${-c[0][0][1]}`;
+      for (const s of c) d += `C${s[1][0]} ${-s[1][1]} ${s[2][0]} ${-s[2][1]} ${s[3][0]} ${-s[3][1]}`;
+      d += "Z";
+    }
+    return d;
+  }
+
+  function drawEditor() {
+    document.querySelectorAll("#letters button").forEach((b) => {
+      b.classList.toggle("on", b.dataset.name === current);
+      b.classList.toggle("edited", !!(prm.edits && prm.edits[b.dataset.name]));
+    });
+    const g = FontMaker.buildGlyphs(prm, { only: current }).glyphs[0];
+    if (!g) return;
+    const svg = $("ed-svg");
+    // the view fits the letter, and stays put while a point is being dragged
+    let top = g.H + g.A + 70, bottom = -g.D - 70, lo = 0, hi = g.advance;
+    for (const st of g.skeleton) for (const p of st.points) {
+      top = Math.max(top, p.y + 60); bottom = Math.min(bottom, p.y - 60);
+      lo = Math.min(lo, p.x); hi = Math.max(hi, p.x);
+    }
+    let w = Math.max(hi - lo, g.H * 1.1) + 160, x0 = (lo + hi) / 2 - w / 2;
+    if (drag && drag.view) [x0, top, w, bottom] = drag.view;
+    else if (drag) drag.view = [x0, top, w, bottom];
+    svg.setAttribute("viewBox", `${x0} ${-top} ${w} ${top - bottom}`);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    drawEditor.view = [x0, top, w, bottom];
+    svg.textContent = "";
+    const upp = (top - bottom) / (svg.clientHeight || 420); // font units per screen pixel
+    for (const [y, main] of [[0, true], [g.H, true], [-g.D, false], [g.H + g.A, false]]) {
+      el("line", { x1: x0, x2: x0 + w, y1: -y, y2: -y, class: main ? "guide main" : "guide" }, svg);
+    }
+    el("line", { x1: 0, x2: 0, y1: -top, y2: -bottom, class: "guide" }, svg);
+    el("line", { x1: g.advance, x2: g.advance, y1: -top, y2: -bottom, class: "guide" }, svg);
+    el("path", { d: contourPath(g.contours), class: "ink", "fill-rule": "nonzero" }, svg);
+    g.skeleton.forEach((st, si) => {
+      const P = st.points;
+      let d = `M${P[0].x} ${-P[0].y}`, k = 1;
+      for (const t of st.segs) {
+        if (t === "L") { d += `L${P[k].x} ${-P[k].y}`; k += 1; }
+        else { d += `C${P[k].x} ${-P[k].y} ${P[k + 1].x} ${-P[k + 1].y} ${P[k + 2].x} ${-P[k + 2].y}`; k += 3; }
+      }
+      el("path", { d, class: "bone" }, svg);
+      // control points hang on the point of the line next to them
+      P.forEach((p, pi) => {
+        if (p.on) return;
+        const a = P[pi - 1].on ? P[pi - 1] : P[pi + 1];
+        el("line", { x1: a.x, y1: -a.y, x2: p.x, y2: -p.y, class: "arm" }, svg);
+      });
+    });
+    g.skeleton.forEach((st, si) => {
+      st.points.forEach((p, pi) => {
+        // a corner with no rounding has its curve points on the corner: show just the corner
+        if (!p.on && st.points.some((q, qi) => qi !== pi && q.on && Math.hypot(q.x - p.x, q.y - p.y) < 2)) return;
+        el("circle", { cx: p.x, cy: -p.y, r: 20 * upp, class: "hit", "data-s": si, "data-p": pi }, svg);
+        if (p.on) el("circle", { cx: p.x, cy: -p.y, r: 7 * upp, class: "pt", "pointer-events": "none" }, svg);
+        else el("rect", { x: p.x - 5 * upp, y: -p.y - 5 * upp, width: 10 * upp, height: 10 * upp, class: "pt off", "pointer-events": "none" }, svg);
+      });
+    });
+    drawEditor.glyph = g;
+  }
+
+  function fontPoint(ev) {
+    const svg = $("ed-svg");
+    const pt = svg.createSVGPoint();
+    pt.x = ev.clientX;
+    pt.y = ev.clientY;
+    const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return [q.x, -q.y];
+  }
+
+  function startDrag(ev) {
+    const t = ev.target;
+    if (!t.classList || !t.classList.contains("hit")) return;
+    ev.preventDefault();
+    const si = Number(t.dataset.s), pi = Number(t.dataset.p);
+    const sk = drawEditor.glyph.skeleton;
+    // a point on the line takes its control points along, and the points of other strokes that
+    // sit on it (where two strokes meet)
+    const group = [];
+    const take = (s, p) => {
+      const pts = sk[s].points;
+      group.push([s, p]);
+      if (!pts[p].on) return;
+      if (p > 0 && !pts[p - 1].on) group.push([s, p - 1]);
+      if (p + 1 < pts.length && !pts[p + 1].on) group.push([s, p + 1]);
+    };
+    take(si, pi);
+    const me = sk[si].points[pi];
+    if (me.on) {
+      sk.forEach((st, s) => st.points.forEach((q, p) => {
+        if (s !== si && q.on && Math.hypot(q.x - me.x, q.y - me.y) < 4) take(s, p);
+      }));
+    }
+    pushUndo();
+    const ed = (prm.edits[current] = prm.edits[current] || {});
+    drag = {
+      group, from: fontPoint(ev),
+      base: group.map(([s, p]) => (ed[s + "." + p] || [0, 0]).slice()),
+      slant: drawEditor.glyph.slant,
+      view: drawEditor.view,
+    };
+    $("ed-svg").setPointerCapture(ev.pointerId);
+  }
+
+  function moveDrag(ev) {
+    if (!drag) return;
+    const [x, y] = fontPoint(ev);
+    const dy = y - drag.from[1];
+    const dx = x - drag.from[0] - dy * drag.slant;
+    const ed = prm.edits[current];
+    drag.group.forEach(([s, p], i) => {
+      ed[s + "." + p] = [Math.round(drag.base[i][0] + dx), Math.round(drag.base[i][1] + dy)];
+    });
+    drawEditor();
+  }
+
+  function endDrag() {
+    if (!drag) return;
+    drag = null;
+    const ed = prm.edits[current];
+    for (const k in ed) if (!ed[k][0] && !ed[k][1]) delete ed[k];
+    if (!Object.keys(ed).length) delete prm.edits[current];
+    if (undo.length && undo[undo.length - 1] === JSON.stringify(prm.edits)) undo.pop();
+    changed();
   }
 
   // ---------------------------------------------------------------- files
@@ -237,6 +439,7 @@
   buildControls();
   load();
   syncControls();
-  markPreset(JSON.stringify(sanitize({})) === JSON.stringify(prm) ? 0 : null);
+  markPreset(SLIDERS.every((s) => prm[s.key] === D[s.key]) ? 0 : null);
+  buildEditor();
   render();
 })();

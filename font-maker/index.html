@@ -11,7 +11,11 @@
 
 <header class="top">
   <h1>מחולל גופנים עבריים</h1>
-  <p>מזיזים את המחוונים, רואים את האותיות משתנות, ומורידים קובץ גופן (OTF) שאפשר להתקין ולהשתמש בו בכל תוכנה.</p>
+  <ol class="steps">
+    <li><b>בוחרים סגנון</b> (ספר, כותרת, נקי…) ומזיזים את המחוונים. כל האותיות משתנות יחד.</li>
+    <li><b>רוצים לשנות אות אחת?</b> לוחצים עליה ב"עריכת אות" וגוררים את הנקודות שעל הקווים שלה.</li>
+    <li><b>כותבים שם ולוחצים "הורדת הגופן".</b> לוחצים פעמיים על הקובץ שירד ובוחרים "התקנה" — והגופן מופיע בוורד ובכל תוכנה.</li>
+  </ol>
 </header>
 
 <main class="layout">
@@ -64,6 +68,19 @@
         <p class="pv pv-tiny">טקסט קטן מאוד, כמו בהערות שוליים: 1234567890 — "מירכאות", (סוגריים) [ומרובעים] וסימנים: ? ! ; ׳ ״</p>
       </div>
     </div>
+
+    <section class="editor" aria-label="עריכת אות">
+      <h2>עריכת אות</h2>
+      <p class="hint">לוחצים על אות, ואז גוררים את הנקודות. <span class="key on"></span> נקודה על הקו —
+        מזיזה אותו. <span class="key off"></span> ריבוע קטן — מכופף את העיקול. השינוי נשמר באות גם כשמזיזים את המחוונים.</p>
+      <div class="letters" id="letters"></div>
+      <div class="ed-wrap"><svg id="ed-svg" role="img" aria-label="האות בעריכה"></svg></div>
+      <div class="row">
+        <button type="button" class="btn ghost small" id="ed-undo">↶ ביטול</button>
+        <button type="button" class="btn ghost small" id="ed-reset">החזרת האות למקור</button>
+        <button type="button" class="btn ghost small" id="ed-reset-all">החזרת כל האותיות</button>
+      </div>
+    </section>
 
     <details class="help">
       <summary>איך משתמשים בגופן?</summary>

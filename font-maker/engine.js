@@ -66,7 +66,8 @@
       const lo = Math.hypot(dx, dy) || 1;
       dx /= lo; dy /= lo;
       r = Math.max(0, Math.min(r, li * 0.95));
-      if (r < 1) return this.L(cx, cy);
+      // (a corner with no rounding keeps its curve, of no length, so the points of a letter
+      // are always the same ones and changes made by hand stay on the right point)
       const ax = cx - ix * r, ay = cy - iy * r;
       const bx = cx + dx * r, by = cy + dy * r;
       this.L(ax, ay);
@@ -262,6 +263,7 @@
       this.strokes = [];   // {path, swap} swap: pens turned for Latin-like digits
       this.shapes = [];    // closed contours
       this.anchors = {};
+      this.links = [];     // heads that move with the start of a stroke
       this.swap = false;
     }
     P(x, y) {
@@ -269,7 +271,7 @@
       this.strokes.push({ path: p, swap: this.swap });
       return p;
     }
-    shape(contour) { this.shapes.push(contour); }
+    shape(contour) { this.shapes.push(contour); return this.shapes.length - 1; }
     // The head: a wedge hanging under the left end of a roof whose top is at y.
     head(x, y) {
       const { T, S, s } = this.ctx;
@@ -281,13 +283,16 @@
       const yb = y0 - T + 1;           // underside of the roof
       const rr = Math.min(S * 0.6, hw * 0.3);
       const xt = xa + S * 0.12;
-      this.shape([
+      // the head moves with the roof it hangs on
+      const roof = this.strokes.findIndex((st) => Math.abs(st.path.start[0] - x) < 1 && Math.abs(st.path.start[1] - (y0 - T / 2)) < 1);
+      const i = this.shape([
         lineSeg([xa, y0], [xt, yb - hd + rr]),
         [[xt, yb - hd + rr], [xt, yb - hd + rr * 0.45], [xt + rr * 0.45, yb - hd], [xt + rr, yb - hd]],
         [[xt + rr, yb - hd], [xt + rr + (hw - rr) * 0.3, yb - hd * 0.9], [xa + hw * 0.6, yb], [xa + hw, yb]],
         lineSeg([xa + hw, yb], [xa + hw, y0]),
         lineSeg([xa + hw, y0], [xa, y0]),
       ]);
+      if (roof >= 0) this.links.push({ shape: i, stroke: roof });
     }
     dot(x, y, rad) { this.shape(ellipse(x, y, rad, rad)); }
   }
@@ -807,8 +812,53 @@
     return contours.map((c) => c.map((seg) => seg.map(f)));
   }
 
+  // The points of a stroke path that can be moved by hand, in order: the start, then the end of
+  // a line, or the two control points and the end of a curve.
+  function pathPoints(p) {
+    const out = [{ get: () => p.start, set: (v) => { p.start = v; }, on: true }];
+    for (const s of p.segs) {
+      const k = s.t === "L" ? [0] : [0, 2, 4];
+      k.forEach((j, n) => out.push({
+        get: () => [s.p[j], s.p[j + 1]],
+        set: (v) => { s.p[j] = v[0]; s.p[j + 1] = v[1]; },
+        on: s.t === "L" || n === 2,
+      }));
+    }
+    return out;
+  }
+
+  // Changes made by hand: {"stroke.point": [dx, dy]}, moves from where the settings put the point.
+  function applyEdits(d, edits) {
+    d.strokes.forEach((st, si) => {
+      const pts = pathPoints(st.path);
+      pts.forEach((pt, pi) => {
+        const e = edits[si + "." + pi];
+        if (!e) return;
+        const v = pt.get();
+        pt.set([v[0] + e[0], v[1] + e[1]]);
+      });
+      const last = pts[pts.length - 1].get();
+      st.path.cur = [last[0], last[1]];
+    });
+    for (const l of d.links) {
+      const e = edits[l.stroke + ".0"];
+      if (e) d.shapes[l.shape] = d.shapes[l.shape].map((sg) => sg.map((p) => [p[0] + e[0], p[1] + e[1]]));
+    }
+  }
+
+  // Letters, digits and signs whose points can be moved by hand.
+  function editableGlyphs() {
+    return HEBREW.map(([n, u]) => ({ name: n, char: String.fromCharCode(u) }))
+      .concat(["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"].map((n, i) => ({ name: n, char: String(i) })))
+      .concat(PUNCT.filter((p) => ["question", "parenleft", "parenright", "bracketleft", "bracketright", "slash", "hyphen", "maqaf"]
+        .includes(p.name)).map((p) => ({ name: p.name, char: String.fromCharCode(p.uni) })));
+  }
+
   // All glyphs of the font with their outlines (overlapping contours) and anchors.
-  function buildGlyphs(prmIn) {
+  // opts.only: build just this glyph (for the letter editor), with its skeleton.
+  function buildGlyphs(prmIn, opts) {
+    opts = opts || {};
+    const only = opts.only;
     const prm = Object.assign({}, DEFAULTS, prmIn || {});
     const c = makeCtx(prm);
     const sb = Math.round((0.045 * c.H + 0.3 * c.T) * prm.spacing);
@@ -818,10 +868,13 @@
 
     function add(name, uni, width, draw, opts) {
       opts = opts || {};
+      if (only && name !== only) return;
       const cc = opts.swap ? Object.assign({}, c, { t: c.H - c.S / 2, b: c.S / 2 }) : c;
       const d = new Drawing(cc, width);
       if (opts.swap) d.swap = true;
       draw(d, cc);
+      const edits = prm.edits && prm.edits[name];
+      if (edits) applyEdits(d, edits);
       let contours = drawingContours(d);
       // the side bearings are measured from the ink
       let x0 = Infinity, x1 = -Infinity;
@@ -844,14 +897,30 @@
       anchors.aboveRight = [ar[0], ar[1] + c.gap];
       anchors.above = [d.W / 2, c.H + c.gap];
       for (const k in anchors) anchors[k] = skew([anchors[k][0] + left, anchors[k][1]]).map(Math.round);
-      glyphs.push({
+      const g = {
         name, unicode: uni, advance: Math.round(width + 2 * sb), contours,
         anchors: opts.base ? anchors : null,
-      });
+      };
+      if (only) {
+        // the skeleton, where it is drawn: [{x, y, on}] per stroke, and how to turn a move on
+        // the screen back into a move of the point
+        g.skeleton = d.strokes.map((st) => ({
+          points: pathPoints(st.path).map((pt) => {
+            const [x, y] = skew([pt.get()[0] + left, pt.get()[1]]);
+            return { x, y, on: pt.on };
+          }),
+          segs: st.path.segs.map((sg) => sg.t),
+        }));
+        g.slant = sl;
+        g.H = c.H;
+        g.D = c.D;
+        g.A = c.A;
+      }
+      glyphs.push(g);
     }
 
     // .notdef: an empty box
-    {
+    if (!only) {
       const w = c.H * 0.6, th = Math.max(20, c.S);
       glyphs.push({
         name: ".notdef", unicode: undefined, advance: Math.round(w + 2 * sb),
@@ -862,7 +931,7 @@
         anchors: null,
       });
     }
-    glyphs.push({ name: "space", unicode: 0x20, advance: Math.round(c.H * 0.42 * prm.spacing ** 0.5), contours: [], anchors: null });
+    if (!only) glyphs.push({ name: "space", unicode: 0x20, advance: Math.round(c.H * 0.42 * prm.spacing ** 0.5), contours: [], anchors: null });
 
     for (const [name, uni, f] of HEBREW) {
       add(name, uni, f * c.H * prm.width, LETTERS[name], { base: true });
@@ -872,7 +941,7 @@
     for (const p of PUNCT) add(p.name, p.uni, p.width(c), p.draw);
 
     // Vowel points: no width of their own; they are placed on the letter by the 'mark' feature.
-    const marks = markShapes(c);
+    const marks = only ? {} : markShapes(c);
     for (const name in marks) {
       const [uni, cls, shapes] = marks[name];
       glyphs.push({
@@ -1202,5 +1271,5 @@
     return out;
   }
 
-  global.FontMaker = { DEFAULTS, buildGlyphs, makeFont, unite };
+  global.FontMaker = { DEFAULTS, buildGlyphs, makeFont, unite, editableGlyphs };
 })(typeof window !== "undefined" ? window : globalThis);
