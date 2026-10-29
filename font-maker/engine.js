@@ -30,6 +30,7 @@
     heel: 0.5,       // length of the heel of bet and mem, beyond the stem
     overhang: 0.5,   // how far the roof of dalet and he reaches past the stem
     headShape: 0.5,  // shape of the head: 0 a square block, 0.5 a wedge, 1 a round drop
+    base: "classic", // the set of letter drawings to start from (see addLetterSet)
   };
 
   // ---------------------------------------------------------------- paths
@@ -315,6 +316,15 @@
     ["pe", 0x5e4, 0.82], ["finaltsadi", 0x5e5, 0.80], ["tsadi", 0x5e6, 0.82], ["qof", 0x5e7, 0.86],
     ["resh", 0x5e8, 0.80], ["shin", 0x5e9, 1.0], ["tav", 0x5ea, 0.90],
   ];
+
+  // Sets of letter drawings to start from. Each has the widths of its letters (parts of the
+  // height), a drawing for every letter, and the settings it looks best with.
+  const SETS = {};
+  function addLetterSet(id, set) { SETS[id] = set; }
+  function letterSet(prm) { return SETS[prm.base] || SETS.classic || SETS.square; }
+  function letterSets() {
+    return Object.keys(SETS).map((id) => ({ id, name: SETS[id].name, about: SETS[id].about, defaults: SETS[id].defaults || {} }));
+  }
 
   const LETTERS = {
     alef(d, c) {
@@ -877,10 +887,11 @@
     const prm = Object.assign({}, DEFAULTS, prmIn || {});
     const c = makeCtx(prm);
     const out = {};
-    for (const [name, , f] of HEBREW) {
-      const W = f * c.H * prm.width;
+    const set = letterSet(prm);
+    for (const [name] of HEBREW) {
+      const W = set.widths[name] * c.H * prm.width;
       const d = new Drawing(c, W);
-      LETTERS[name](d, c);
+      set.letters[name](d, c);
       const roles = {};
       d.strokes.forEach((st, si) => {
         const P = pathPoints(st.path).map((p) => ({ v: p.get(), on: p.on }));
@@ -976,7 +987,7 @@
   // a letter much wider or narrower than its usual width, or reaching out of its lines.
   function checkLetters(prmIn) {
     const prm = Object.assign({}, DEFAULTS, prmIn || {});
-    const names = Object.keys(prm.edits || {}).filter((n) => LETTERS[n]);
+    const names = Object.keys(prm.edits || {}).filter((n) => HEBREW.some((h) => h[0] === n));
     if (!names.length) return [];
     const now = buildGlyphs(prm, { only: names, bare: true }).glyphs;
     const was = buildGlyphs(Object.assign({}, prm, { edits: {} }), { only: names, bare: true }).glyphs;
@@ -1083,8 +1094,9 @@
     }
     if (!bare) glyphs.push({ name: "space", unicode: 0x20, advance: Math.round(c.H * 0.42 * prm.spacing ** 0.5), contours: [], anchors: null });
 
-    for (const [name, uni, f] of HEBREW) {
-      add(name, uni, f * c.H * prm.width, LETTERS[name], { base: true });
+    const set = letterSet(prm);
+    for (const [name, uni] of HEBREW) {
+      add(name, uni, set.widths[name] * c.H * prm.width, set.letters[name], { base: true });
     }
     const dn = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
     dn.forEach((n, i) => add(n, 0x30 + i, c.H * 0.6 * prm.width, DIGITS[n], { swap: true }));
@@ -1421,5 +1433,13 @@
     return out;
   }
 
-  global.FontMaker = { DEFAULTS, buildGlyphs, makeFont, unite, editableGlyphs, styleFrom, pointRoles, partName, checkLetters };
+  addLetterSet("square", {
+    name: "מרובע",
+    about: "אותיות ישרות ומרובעות, כמו שלט",
+    widths: Object.fromEntries(HEBREW.map(([n, , f]) => [n, f])),
+    letters: LETTERS,
+    defaults: { round: 0.2, serif: 0.5, headShape: 0.3 },
+  });
+
+  global.FontMaker = { DEFAULTS, buildGlyphs, makeFont, unite, editableGlyphs, styleFrom, pointRoles, partName, checkLetters, addLetterSet, letterSets };
 })(typeof window !== "undefined" ? window : globalThis);

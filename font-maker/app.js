@@ -75,6 +75,10 @@
         }
       }
     }
+    const ids = FontMaker.letterSets().map((x) => x.id);
+    // settings saved before there was a choice of letters were made on the square letters
+    const old = p && !p.base && p.edits && Object.keys(p.edits).length;
+    out.base = p && ids.includes(p.base) ? p.base : old ? "square" : "classic";
     out.hand = Array.isArray(p && p.hand) ? p.hand.filter((n) => typeof n === "string" && out.edits[n]) : [];
     return out;
   }
@@ -109,7 +113,7 @@
       b.textContent = p.name;
       b.dataset.i = i;
       b.addEventListener("click", () => {
-        prm = Object.assign({}, D, p.prm, { edits: prm.edits, hand: prm.hand });
+        prm = Object.assign({}, D, p.prm, { base: prm.base, edits: prm.edits, hand: prm.hand });
         markPreset(i);
         syncControls();
         changed();
@@ -117,14 +121,14 @@
       chips.appendChild(b);
     });
     $("surprise").addEventListener("click", () => {
-      prm = Object.assign(surprise(), { edits: prm.edits, hand: prm.hand });
+      prm = Object.assign(surprise(), { base: prm.base, edits: prm.edits, hand: prm.hand });
       markPreset(null);
       syncControls();
       changed();
     });
     $("reset").addEventListener("click", () => {
-      prm = Object.assign({}, D, { edits: prm.edits, hand: prm.hand });
-      markPreset(0);
+      prm = Object.assign({}, D, setDefaults(prm.base), { base: prm.base, edits: prm.edits, hand: prm.hand });
+      markPreset(null);
       syncControls();
       changed();
     });
@@ -160,6 +164,71 @@
     }
     markPreset(null);
     changed();
+  }
+
+  // ---- the letters to start from
+
+  function setDefaults(id) {
+    const s = FontMaker.letterSets().find((x) => x.id === id);
+    return s ? s.defaults : {};
+  }
+
+  // A word drawn in the letters of some settings, as an SVG path.
+  function wordPath(p, text) {
+    const names = { "א": "alef", "ב": "bet", "ג": "gimel", "ד": "dalet", "ה": "he", "ו": "vav", "ז": "zayin", "ח": "het", "ט": "tet", "י": "yod",
+      "ך": "finalkaf", "כ": "kaf", "ל": "lamed", "ם": "finalmem", "מ": "mem", "ן": "finalnun", "נ": "nun", "ס": "samekh", "ע": "ayin",
+      "ף": "finalpe", "פ": "pe", "ץ": "finaltsadi", "צ": "tsadi", "ק": "qof", "ר": "resh", "ש": "shin", "ת": "tav" };
+    const chars = [...text];
+    const gl = {};
+    for (const g of FontMaker.buildGlyphs(p, { only: [...new Set(chars.map((c) => names[c]).filter(Boolean))] }).glyphs) gl[g.name] = g;
+    const space = (p.height || D.height) * 0.42;
+    const total = chars.reduce((a, c) => a + (gl[names[c]] ? gl[names[c]].advance : space), 0);
+    let x = 0, d = "";
+    for (const ch of chars) {
+      const g = gl[names[ch]];
+      const adv = g ? g.advance : space;
+      if (g) {
+        const dx = total - x - adv;
+        for (const c of g.contours) {
+          d += `M${c[0][0][0] + dx} ${-c[0][0][1]}`;
+          for (const s of c) d += `C${s[1][0] + dx} ${-s[1][1]} ${s[2][0] + dx} ${-s[2][1]} ${s[3][0] + dx} ${-s[3][1]}`;
+          d += "Z";
+        }
+      }
+      x += adv;
+    }
+    return { d, width: total };
+  }
+
+  function buildBases() {
+    const box = $("bases");
+    for (const s of FontMaker.letterSets()) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "base";
+      b.dataset.id = s.id;
+      const p = Object.assign({}, D, s.defaults, { base: s.id, edits: {} });
+      const w = wordPath(p, "שלום עולם");
+      const H = p.height;
+      b.innerHTML = `<svg viewBox="-20 ${-(H * 1.5)} ${w.width + 40} ${H * 1.95}" aria-hidden="true"><path d="${w.d}"/></svg>
+        <span class="base-name">${s.name}</span><span class="base-about">${s.about || ""}</span>`;
+      b.addEventListener("click", () => chooseBase(s.id));
+      box.appendChild(b);
+    }
+  }
+
+  function chooseBase(id) {
+    if (id === prm.base) return;
+    if (Object.keys(prm.edits).length && !confirm("לעבור לאותיות אחרות? השינויים שעשית בעריכת האותיות יימחקו.")) return;
+    prm = Object.assign({}, D, setDefaults(id), { base: id, edits: {}, hand: [] });
+    undo.length = 0;
+    markPreset(null);
+    select(current);
+    changed();
+  }
+
+  function markBase() {
+    document.querySelectorAll(".base").forEach((b) => b.classList.toggle("on", b.dataset.id === prm.base));
   }
 
   function markPreset(i) {
@@ -201,6 +270,7 @@
 
   function changed() {
     syncControls();
+    markBase();
     drawEditor();
     store();
     clearTimeout(timer);
@@ -740,6 +810,7 @@
   // ---------------------------------------------------------------- start
 
   buildControls();
+  buildBases();
   load();
   syncControls();
   markPreset(SLIDERS.every((s) => prm[s.key] === D[s.key]) ? 0 : null);
