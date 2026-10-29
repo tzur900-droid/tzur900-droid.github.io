@@ -227,12 +227,14 @@
     const w = (S.weight + (L.weight || 0)) * (g.mark ? 0.6 : 1);
     // thinning eats the hairlines quickly, so it goes slower than thickening
     const soft = (v) => (v < 0 ? v * 0.45 : v) * unit;
+    const dv = soft(w - S.contrast * 0.5);  // grows the vertical strokes (sideways)
+    const dh = soft(w + S.contrast * 0.5);  // grows the horizontal strokes (up and down)
+    // a letter that grows sideways takes the room it grows into, so the space between letters stays
+    const grow = g.mark || !g.advance ? 0 : dv;
     return {
-      sx, sy, k, dx: dsb, dy, depth: L.depth || 1,
-      dv: soft(w - S.contrast * 0.5),  // grows the vertical strokes (sideways)
-      dh: soft(w + S.contrast * 0.5),  // grows the horizontal strokes (up and down)
+      sx, sy, k, dx: dsb + grow, dy, depth: L.depth || 1, dv, dh,
       r: S.round * 0.02 * model.upm,
-      advance: g.advance ? Math.max(0, Math.round(g.advance * sx + 2 * dsb)) : 0,
+      advance: g.advance ? Math.max(0, Math.round(g.advance * sx + 2 * dsb + 2 * grow)) : 0,
     };
   }
 

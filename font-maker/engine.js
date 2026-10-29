@@ -6,7 +6,7 @@
 // thick, a short flat one keeps the vertical strokes thin. The sweep of a straight pen along a
 // curve is exact with Bezier curves: the curve moved by +half the pen, then back by -half the pen.
 //
-// Needs opentype.js and paper.js (paper.js joins the overlapping strokes into one outline).
+// Needs opentype.js and Clipper (Clipper joins the overlapping strokes into one outline).
 
 (function (global) {
   "use strict";
@@ -1120,11 +1120,93 @@
   // The strokes overlap; the font gets one clean outline. The contours are turned into fine
   // polygons, joined with Clipper (exact, in integers), and smooth curves are fitted back onto them.
 
-  let paperReady = false;
-  function ensurePaper() {
-    if (!paperReady) {
-      paper.setup(new paper.Size(10, 10));
-      paperReady = true;
+  function ensurePaper() { /* (kept for older callers: curves are fitted here now) */ }
+
+  // Cubic curves through a run of points, within tol of every point (the algorithm of
+  // Philip Schneider, "An Algorithm for Automatically Fitting Digitized Curves", 1990): one curve
+  // with the points spread by their distance along the run, improved a few times by Newton
+  // steps, and split in two at the worst point when that is not enough.
+  function fitCurves(pts, tol) {
+    const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+    const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
+    const mul = (a, k) => [a[0] * k, a[1] * k];
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+    const norm = (a) => { const l = Math.hypot(a[0], a[1]) || 1; return [a[0] / l, a[1] / l]; };
+    const bez = (c, t) => cubicAt(c, t);
+    const out = [];
+    const tan1 = norm(sub(pts[1], pts[0])), tan2 = norm(sub(pts[pts.length - 2], pts[pts.length - 1]));
+    fit(0, pts.length - 1, tan1, tan2, 0);
+    return out;
+
+    function params(first, last) {
+      const u = [0];
+      for (let i = first + 1; i <= last; i++) u.push(u[u.length - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+      const L = u[u.length - 1] || 1;
+      return u.map((x) => x / L);
+    }
+
+    function generate(first, last, u, t1, t2) {
+      const p0 = pts[first], p3 = pts[last];
+      let c00 = 0, c01 = 0, c11 = 0, x0 = 0, x1 = 0;
+      for (let i = 0; i <= last - first; i++) {
+        const t = u[i], s = 1 - t, b1 = 3 * t * s * s, b2 = 3 * t * t * s;
+        const a1 = mul(t1, b1), a2 = mul(t2, b2);
+        c00 += dot(a1, a1); c01 += dot(a1, a2); c11 += dot(a2, a2);
+        const tmp = sub(pts[first + i], add(mul(p0, s * s * s + b1), mul(p3, b2 + t * t * t)));
+        x0 += dot(a1, tmp); x1 += dot(a2, tmp);
+      }
+      const det = c00 * c11 - c01 * c01;
+      let al = 0, ar = 0;
+      if (Math.abs(det) > 1e-12) { al = (x0 * c11 - c01 * x1) / det; ar = (c00 * x1 - c01 * x0) / det; }
+      const seg = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]);
+      if (al < seg * 1e-6 || ar < seg * 1e-6 || !isFinite(al) || !isFinite(ar)) al = ar = seg / 3;
+      return [p0, add(p0, mul(t1, al)), add(p3, mul(t2, ar)), p3];
+    }
+
+    function maxError(first, last, c, u) {
+      let worst = 0, at = Math.floor((first + last) / 2);
+      for (let i = first + 1; i < last; i++) {
+        const q = bez(c, u[i - first]);
+        const d = (q[0] - pts[i][0]) ** 2 + (q[1] - pts[i][1]) ** 2;
+        if (d >= worst) { worst = d; at = i; }
+      }
+      return [worst, at];
+    }
+
+    function reparam(first, last, u, c) {
+      const d1 = [0, 1, 2].map((i) => mul(sub(c[i + 1], c[i]), 3));
+      const d2 = [0, 1].map((i) => mul(sub(d1[i + 1], d1[i]), 2));
+      return u.map((t, i) => {
+        const p = pts[first + i], q = sub(bez(c, t), p);
+        const s = 1 - t;
+        const q1 = add(add(mul(d1[0], s * s), mul(d1[1], 2 * s * t)), mul(d1[2], t * t));
+        const q2 = add(mul(d2[0], s), mul(d2[1], t));
+        const den = dot(q1, q1) + dot(q, q2);
+        return Math.abs(den) < 1e-12 ? t : Math.min(1, Math.max(0, t - dot(q, q1) / den));
+      });
+    }
+
+    function fit(first, last, t1, t2, depth) {
+      if (last - first === 1) {
+        const p0 = pts[first], p3 = pts[last], d = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]) / 3;
+        out.push([p0, add(p0, mul(t1, d)), add(p3, mul(t2, d)), p3]);
+        return;
+      }
+      let u = params(first, last), c = generate(first, last, u, t1, t2);
+      let [err, at] = maxError(first, last, c, u);
+      if (err < tol * tol) { out.push(c); return; }
+      if (err < tol * tol * 16) {
+        for (let k = 0; k < 4; k++) {
+          u = reparam(first, last, u, c);
+          c = generate(first, last, u, t1, t2);
+          [err, at] = maxError(first, last, c, u);
+          if (err < tol * tol) { out.push(c); return; }
+        }
+      }
+      if (depth > 12) { out.push(c); return; }
+      const tc = norm(sub(pts[at - 1], pts[at + 1]));
+      fit(first, at, t1, tc, depth + 1);
+      fit(at, last, [-tc[0], -tc[1]], t2, depth + 1);
     }
   }
 
@@ -1187,14 +1269,7 @@
       if (run.length <= 3) {
         for (let k = 0; k + 1 < run.length; k++) out.push(lineSeg(run[k], run[k + 1]));
       } else {
-        const p = new paper.Path({ segments: run.map((q) => new paper.Point(q[0], q[1])), insert: false });
-        p.simplify(0.35);
-        const sg = p.segments;
-        for (let k = 0; k + 1 < sg.length; k++) {
-          const a = sg[k], b = sg[k + 1];
-          out.push([[a.point.x, a.point.y], [a.point.x + a.handleOut.x, a.point.y + a.handleOut.y],
-            [b.point.x + b.handleIn.x, b.point.y + b.handleIn.y], [b.point.x, b.point.y]]);
-        }
+        out.push(...fitCurves(run, 0.35));
       }
       i = j;
     } while (i !== first);
