@@ -33,8 +33,34 @@
     { name: "נטוי", prm: { weight: 0.12, slant: 9, width: 0.94 } },
   ];
 
+  // Changing an existing font (outline.js): its settings, and the settings of single letters.
+  const OUTLINE_SLIDERS = [
+    { key: "weight", aiStep: 0.3, label: "עובי", help: "0 = כמו הגופן המקורי", min: -0.8, max: 1.5, step: 0.05, fmt: (v) => (v > 0 ? "+" : "") + Math.round(v * 100), about: "0 is the original weight; 1 is bold, -0.5 light." },
+    { key: "contrast", aiStep: 0.3, label: "ניגודיות", help: "ימינה: קווים שוכבים עבים יותר. שמאלה: עומדים עבים יותר", min: -1, max: 1, step: 0.05, fmt: (v) => (v > 0 ? "+" : "") + Math.round(v * 100), about: "Positive: thicker horizontal strokes than vertical ones (traditional Hebrew); negative: the other way." },
+    { key: "width", aiStep: 0.1, label: "רוחב", min: 0.7, max: 1.4, step: 0.01, fmt: (v) => Math.round(v * 100) + "%", about: "1 is the original width." },
+    { key: "height", aiStep: 0.06, label: "גובה", min: 0.8, max: 1.25, step: 0.01, fmt: (v) => Math.round(v * 100) + "%", about: "1 is the original height of the letters." },
+    { key: "slant", aiStep: 8, label: "נטייה", min: -15, max: 15, step: 0.5, fmt: (v) => v + "°", about: "Degrees; 0 is upright." },
+    { key: "spacing", aiStep: 0.15, label: "ריווח בין האותיות", min: 0.6, max: 1.8, step: 0.01, fmt: (v) => Math.round(v * 100) + "%", about: "1 is the original spacing." },
+    { key: "round", aiStep: 0.3, label: "עיגול הפינות", min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + "%", about: "0 keeps the corners as they are; 1 rounds them a lot." },
+  ];
+  const LETTER_KEYS = [
+    { key: "width", label: "רוחב האות", min: 0.6, max: 1.6, step: 0.08, base: 1, fmt: (v) => Math.round(v * 100) + "%", about: "Multiplies the width of this letter." },
+    { key: "height", label: "גובה האות", min: 0.7, max: 1.4, step: 0.06, base: 1, fmt: (v) => Math.round(v * 100) + "%", about: "Multiplies the height of this letter, from the line up." },
+    { key: "weight", label: "עובי האות", min: -1, max: 1, step: 0.25, base: 0, fmt: (v) => (v > 0 ? "+" : "") + Math.round(v * 100), about: "Added to the weight of the whole font, for this letter." },
+    { key: "shift", label: "הזזה למעלה / למטה", min: -0.3, max: 0.3, step: 0.04, base: 0, fmt: (v) => (v > 0 ? "+" : "") + Math.round(v * 100), about: "Moves this letter up (positive) or down, in parts of the letter height." },
+  ];
+
   const STORE = "font-maker-settings";
   let prm = Object.assign({}, D, { edits: {}, hand: [] });
+  let mode = "outline";                 // "outline": change an existing font; "draw": draw from nothing
+  let src = { id: "frankruhl" };        // the font changed: {id} from the library, or {file} from the computer
+  let ol = olDefaults();                // the changes to it
+  let model = null;                     // the font changed, as read by outline.js
+  let olUndo = [];
+
+  function olDefaults() {
+    return Object.assign({}, FontMaker.Outline.SETTINGS, { letters: {} });
+  }
 
   const $ = (id) => document.getElementById(id);
 
@@ -48,12 +74,16 @@
         if (saved.family) $("family").value = saved.family;
         if (saved.style) document.querySelector(`input[name=style][value=${saved.style}]`).checked = true;
       }
+      if (saved && saved.ol) ol = sanitizeOutline(saved.ol);
+      // settings saved before there was a choice were made by drawing
+      if (saved && (saved.mode === "draw" || (!saved.mode && saved.prm && Object.keys(saved.prm.edits || {}).length))) mode = "draw";
+      if (saved && saved.src && FontMaker.library.some((f) => f.id === saved.src.id)) src = { id: saved.src.id };
     } catch (e) { /* no storage: start from the defaults */ }
   }
 
   function store() {
     try {
-      localStorage.setItem(STORE, JSON.stringify({ prm, family: $("family").value, style: style() }));
+      localStorage.setItem(STORE, JSON.stringify({ prm, mode, src: src.id ? src : null, ol, family: $("family").value, style: style() }));
     } catch (e) { /* ignore */ }
   }
 
@@ -83,15 +113,37 @@
     return out;
   }
 
+  function sanitizeOutline(p) {
+    const out = olDefaults();
+    for (const s of OUTLINE_SLIDERS) {
+      const v = Number(p && p[s.key]);
+      if (isFinite(v)) out[s.key] = Math.min(s.max, Math.max(s.min, v));
+    }
+    const L = p && p.letters;
+    if (L && typeof L === "object") {
+      for (const g in L) {
+        for (const k of LETTER_KEYS) {
+          const v = Number(L[g] && L[g][k.key]);
+          if (isFinite(v) && v !== k.base) (out.letters[g] = out.letters[g] || {})[k.key] = Math.min(k.max, Math.max(k.min, v));
+        }
+      }
+    }
+    return out;
+  }
+
   function style() {
     return document.querySelector("input[name=style]:checked").value;
   }
 
   // ---------------------------------------------------------------- controls
 
-  function buildControls() {
+  const sliders = () => (mode === "outline" ? OUTLINE_SLIDERS : SLIDERS);
+  const target = () => (mode === "outline" ? ol : prm);
+
+  function buildSliders() {
     const box = $("sliders");
-    for (const s of SLIDERS) {
+    box.textContent = "";
+    for (const s of sliders()) {
       const wrap = document.createElement("div");
       wrap.className = "slider";
       wrap.innerHTML = `<label class="lbl" for="s-${s.key}"><span>${s.label}</span><span class="val" id="v-${s.key}"></span></label>
@@ -100,11 +152,15 @@
       box.appendChild(wrap);
       const input = wrap.querySelector("input");
       input.addEventListener("input", () => {
-        prm[s.key] = Number(input.value);
+        target()[s.key] = Number(input.value);
         markPreset(null);
         changed();
       });
     }
+  }
+
+  function buildControls() {
+    buildSliders();
     const chips = $("presets");
     PRESETS.forEach((p, i) => {
       const b = document.createElement("button");
@@ -121,17 +177,20 @@
       chips.appendChild(b);
     });
     $("surprise").addEventListener("click", () => {
-      prm = Object.assign(surprise(), { base: prm.base, edits: prm.edits, hand: prm.hand });
+      if (mode === "outline") ol = Object.assign(surpriseOutline(), { letters: ol.letters });
+      else prm = Object.assign(surprise(), { base: prm.base, edits: prm.edits, hand: prm.hand });
       markPreset(null);
       syncControls();
       changed();
     });
     $("reset").addEventListener("click", () => {
-      prm = Object.assign({}, D, setDefaults(prm.base), { base: prm.base, edits: prm.edits, hand: prm.hand });
+      if (mode === "outline") ol = Object.assign(olDefaults(), { letters: ol.letters });
+      else prm = Object.assign({}, D, setDefaults(prm.base), { base: prm.base, edits: prm.edits, hand: prm.hand });
       markPreset(null);
       syncControls();
       changed();
     });
+    document.querySelectorAll("input[name=mode]").forEach((r) => r.addEventListener("change", () => setMode(r.value)));
     // mixing two styles
     for (const id of ["mix-a", "mix-b"]) {
       const sel = $(id);
@@ -151,6 +210,8 @@
     $("download").addEventListener("click", download);
     $("save-settings").addEventListener("click", saveSettings);
     $("load-settings").addEventListener("change", loadSettings);
+    $("upload").addEventListener("change", uploadFont);
+    $("license-dl").addEventListener("click", downloadLicense);
   }
 
   function mix() {
@@ -236,10 +297,24 @@
   }
 
   function syncControls() {
-    for (const s of SLIDERS) {
-      $("s-" + s.key).value = prm[s.key];
-      $("v-" + s.key).textContent = s.fmt(prm[s.key]);
+    const t = target();
+    for (const s of sliders()) {
+      if (!$("s-" + s.key)) continue;
+      $("s-" + s.key).value = t[s.key];
+      $("v-" + s.key).textContent = s.fmt(t[s.key]);
     }
+  }
+
+  function surpriseOutline() {
+    const r = (a, b) => a + Math.random() * (b - a);
+    return sanitizeOutline({
+      weight: r(-0.25, 0.8),
+      contrast: Math.random() < 0.5 ? 0 : r(-0.4, 0.6),
+      width: r(0.9, 1.12),
+      slant: Math.random() < 0.85 ? 0 : Math.round(r(5, 9)),
+      spacing: r(0.95, 1.15),
+      round: Math.random() < 0.6 ? 0 : r(0.2, 0.7),
+    });
   }
 
   // A random font that still looks like a font: every setting stays in its sensible middle.
@@ -271,7 +346,8 @@
   function changed() {
     syncControls();
     markBase();
-    drawEditor();
+    if (mode === "outline") drawOutlineEditor();
+    else drawEditor();
     store();
     clearTimeout(timer);
     timer = setTimeout(render, 60);
@@ -281,7 +357,15 @@
     if (busy) { again = true; return; }
     busy = true;
     try {
-      const buf = FontMaker.makeFont(prm, { family: "Preview" });
+      let buf;
+      if (mode === "outline") {
+        if (!model) { busy = false; return; }
+        // only the letters on the screen get the slow changes, so the preview keeps up
+        const text = [...document.querySelectorAll(".pv")].map((e) => e.textContent).join("") + "אבגדהוזחטיכךלמםנןסעפףצץקרשת0123456789";
+        buf = FontMaker.Outline.build(model, ol, { family: "Preview", only: FontMaker.Outline.glyphsFor(model, text), fit: false });
+      } else {
+        buf = FontMaker.makeFont(prm, { family: "Preview" });
+      }
       const f = new FontFace("Preview", buf);
       await f.load();
       document.fonts.add(f);
@@ -335,6 +419,11 @@
       changed();
     });
     $("ed-reset").addEventListener("click", () => {
+      if (mode === "outline") {
+        const g = glyphOf(charOf(current));
+        if (g && ol.letters[g]) { delete ol.letters[g]; changed(); }
+        return;
+      }
       if (!prm.edits[current]) return;
       pushUndo();
       delete prm.edits[current];
@@ -343,6 +432,10 @@
       changed();
     });
     $("ed-reset-all").addEventListener("click", () => {
+      if (mode === "outline") {
+        if (Object.keys(ol.letters).length && confirm("להחזיר את כל האותיות שערכת לצורה של הגופן?")) { ol.letters = {}; changed(); }
+        return;
+      }
       if (!Object.keys(prm.edits).length) return;
       if (!confirm("להחזיר את כל האותיות שערכת לצורה המקורית?")) return;
       pushUndo();
@@ -357,7 +450,7 @@
         changed();
       }
     });
-    $("ed-words").addEventListener("input", drawLine);
+    $("ed-words").addEventListener("input", () => (mode === "outline" ? drawOutlineEditor() : drawLine()));
     $("ed-more").addEventListener("click", () => { variants = makeVariants(false); drawVariants(); });
     $("ed-like").addEventListener("click", () => { variants = makeVariants(true); drawVariants(); });
     select(current);
@@ -365,6 +458,7 @@
 
   function select(name) {
     current = name;
+    if (mode === "outline") { drawOutlineEditor(); return; }
     variants = makeVariants(false);
     drawEditor();
   }
@@ -751,6 +845,338 @@
     }
   }
 
+  // ---------------------------------------------------------------- starting from a font
+
+  function setMode(m) {
+    mode = m;
+    document.body.classList.toggle("mode-outline", m === "outline");
+    document.body.classList.toggle("mode-draw", m === "draw");
+    document.querySelector(`input[name=mode][value=${m}]`).checked = true;
+    buildSliders();
+    if (m === "outline" && !model) chooseFont(src.id || "frankruhl");
+    else {
+      if (m === "draw") select(current);
+      changed();
+    }
+  }
+
+  // The library: cards with the name of each font written in it.
+  let libraryShown = false;
+  function buildLibrary() {
+    const box = $("library");
+    const groups = {};
+    for (const f of FontMaker.library) (groups[f.group] = groups[f.group] || []).push(f);
+    let first = true;
+    for (const g in groups) {
+      const det = document.createElement("details");
+      det.className = "lib-group";
+      det.open = first;
+      first = false;
+      const h = document.createElement("summary");
+      h.textContent = g + " (" + groups[g].length + ")";
+      det.appendChild(h);
+      box.appendChild(det);
+      const grid = document.createElement("div");
+      grid.className = "lib-grid";
+      for (const f of groups[g]) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "lib";
+        b.dataset.id = f.id;
+        b.innerHTML = `<span class="lib-sample" style="font-family:'lib-${f.id}',serif">אבגד שלום</span><span class="lib-name">${f.name}</span><span class="lib-about">${f.about} · ${f.license}</span>`;
+        b.addEventListener("click", () => chooseFont(f.id));
+        grid.appendChild(b);
+      }
+      det.appendChild(grid);
+    }
+  }
+
+  // The cards show each font in itself; the fonts load in the background.
+  async function showLibraryFonts() {
+    if (libraryShown) return;
+    libraryShown = true;
+    for (const f of FontMaker.library) {
+      try {
+        const ff = new FontFace("lib-" + f.id, await FontMaker.libraryFile(f.file));
+        await ff.load();
+        document.fonts.add(ff);
+      } catch (e) { /* the card keeps the name only */ }
+    }
+  }
+
+  function markLibrary() {
+    document.querySelectorAll(".lib").forEach((b) => b.classList.toggle("on", !!src.id && b.dataset.id === src.id));
+  }
+
+  async function chooseFont(id) {
+    const f = FontMaker.library.find((x) => x.id === id) || FontMaker.library[0];
+    $("status").textContent = "טוען את " + f.name + "…";
+    try {
+      const buf = await FontMaker.libraryFile(f.file);
+      model = FontMaker.Outline.load(buf, { library: f });
+      src = { id: f.id };
+      dropMissingLetters();
+      $("status").textContent = "";
+    } catch (e) {
+      $("status").textContent = "לא הצלחתי לטעון את הגופן: " + e.message;
+    }
+    afterFont();
+  }
+
+  async function uploadFont(ev) {
+    const file = ev.target.files[0];
+    ev.target.value = "";
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const m = FontMaker.Outline.load(buf, { file: file.name });
+      if (!Object.keys(m.byChar).some((u) => u >= 0x5d0 && u <= 0x5ea)) {
+        if (!confirm("בגופן הזה אין אותיות עבריות. להמשיך בכל זאת?")) return;
+      }
+      model = m;
+      src = { file: file.name };
+      dropMissingLetters();
+      $("status").textContent = "הגופן נטען: " + file.name;
+    } catch (e) {
+      $("status").textContent = "לא הצלחתי לקרוא את הקובץ (צריך TTF, OTF או WOFF): " + e.message;
+    }
+    afterFont();
+  }
+
+  function dropMissingLetters() {
+    for (const g in ol.letters) if (!model.glyphs.some((x) => x.name === g)) delete ol.letters[g];
+  }
+
+  // What license the font has, from the library or from the font itself.
+  function licenseOf() {
+    if (!model) return null;
+    const lib = model.meta.library;
+    if (lib) return { kind: lib.license, file: lib.licenseFile };
+    const t = (model.names.license + " " + model.names.licenseURL + " " + model.names.copyright).toLowerCase();
+    if (/open font license|scripts\.sil\.org\/ofl|openfontlicense|\bofl\b/.test(t)) return { kind: "OFL" };
+    if (/gnu|\bgpl\b/.test(t)) return { kind: "GPL" };
+    if (/apache license/.test(t)) return { kind: "Apache" };
+    return { kind: null };
+  }
+
+  function afterFont() {
+    markLibrary();
+    const info = $("src-info"), note = $("license-note");
+    if (!model) { info.textContent = ""; return; }
+    const lic = licenseOf();
+    const orig = model.names.family || (model.meta.file || "");
+    info.innerHTML = "";
+    const b = document.createElement("b");
+    b.textContent = "הגופן שמשנים: " + orig;
+    info.appendChild(b);
+    const known = lic && lic.kind;
+    $("rights-wrap").classList.toggle("hidden", !!known);
+    note.textContent = known
+      ? `הגופן המקורי ברישיון ${lic.kind}. הגופן החדש יישאר ברישיון הזה: מותר להשתמש בו ולשתף אותו, עם שם חדש, ועם קובץ הרישיון.`
+      : "לא זיהיתי את הרישיון של הגופן הזה. שנה אותו רק אם מותר לך (למשל גופן שעיצבת בעצמך, או שהרישיון שלו מתיר שינויים).";
+    if (model.names.license && !model.meta.library) {
+      const p = document.createElement("small");
+      p.className = "src-license";
+      p.textContent = "מה כתוב בגופן: " + model.names.license.slice(0, 220) + (model.names.license.length > 220 ? "…" : "");
+      info.appendChild(p);
+    }
+    if (FontMaker.Outline && current && !HEBREW.includes(current)) current = "bet";
+    changed();
+  }
+
+  async function downloadLicense() {
+    const lic = licenseOf();
+    if (!lic) return;
+    let text = "";
+    if (lic.file) {
+      const buf = await FontMaker.libraryFile(lic.file);
+      text = new TextDecoder().decode(buf);
+      if (lic.file === "LICENSE-Culmus.txt") text += "\n\n" + new TextDecoder().decode(await FontMaker.libraryFile("GNU-GPL.txt"));
+    } else {
+      text = [model.names.copyright, model.names.license, model.names.licenseURL].filter(Boolean).join("\n\n");
+    }
+    save(new Blob([text], { type: "text/plain;charset=utf-8" }), fileName("-LICENSE.txt").replace("-Regular", "").replace("-Bold", ""));
+  }
+
+  // ---- single letters of the font
+
+  const glyphOf = (ch) => (model && model.byChar[ch.codePointAt(0)] !== undefined ? model.glyphs[model.byChar[ch.codePointAt(0)]].name : null);
+
+  function drawOutlineEditor() {
+    document.querySelectorAll("#letters button").forEach((b) => {
+      const g = glyphOf(charOf(b.dataset.name));
+      b.classList.toggle("on", b.dataset.name === current);
+      b.classList.toggle("edited", !!(g && ol.letters[g]));
+      b.classList.toggle("hand", !!(g && ol.letters[g]));
+      b.disabled = !g;
+    });
+    const box = $("ol-letter");
+    const ch = charOf(current);
+    const g = glyphOf(ch);
+    if (!g) { box.textContent = model ? "האות הזו לא נמצאת בגופן." : ""; return; }
+    const L = ol.letters[g] || {};
+    if (box.dataset.for !== g) {
+      box.dataset.for = g;
+      box.innerHTML = `<p class="ol-cur pv">${ch}</p>` + LETTER_KEYS.map((k) => `<div class="slider"><label class="lbl" for="l-${k.key}"><span>${k.label}</span><span class="val" id="lv-${k.key}"></span></label>
+        <input type="range" id="l-${k.key}" min="${k.min}" max="${k.max}" step="0.01"></div>`).join("");
+      for (const k of LETTER_KEYS) {
+        $("l-" + k.key).addEventListener("input", (ev) => {
+          const v = Number(ev.target.value);
+          const e = (ol.letters[g] = ol.letters[g] || {});
+          if (Math.abs(v - k.base) < 0.005) delete e[k.key];
+          else e[k.key] = v;
+          if (!Object.keys(e).length) delete ol.letters[g];
+          changed();
+        });
+      }
+    }
+    for (const k of LETTER_KEYS) {
+      const v = L[k.key] !== undefined ? L[k.key] : k.base;
+      $("l-" + k.key).value = v;
+      $("lv-" + k.key).textContent = k.fmt(v);
+    }
+    // the letter among others, in the preview font
+    const words = ($("ed-words").value || "").trim();
+    const line = $("ol-line");
+    line.textContent = "";
+    for (const part of [`הה${ch}הה וו${ch}וו `, words]) {
+      for (const c of part) {
+        if (c === ch) {
+          const sp = document.createElement("span");
+          sp.className = "cur";
+          sp.textContent = c;
+          line.appendChild(sp);
+        } else line.appendChild(document.createTextNode(c));
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- asking in words
+
+  const KEY_STORE = "font-maker-ai-key";
+  let aiHistory = [];
+
+  function aiContext() {
+    if (mode === "outline") {
+      const lettersNow = Object.entries(ol.letters).map(([g, v]) => {
+        const i = model ? model.glyphs.findIndex((x) => x.name === g) : -1;
+        const ch = i >= 0 && model.glyphs[i].unicodes.length ? String.fromCodePoint(model.glyphs[i].unicodes[0]) : g;
+        return ch + " " + JSON.stringify(v);
+      }).join("; ");
+      return {
+        about: `The font is based on the existing font "${model ? model.names.family : ""}". The settings change it; at their neutral values it is the original font.`,
+        keys: OUTLINE_SLIDERS.map((k) => ({ key: k.key, label: k.label, min: k.min, max: k.max, step: k.aiStep, value: ol[k.key], about: k.about })),
+        letterKeys: LETTER_KEYS.map((k) => ({ key: k.key, label: k.label, min: k.min, max: k.max, step: k.step, base: k.base, about: k.about })),
+        letterValue: (L, key) => {
+          const g = glyphOf(L);
+          const k = LETTER_KEYS.find((x) => x.key === key);
+          return g && ol.letters[g] && ol.letters[g][key] !== undefined ? ol.letters[g][key] : k.base;
+        },
+        letterNow: () => lettersNow,
+      };
+    }
+    return {
+      about: "The letters are drawn by the program from a skeleton with a broad pen; the settings shape every letter.",
+      keys: SLIDERS.map((k) => ({ key: k.key, label: k.label, min: k.min, max: k.max, step: (k.max - k.min) / 6, value: prm[k.key], about: k.help || "" })),
+      letterKeys: null,
+    };
+  }
+
+  function aiApply(res) {
+    const t = target();
+    for (const c of res.settings) t[c.key] = c.value;
+    if (mode === "outline") {
+      for (const c of res.letters) {
+        const g = glyphOf(c.letter);
+        if (!g) continue;
+        const k = LETTER_KEYS.find((x) => x.key === c.key);
+        const e = (ol.letters[g] = ol.letters[g] || {});
+        if (Math.abs(c.value - k.base) < 0.005) delete e[c.key];
+        else e[c.key] = c.value;
+        if (!Object.keys(e).length) delete ol.letters[g];
+      }
+    }
+    markPreset(null);
+    changed();
+  }
+
+  // What was changed, in words.
+  function describeChanges(res) {
+    const parts = [];
+    for (const c of res.settings) {
+      const k = sliders().find((x) => x.key === c.key);
+      if (k) parts.push(k.label + ": " + k.fmt(c.value));
+    }
+    for (const c of res.letters) {
+      const k = LETTER_KEYS.find((x) => x.key === c.key);
+      if (k) parts.push(c.letter + " — " + k.label + ": " + k.fmt(c.value));
+    }
+    return parts.join(" · ");
+  }
+
+  async function aiGo() {
+    const text = $("ai-text").value.trim();
+    if (!text) return;
+    if (mode === "outline" && !model) return;
+    const key = $("ai-key").value.trim();
+    try {
+      if ($("ai-remember").checked && key) localStorage.setItem(KEY_STORE, key);
+      else localStorage.removeItem(KEY_STORE);
+    } catch (e) { /* ignore */ }
+    const ctx = aiContext();
+    $("ai-go").disabled = true;
+    $("ai-msg").textContent = key ? "Claude חושב…" : "";
+    const before = { ol: JSON.stringify(ol), prm: JSON.stringify(prm) };
+    let res;
+    try {
+      res = key ? await FontMaker.AI.ask(text, ctx, key, aiHistory) : FontMaker.AI.simple(text, ctx);
+    } catch (e) {
+      const m = String((e && e.message) || e);
+      $("ai-msg").textContent = /401|authentication|api.key|x-api-key/i.test(m) ? "המפתח לא התקבל. בדוק שהעתקת אותו נכון." :
+        /429|rate/i.test(m) ? "יותר מדי בקשות כרגע. נסה שוב בעוד רגע." :
+        /fetch|network|Failed/i.test(m) ? "אין חיבור לאינטרנט (בלי חיבור אפשר להשתמש בבקשות פשוטות, בלי מפתח)." : "שגיאה: " + m;
+      $("ai-go").disabled = false;
+      return;
+    }
+    $("ai-go").disabled = false;
+    if (!res.settings.length && !res.letters.length) {
+      $("ai-msg").textContent = res.explanation || "לא היה מה לשנות.";
+      return;
+    }
+    olUndo.push(before);
+    aiApply(res);
+    const done = describeChanges(res);
+    $("ai-msg").textContent = "";
+    aiHistory.push({ text, explanation: res.explanation || done });
+    const li = document.createElement("li");
+    li.innerHTML = `<b></b><span></span><button type="button" class="btn ghost small">↶ ביטול</button>`;
+    li.querySelector("b").textContent = text;
+    li.querySelector("span").textContent = (res.explanation ? res.explanation + " " : "") + "(" + done + ")";
+    li.querySelector("button").addEventListener("click", () => {
+      ol = sanitizeOutline(JSON.parse(before.ol));
+      prm = sanitize(JSON.parse(before.prm));
+      li.classList.add("undone");
+      li.querySelector("button").remove();
+      changed();
+    });
+    $("ai-log").prepend(li);
+    $("ai-text").value = "";
+  }
+
+  function buildAI() {
+    try {
+      const k = localStorage.getItem(KEY_STORE);
+      if (k) $("ai-key").value = k;
+    } catch (e) { /* ignore */ }
+    $("ai-go").addEventListener("click", aiGo);
+    $("ai-text").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); aiGo(); }
+    });
+    const sum = () => { $("ai-key-sum").textContent = $("ai-key").value.trim() ? "✓ Claude מחובר (מפתח API)" : "בינה מלאכותית (Claude): להבנה של כל בקשה"; };
+    $("ai-key").addEventListener("input", sum);
+    sum();
+  }
+
   // ---------------------------------------------------------------- files
 
   function fileName(ext) {
@@ -767,7 +1193,18 @@
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
   }
 
+  // A name of the original font may not be kept (the OFL asks for a new one).
+  function nameProblem() {
+    if (!model) return "";
+    const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const mine = norm($("family").value), orig = norm(model.names.family);
+    if (!mine) return "צריך לתת לגופן שם באותיות אנגליות.";
+    if (orig && (mine.includes(orig) || orig.includes(mine))) return `צריך שם חדש, שונה מהשם של הגופן המקורי (${model.names.family}).`;
+    return "";
+  }
+
   function download() {
+    if (mode === "outline") return downloadOutline();
     const btn = $("download");
     btn.disabled = true;
     $("status").textContent = "בונה את הגופן… (כמה שניות)";
@@ -783,8 +1220,32 @@
     }, 30);
   }
 
+  function downloadOutline() {
+    if (!model) return;
+    const problem = nameProblem();
+    if (problem) { $("status").textContent = problem; $("family").focus(); return; }
+    const lic = licenseOf();
+    if (!(lic && lic.kind) && !$("rights").checked) {
+      $("status").textContent = "סמן שיש לך זכות לשנות את הגופן הזה.";
+      return;
+    }
+    const btn = $("download");
+    btn.disabled = true;
+    $("status").textContent = "בונה את הגופן… (זה יכול לקחת חצי דקה)";
+    setTimeout(() => {
+      try {
+        const buf = FontMaker.Outline.build(model, ol, { family: $("family").value, style: style(), fit: true });
+        save(new Blob([buf], { type: "font/otf" }), fileName(".otf"));
+        $("status").textContent = "הגופן ירד: " + fileName(".otf") + (lic && lic.kind ? ". כשמשתפים אותו, מצרפים את קובץ הרישיון." : "");
+      } catch (e) {
+        $("status").textContent = "לא הצלחתי לבנות את הגופן: " + e.message;
+      }
+      btn.disabled = false;
+    }, 30);
+  }
+
   function saveSettings() {
-    const data = { app: "font-maker", version: 1, family: $("family").value, style: style(), prm };
+    const data = { app: "font-maker", version: 2, family: $("family").value, style: style(), mode, src: src.id ? src : null, ol, prm };
     save(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), fileName(".json"));
   }
 
@@ -794,6 +1255,15 @@
     file.text().then((txt) => {
       const data = JSON.parse(txt);
       prm = sanitize(data.prm || data);
+      if (data.ol) ol = sanitizeOutline(data.ol);
+      if (data.mode === "outline" || data.mode === "draw") {
+        if (data.src && data.src.id) src = { id: data.src.id };
+        if (data.mode === "outline" && data.src && data.src.id && data.src.id !== (model && model.meta.library && model.meta.library.id)) {
+          mode = "outline";
+          chooseFont(data.src.id);
+        }
+        setMode(data.mode);
+      }
       if (data.family) $("family").value = data.family;
       if (data.style === "Bold" || data.style === "Regular") {
         document.querySelector(`input[name=style][value=${data.style}]`).checked = true;
@@ -811,9 +1281,11 @@
 
   buildControls();
   buildBases();
+  buildLibrary();
+  buildAI();
   load();
-  syncControls();
-  markPreset(SLIDERS.every((s) => prm[s.key] === D[s.key]) ? 0 : null);
   buildEditor();
-  render();
+  markPreset(SLIDERS.every((s) => prm[s.key] === D[s.key]) ? 0 : null);
+  setMode(mode);
+  showLibraryFonts();
 })();

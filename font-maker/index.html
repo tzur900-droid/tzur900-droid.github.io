@@ -12,34 +12,50 @@
 <header class="top">
   <h1>מחולל גופנים עבריים</h1>
   <ol class="steps">
-    <li><b>בוחרים סגנון</b> (או מערבבים שניים) ומזיזים את המחוונים. כל האותיות משתנות יחד.</li>
-    <li><b>רוצים לשנות אות?</b> לוחצים עליה ב"עריכת אות", ובוחרים צורה מהאפשרויות או גוררים נקודות. אותו חלק משתנה בכל האותיות.</li>
-    <li><b>כותבים שם ולוחצים "הורדת הגופן".</b> לוחצים פעמיים על הקובץ שירד ובוחרים "התקנה" — והגופן מופיע בוורד ובכל תוכנה.</li>
+    <li><b>בוחרים גופן להתחלה</b> מהמאגר, או מעלים גופן מהמחשב.</li>
+    <li><b>משנים אותו:</b> במחוונים, באות אחת, או כותבים במילים מה לשנות ("עבה יותר", "האות ש רחבה יותר").</li>
+    <li><b>כותבים שם חדש ולוחצים "הורדת הגופן".</b> לוחצים פעמיים על הקובץ שירד ובוחרים "התקנה" — והגופן מופיע בוורד ובכל תוכנה.</li>
   </ol>
 </header>
 
 <main class="layout">
   <aside class="panel" aria-label="הגדרות הגופן">
     <section>
-      <h2>אותיות להתחלה</h2>
-      <p class="hint">בוחרים את צורת האותיות שממנה מתחילים. המחוונים והעריכה משנים אותה הלאה.</p>
-      <div class="bases" id="bases"></div>
+      <h2>נקודת התחלה</h2>
+      <div class="seg mode-seg" role="radiogroup" aria-label="מאיפה מתחילים">
+        <label><input type="radio" name="mode" value="outline" checked> גופן קיים (מומלץ)</label>
+        <label><input type="radio" name="mode" value="draw"> לצייר מאפס</label>
+      </div>
+
+      <div class="outline-only">
+        <p class="hint">גופנים חופשיים שמותר לשנות. בוחרים אחד, משנים, ומורידים בשם חדש.</p>
+        <div id="library"></div>
+        <label class="btn ghost wide file upload">➕ גופן מהמחשב (TTF / OTF / WOFF)<input type="file" id="upload" accept=".ttf,.otf,.woff,font/ttf,font/otf,font/woff"></label>
+        <div class="src-info" id="src-info"></div>
+      </div>
+
+      <div class="draw-only">
+        <p class="hint">אותיות שהתוכנה מציירת בעצמה. מתאים לניסויים; לגופן "נורמלי" עדיף להתחיל מגופן קיים.</p>
+        <div class="bases" id="bases"></div>
+      </div>
     </section>
 
-    <section>
+    <section class="draw-only">
       <h2>סגנון מוכן</h2>
       <div class="chips" id="presets"></div>
       <div class="mix">
         <div class="lbl"><span>ערבוב שני סגנונות</span><span class="val" id="mix-v"></span></div>
         <div class="mix-row"><select id="mix-a" aria-label="סגנון ראשון"></select><input type="range" id="mix-t" min="0" max="100" value="50" aria-label="כמה מכל סגנון"><select id="mix-b" aria-label="סגנון שני"></select></div>
       </div>
-      <button type="button" class="btn ghost wide" id="surprise">🎲 הפתעה — גופן אקראי (אבל לא מוזר)</button>
     </section>
 
     <section>
       <h2>צורת האותיות</h2>
       <div id="sliders"></div>
-      <button type="button" class="btn ghost small" id="reset">איפוס להגדרות הספר</button>
+      <div class="row">
+        <button type="button" class="btn ghost small" id="surprise">🎲 הפתעה</button>
+        <button type="button" class="btn ghost small" id="reset">איפוס</button>
+      </div>
     </section>
 
     <section>
@@ -54,12 +70,15 @@
         </div>
         <small>כדי לקבל משפחה: מורידים גופן "רגיל", מעבים, ומורידים שוב באותו שם כ"מודגש". אז כפתור ההדגשה בתוכנות משתמש בו.</small>
       </div>
+      <label class="rights outline-only hidden" id="rights-wrap"><input type="checkbox" id="rights"> יש לי זכות לשנות את הגופן הזה (הרישיון שלו לא זוהה)</label>
       <button type="button" class="btn primary wide" id="download">⬇ הורדת הגופן</button>
       <p class="status" id="status" role="status"></p>
       <div class="row">
         <button type="button" class="btn ghost small" id="save-settings">שמירת ההגדרות לקובץ</button>
         <label class="btn ghost small file">טעינת הגדרות<input type="file" id="load-settings" accept=".json,application/json"></label>
+        <button type="button" class="btn ghost small outline-only" id="license-dl">קובץ הרישיון</button>
       </div>
+      <p class="hint outline-only" id="license-note"></p>
     </section>
   </aside>
 
@@ -79,10 +98,36 @@
       </div>
     </div>
 
+    <section class="ai" aria-label="שינוי במילים">
+      <h2>✨ לבקש שינוי במילים</h2>
+      <div class="ai-row">
+        <textarea id="ai-text" rows="2" placeholder="למשל: תעשה את הגופן עבה יותר ומעט רחב. או: האות ש רחבה יותר והאות ל גבוהה יותר."></textarea>
+        <button type="button" class="btn primary" id="ai-go">שנה</button>
+      </div>
+      <p class="status" id="ai-msg" role="status"></p>
+      <ol class="ai-log" id="ai-log"></ol>
+      <details class="ai-key">
+        <summary id="ai-key-sum">בינה מלאכותית (Claude): להבנה של כל בקשה</summary>
+        <p class="hint">בלי מפתח, התוכנה מבינה בקשות פשוטות ("עבה יותר", "צר", "נטוי", "עגול", "האות ש רחבה"). עם מפתח API של Anthropic,
+          Claude מבין כל בקשה במילים חופשיות. המפתח נשמר רק במחשב הזה, והשימוש מחויב בחשבון שלך אצל Anthropic.</p>
+        <label class="field">מפתח API
+          <input type="password" id="ai-key" dir="ltr" autocomplete="off" placeholder="sk-ant-...">
+        </label>
+        <label class="toggles"><input type="checkbox" id="ai-remember" checked> לזכור את המפתח במחשב הזה</label>
+      </details>
+    </section>
+
     <section class="editor" aria-label="עריכת אות">
       <h2>עריכת אות</h2>
       <div class="letters" id="letters"></div>
 
+      <div class="outline-only">
+        <p class="hint">בוחרים אות ומשנים רק אותה. השינוי מתווסף על השינויים של כל הגופן.</p>
+        <div id="ol-letter"></div>
+        <div class="ol-line pv" id="ol-line"></div>
+      </div>
+
+      <div class="draw-only">
       <h3>1. לבחור צורה</h3>
       <p class="hint">לוחצים על אחת הצורות, והאות מקבלת אותה. לא מצאת? "אפשרויות חדשות", או "עוד בכיוון הזה" לגרסאות קרובות לאות כמו שהיא עכשיו.</p>
       <div class="variants" id="ed-variants"></div>
@@ -103,13 +148,14 @@
 
       <h3>3. לראות אותה במילים</h3>
       <div class="ed-wrap line-wrap"><svg id="ed-line" role="img" aria-label="האות בתוך שורה"></svg></div>
+      </div>
       <label class="field">מילים לבדיקה
         <input type="text" id="ed-words" value="בראשית ברא שלום" autocomplete="off">
       </label>
-      <div id="ed-checks" class="checks"></div>
+      <div id="ed-checks" class="checks draw-only"></div>
 
       <div class="row">
-        <button type="button" class="btn ghost small" id="ed-undo">↶ ביטול</button>
+        <button type="button" class="btn ghost small draw-only" id="ed-undo">↶ ביטול</button>
         <button type="button" class="btn ghost small" id="ed-reset">החזרת האות למקור</button>
         <button type="button" class="btn ghost small" id="ed-reset-all">החזרת כל האותיות</button>
       </div>
@@ -121,7 +167,8 @@
         <li><b>בווינדוס:</b> לוחצים פעמיים על הקובץ שהורד ובוחרים <b>התקנה</b>. מעכשיו הגופן מופיע ברשימת הגופנים בכל התוכנות (וורד, פוטושופ, תוכנות עימוד…).</li>
         <li><b>בטלפון או באתר:</b> קובץ OTF עובד גם באתרים (CSS) ובאפליקציות עיצוב.</li>
         <li>בגופן יש את כל האותיות והסופיות, ניקוד מלא (עם מיקום אוטומטי מתחת לאות ומעליה), ספרות וסימני פיסוק. טעמי המקרא ואותיות לטיניות אינם בגופן; תוכנות לוקחות אותם מגופן אחר.</li>
-        <li>הגופן שלך — אפשר להשתמש בו, לשתף אותו ולמכור ספרים שמודפסים בו, בלי הגבלה.</li>
+        <li>גופן שנוצר מגופן קיים נשאר ברישיון של המקור (OFL או GPL): מותר להשתמש בו, לשתף אותו ולהדפיס בו ספרים, אבל צריך שם חדש, וכשמשתפים את קובץ הגופן — לצרף את קובץ הרישיון.</li>
+        <li>גופן שצויר מאפס כאן — שלך, בלי הגבלה.</li>
       </ul>
     </details>
   </section>
@@ -134,6 +181,10 @@
 <script src="letters-classic.js"></script>
 <script src="letters-modern.js"></script>
 <script src="letters-rashi.js"></script>
+<script src="outline.js"></script>
+<script src="library.js"></script>
+<script src="lib/anthropic-sdk.min.js"></script>
+<script src="ai.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

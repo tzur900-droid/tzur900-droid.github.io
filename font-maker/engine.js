@@ -1380,6 +1380,23 @@
 
   // Adds GDEF and GPOS to the font file made by opentype.js.
   function addLayoutTables(buf, glyphs, bold) {
+    return withTables(buf, { GDEF: Uint8Array.from(makeGDEF(glyphs)), GPOS: Uint8Array.from(makeGPOS(glyphs)) }, bold);
+  }
+
+  // The tables of a font file, by tag.
+  function readTables(buf) {
+    const dv = new DataView(buf);
+    const out = {};
+    for (let i = 0; i < dv.getUint16(4); i++) {
+      const o = 12 + i * 16;
+      const tag = String.fromCharCode(dv.getUint8(o), dv.getUint8(o + 1), dv.getUint8(o + 2), dv.getUint8(o + 3));
+      out[tag] = new Uint8Array(buf, dv.getUint32(o + 8), dv.getUint32(o + 12)).slice();
+    }
+    return out;
+  }
+
+  // The font file with these tables added (or put in place of the ones it has).
+  function withTables(buf, extra, bold) {
     const dv = new DataView(buf);
     const numTables = dv.getUint16(4);
     const tables = [];
@@ -1389,8 +1406,11 @@
       const offset = dv.getUint32(o + 8), length = dv.getUint32(o + 12);
       tables.push({ tag, data: new Uint8Array(buf, offset, length).slice() });
     }
-    tables.push({ tag: "GDEF", data: Uint8Array.from(makeGDEF(glyphs)) });
-    tables.push({ tag: "GPOS", data: Uint8Array.from(makeGPOS(glyphs)) });
+    for (const tag in extra) {
+      const i = tables.findIndex((t) => t.tag === tag);
+      if (i >= 0) tables.splice(i, 1);
+      if (extra[tag]) tables.push({ tag, data: extra[tag] });
+    }
     tables.sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0));
     const head = tables.find((t) => t.tag === "head");
     head.data[8] = head.data[9] = head.data[10] = head.data[11] = 0;
@@ -1441,5 +1461,9 @@
     defaults: { round: 0.2, serif: 0.5, headShape: 0.3 },
   });
 
-  global.FontMaker = { DEFAULTS, buildGlyphs, makeFont, unite, editableGlyphs, styleFrom, pointRoles, partName, checkLetters, addLetterSet, letterSets };
+  global.FontMaker = {
+    DEFAULTS, buildGlyphs, makeFont, unite, editableGlyphs, styleFrom, pointRoles, partName, checkLetters, addLetterSet, letterSets,
+    // for the engine that changes existing fonts (outline.js)
+    geom: { SCALE, flatten, fitContour, lineSeg, cubicAt, ensurePaper, readTables, withTables, Bytes, coverage, anchor },
+  };
 })(typeof window !== "undefined" ? window : globalThis);
