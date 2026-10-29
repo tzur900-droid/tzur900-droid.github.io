@@ -77,11 +77,11 @@ def toc_page(pw, ph, margin, family, entries, gutter=0.0):
     head = Style(family, 20, True)
     frames = [l for l in centred("תוכן העניינים", head, 20 * 1.6, W)]
     y = frames[-1].y + frames[-1].h + 6 * PT_PER_MM
-    # a size at which the list fits the page
-    for size in (13, 12, 11, 10, 9, 8):
-        lh = size * 1.75
-        if y + len(entries) * lh <= ph - 2 * margin:
-            break
+    # the largest size (and then the roomiest spacing) at which the whole list fits the page;
+    # a long list (or a small page) is set smaller and closer, but always on the one page
+    fits = [(s, s * k) for s in (13, 12, 11, 10, 9.5, 9, 8.5, 8, 7.5, 7, 6.5, 6, 5.5, 5, 4.5, 4)
+            for k in (1.75, 1.55, 1.35, 1.2) if y + len(entries) * s * k <= ph - 2 * margin]
+    size, lh = fits[0] if fits else (4, (ph - 2 * margin - y) / max(1, len(entries)))
     lines = []
     for text, num, level in entries:
         st = Style(family, size if level == 0 else size * 0.88, level == 0)
