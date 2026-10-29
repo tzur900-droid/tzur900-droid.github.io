@@ -20,7 +20,7 @@ from .engine import Page
 from .model import heb
 from .textlayout import PT_PER_MM, Style
 
-B5 = (176, 250)
+B5 = (165, 235)        # the page in mm (the printer's B5)
 SIZES = {"margin": 12, "inner": 22, "outer": 15, "rosh_size": 9.5, "rif_size": 11.5, "rif_lead": 1.12, "comm_size": 8.75, "head_size": 8}
 SEDARIM = [("זרעים", ["ברכות"]),
            ("מועד", ["שבת", "עירובין", "פסחים", "יומא", "סוכה", "ביצה", "ראש השנה", "תענית", "מגילה", "מועד קטן"]),
