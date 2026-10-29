@@ -7,11 +7,12 @@ import os
 
 import sys
 
-from PySide6.QtCore import QEvent, QObject, QSettings, QSize, QStandardPaths, Qt, QTimer, QUrl
-from PySide6.QtGui import (QAction, QColor, QIcon, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPixmap, QShortcut,
+from PySide6.QtCore import QEvent, QObject, QSettings, QSize, QStandardPaths, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (QAction, QColor, QIcon, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QKeySequence, QPixmap,
+                           QRawFont, QShortcut,
                            QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
+    QAbstractSpinBox, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QSlider, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
     QMenu, QSizePolicy, QToolBar, QToolButton, QVBoxLayout, QWidget,
@@ -56,13 +57,61 @@ def hebrew_edit(font_family="Frank Ruhl Libre", size=13):
     return e
 
 
+_hebrew_fonts = {}
+
+
+def has_hebrew(family):
+    """Whether the font itself has the Hebrew letters (by looking in the font, not by what the
+    font says about itself, which a font added from a file often leaves out)."""
+    v = _hebrew_fonts.get(family)
+    if v is None:
+        raw = QRawFont.fromFont(QFont(family))
+        v = raw.isValid() and all(raw.supportsCharacter(c) for c in (0x05D0, 0x05E9))
+        _hebrew_fonts[family] = v
+    return v
+
+
+class FontBox(QComboBox):
+    """A list of the Hebrew fonts (each name in its own font): a click anywhere on it opens the
+    list under it, typing a letter jumps to it. A font added while the program runs shows at once."""
+    currentFontChanged = Signal(QFont)
+
+    def __init__(self):
+        super().__init__()
+        self.setEditable(False)
+        self.setMaxVisibleItems(20)
+        self.fill()
+        self.currentIndexChanged.connect(lambda _: self.currentFontChanged.emit(self.currentFont()))
+        QGuiApplication.instance().fontDatabaseChanged.connect(self.fill)
+
+    def fill(self):
+        cur = self.currentText()
+        self.blockSignals(True)
+        self.clear()
+        for f in sorted((f for f in QFontDatabase.families() if not f.startswith("@") and has_hebrew(f)), key=str.lower):
+            self.addItem(f)
+            self.setItemData(self.count() - 1, QFont(f, self.font().pointSize()), Qt.FontRole)
+        if cur:
+            self.select(cur)
+        self.blockSignals(False)
+
+    def select(self, family):
+        k = self.findText(family)
+        if k < 0:
+            # a font the project names that isn't on this computer (or has no Hebrew): kept as it is
+            self.insertItem(0, family)
+            k = 0
+        self.setCurrentIndex(k)
+
+    def setCurrentFont(self, font):
+        self.select(font.family())
+
+    def currentFont(self):
+        return QFont(self.currentText())
+
+
 def font_box():
-    """A list of the Hebrew fonts: a click anywhere on it opens the list under it (typing a letter jumps to it)."""
-    b = QFontComboBox()
-    b.setWritingSystem(QFontDatabase.Hebrew)
-    b.setEditable(False)
-    b.setMaxVisibleItems(20)
-    return b
+    return FontBox()
 
 
 def shrinkable(w):
@@ -1224,7 +1273,7 @@ class MainWindow(QMainWindow):
                 failed.append(os.path.basename(path))
         msg = ""
         if added:
-            hebrew = [f for f in added if QFontDatabase.Hebrew in QFontDatabase.writingSystems(f)]
+            hebrew = [f for f in added if has_hebrew(f)]
             msg += "נוספו הגופנים: " + ", ".join(added) + "\n(הם יופיעו בכל רשימות הגופנים, גם בפעמים הבאות)"
             if len(hebrew) < len(added):
                 msg += "\n\nשים לב: " + ", ".join(f for f in added if f not in hebrew) + " בלי אותיות עבריות."
