@@ -14,7 +14,7 @@ from PySide6.QtGui import (QAction, QColor, QIcon, QDesktopServices, QFont, QFon
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPlainTextEdit, QPushButton, QScrollArea, QSlider, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
+    QPlainTextEdit, QProgressDialog, QPushButton, QScrollArea, QSlider, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
     QMenu, QSizePolicy, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -462,7 +462,91 @@ class MainWindow(QMainWindow):
                 found = True
         if not found:
             menu.addAction("לא נמצאה התיקייה projects").setEnabled(False)
+        else:
+            menu.addSeparator()
+            menu.addAction("ייצוא כל החומשים בהגדרות של הפרויקט הזה…").triggered.connect(self.export_all_books)
         return menu
+
+    def ready_books(self):
+        """(name, path) of each ready book in one file ('בראשית', 'שמות - רשי ואור החיים', …), in order."""
+        root = self.projects_dir()
+        order = ["בראשית", "שמות", "ויקרא", "במדבר", "דברים"]
+        out = []
+        if os.path.isdir(root):
+            for book in os.listdir(root):
+                folder = os.path.join(root, book)
+                files = sorted(f for f in os.listdir(folder) if f.endswith(".json")) if os.path.isdir(folder) else []
+                whole = [f for f in files if "כל הספר" in f] or (files if len(files) == 1 else [])
+                if whole and "╫" not in book:
+                    out.append((book, os.path.join(folder, whole[0])))
+        out.sort(key=lambda b: (b[0].split(" - ")[0] not in order, order.index(b[0].split(" - ")[0]) if b[0].split(" - ")[0] in order else 0, b[0]))
+        return out
+
+    def export_all_books(self):
+        """Every ready book laid out with this project's settings (the page, fonts, spacing, each
+        commentary's settings by its name) and exported to a PDF in one folder. The book that is
+        open here goes as it is, with its changes; the ready books' files are not changed."""
+        books = self.ready_books()
+        if not books:
+            QMessageBox.information(self, APP_NAME, "לא נמצאו ספרים מוכנים.")
+            return
+        self.read_editor()
+        docs = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) or os.path.expanduser("~")
+        folder = os.path.join(docs, "חומשים מעומדים")
+        ans = QMessageBox.question(
+            self, APP_NAME,
+            f"כל {len(books)} החומשים יעומדו בהגדרות של הפרויקט הפתוח (גודל העמוד, גופנים, גדלים, מרווחים, הגדרות כל "
+            f"פירוש לפי שמו) ויישמרו כ־PDF בתיקייה:\n{folder}\n\nזה לוקח כמה דקות. קובצי החומשים עצמם לא משתנים.\n\n"
+            "להמשיך? (No = לבחור תיקייה אחרת)", QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+        if ans == QMessageBox.Cancel:
+            return
+        if ans == QMessageBox.No:
+            folder = QFileDialog.getExistingDirectory(self, "תיקייה לחומשים המעומדים", docs)
+            if not folder:
+                return
+        os.makedirs(folder, exist_ok=True)
+        mine = sorted(model.comm_key(c.get("name")) for c in self.project.get("comms", []))
+        dlg = QProgressDialog("", "ביטול", 0, len(books), self)
+        dlg.setWindowTitle("ייצוא כל החומשים")
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        done, failed = [], []
+        for k, (name, path) in enumerate(books):
+            dlg.setValue(k)
+            dlg.setLabelText(f"{name} ({k + 1} מתוך {len(books)})…")
+            QApplication.processEvents()
+            if dlg.wasCanceled():
+                break
+            try:
+                book = model.load_project(path)
+                if (book.get("title") == self.project.get("title")
+                        and sorted(model.comm_key(c.get("name")) for c in book.get("comms", [])) == mine):
+                    p = json.loads(json.dumps(self.project))       # the book open here, with its changes
+                else:
+                    p = model.apply_settings(self.project, book)
+
+                def progress(n):
+                    QApplication.processEvents()
+                    if dlg.wasCanceled():
+                        raise Cancelled()
+
+                pages = Engine(p, progress).run()
+                out = os.path.join(folder, name + ".pdf")
+                export_pdf(pages, out, p.get("title", name))
+                done.append(name)
+            except Cancelled:
+                break
+            except Exception as e:
+                _log(f"export of {name} failed: {e}")
+                failed.append(f"{name}: {e}")
+        dlg.setValue(len(books))
+        msg = f"נשמרו {len(done)} חומשים בתיקייה:\n{folder}"
+        if failed:
+            msg += "\n\nלא הצליחו:\n" + "\n".join(failed)
+        if len(done) + len(failed) < len(books):
+            msg += "\n\n(הייצוא בוטל באמצע)"
+        if QMessageBox.question(self, APP_NAME, msg + "\n\nלפתוח את התיקייה?") == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
     def build_editor(self):
         """The editing side, in three tabs: each editor gets the full height and scrolls on

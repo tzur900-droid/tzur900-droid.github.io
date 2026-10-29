@@ -174,6 +174,38 @@ def example_project():
     return p
 
 
+# what is a book's own (its text, its name, the words on its cover), not a setting of the layout
+BOOK_OWN = {"title", "main", "comms", "titleSub", "coverTitle", "coverSub", "coverSpine", "coverSpineSub",
+            "coverBack", "coverSpineW"}
+# a commentary's settings (not its name or text)
+COMM_SETTINGS = ("place", "side", "font", "size", "width", "autoW", "cols", "dhOnly", "paraBreak")
+
+
+def comm_key(name):
+    return re.sub(r"[\"'״׳\s]", "", name or "")
+
+
+def apply_settings(src, dst):
+    """dst (a book) with the layout settings of src: the page, the fonts, the spacing, the
+    title page and the look of the cover, and each commentary's settings by its name. dst's
+    text, name and commentaries' texts stay its own. Returns a new project."""
+    out = json.loads(json.dumps(dst))
+    for k, v in src.items():
+        if k not in BOOK_OWN:
+            out[k] = json.loads(json.dumps(v))
+    mine = {comm_key(c.get("name")): c for c in src.get("comms", [])}
+    for c in out.get("comms", []):
+        s = mine.get(comm_key(c.get("name")))
+        if s:
+            for k in COMM_SETTINGS:
+                if k in s:
+                    c[k] = s[k]
+    # the line under the name on the title page names the commentaries: only for the same ones
+    if sorted(mine) == sorted(comm_key(c.get("name")) for c in out.get("comms", [])):
+        out["titleSub"] = src.get("titleSub", "")
+    return normalize(out)
+
+
 def load_project(path):
     with open(path, encoding="utf-8") as f:
         return normalize(json.load(f))
