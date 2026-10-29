@@ -1619,13 +1619,17 @@ class Book:
             mst = Style("Frank Ruhl Libre", 7.5, True)
 
             def day_box(x, l, st):
-                for lab in [w.ref for w in l.words if isinstance(w.ref, str)]:
-                    if lab.startswith("יום "):
-                        word, num_ = lab.split(" ", 1)
-                        page.boxes.append((x, top + l.y + l.h * 0.5, word, num_, st))
-                    else:
-                        # another note in the margin (where the Rif has the place)
-                        page.marks.append((x, top + l.y + l.h * 0.72, lab, mst))
+                labs = [w.ref for w in l.words if isinstance(w.ref, str)]
+                days = [lab for lab in labs if lab.startswith("יום ")]
+                for lab in days:
+                    word, num_ = lab.split(" ", 1)
+                    page.boxes.append((x, top + l.y + l.h * 0.5, word, num_, st))
+                # another note in the margin (where the Rif has the place): under the day's
+                # box when the line has one
+                below = (st.size * 1.4 + 6) if days else 0.0
+                for lab in labs:
+                    if not lab.startswith("יום "):
+                        page.marks.append((x, top + l.y + l.h * 0.72 + below, lab, mst))
             if pg["kind"] == "rosh":
                 for k, col in enumerate(pg["cols"]):
                     if col:
@@ -1781,6 +1785,10 @@ def load_masechet(root, m, found=None):
             gl = read(s["gemara"][0])
             amudim = passage_amudim(rif, gl)
             gtoks, gamud = parse_gemara(gl)
+            # each passage of the Rif: the amud of the Gemara it is on (for the page's head)
+            label = dict(gamud)
+            for j, p in enumerate(rif):
+                p["amud"], p["amud_n"] = label.get(amudim[j]), amudim[j]
             g = lseq(gtoks)[0]
             gem = {tuple(g[k:k + 3]) for k in range(len(g) - 2)}
             # the commonest words of the commentary: a match of them alone is no quotation
@@ -2124,18 +2132,36 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         xref.append(" · ".join(x for x in (perek, daf) if x) +
                     (f" · ברי\"ף עמ' {heb(target + 1)}" if target is not None else ""))
     xref += [""] * len(pad)
+    # the head of a page of the Rif: the dafim of the Gemara it is on (from the first passage
+    # on it to the last; not the Rif's own pages)
+    prev = None
     for n, pg in enumerate(rif_pages):
-        refs = [l.unit.ref for l in pg["text"] if l.unit.kind == "p"]
-        if refs:
-            j = refs[0]
-            daf = rif[j]["daf"]
-            xref.append(f"דף {daf}")
+        refs = [r for l in pg["text"] for r in getattr(l, "refs", [l.unit.ref]) if l.unit.kind == "p"]
+        amuds = sorted({(rif[j]["amud_n"], rif[j]["amud"]) for j in refs if rif[j].get("amud")})
+        if amuds:
+            first, last = amuds[0][1], amuds[-1][1]
+            prev = last
+            xref.append(f"דף {first}" + (f"–{last}" if last != first else ""))
+        elif prev:
+            xref.append(f"דף {prev}")
         else:
             xref.append(comm_name)
     title_rif = f"רי\"ף ו{comm_name}" if comm_name else "רי\"ף"
     pages = book.render(rosh_pages, pad + rif_pages, xref, "פסקי הרא\"ש", title_rif)
     report.append(f"{m}: {len(rosh_pages)} עמודי רא\"ש, {len(rif_pages)} עמודי רי\"ף, ימים {heb(first_day)}–{heb(first_day + len(starts) - 1)}")
+    # where every day begins: its page (as the head numbers it) in the Rosh and in the Rif
+    off = len(rosh_pages) + len(pad)
+    day_pages = {}
+    for part, pgs, base, get in (("rosh", rosh_pages, 0, lambda pg: [l for c in pg["cols"] for l in c]),
+                                 ("rif", rif_pages, off, lambda pg: pg["text"])):
+        for n, pg in enumerate(pgs):
+            for l in get(pg):
+                for w in l.words:
+                    if isinstance(w.ref, str) and w.ref.startswith("יום "):
+                        day_pages.setdefault(w.ref, {})[part] = heb(base + n + 1)
+    info_days = [(d, day_pages.get(f"יום {heb(d)}", {})) for d in range(first_day, first_day + len(starts))]
     info = {"name": m, "comm_name": comm_name, "rosh_pages": len(rosh_pages), "rif_pages": len(rif_pages),
+            "day_pages": info_days,
             "first_day": first_day, "last_day": first_day + len(starts) - 1, "issues": issues,
             "layout": check_layout(book, rosh_pages, rif_pages)}
     return pages, report, info

@@ -176,9 +176,12 @@ def assemble(ms, books, page=B5, margin=SIZES["margin"]):
             out += ps
             if len(out) % 2:
                 out.append(blank(pw, ph))
+    out += contents(pw, ph, ms, books)
+    if len(out) % 2:
+        out.append(blank(pw, ph))
     st = Style("Frank Ruhl Libre", 7)
     for n, p in enumerate(out):
-        if p.frames:
+        if p.frames or getattr(p, "numbered", False):
             if not hasattr(p, "marks"):
                 p.marks = []
             p.marks.append((pw / 2, ph - margin * PT_PER_MM / 2, str(n + 1), st))
@@ -193,6 +196,56 @@ def cover_page(ms, n_pages, volume, colour=COVER, page=B5):
     p = Page(W, H)
     p.paint = [paint]
     return p
+
+
+def contents(pw, ph, ms, books, rows_per_page=44):
+    """At the end of a volume: the days of learning in it, each with its masechet and the
+    pages (as numbered at their heads) where it begins in the Rosh and in the Rif."""
+    rows = []
+    for m in ms:
+        for d, where in books[m][2].get("day_pages", []):
+            rows.append((heb(d), m, where.get("rosh", ""), where.get("rif", "")))
+    pages = []
+    for k in range(0, len(rows), rows_per_page):
+        pages.append(contents_page(pw, ph, rows[k:k + rows_per_page], first=k == 0))
+    return pages
+
+
+def contents_page(pw, ph, rows, first):
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtGui import QColor
+    from . import design
+
+    def paint(p):
+        m = 20 * PT_PER_MM
+        mid = pw / 2
+        y = m
+        if first:
+            design.text_c(p, mid, y + 14, "תוכן ימי הלימוד", Style(design.TITLE_FONT, 20, True))
+            design.divider(p, mid, y + 28, 50, "#555555")
+            y += 44
+        else:
+            y += 8
+        # the columns, from the right: the day, the masechet, the Rosh, the Rif
+        W = pw - 2 * m
+        xs = [pw - m - W * f for f in (0.06, 0.32, 0.64, 0.88)]
+        hst = Style("Frank Ruhl Libre", 10, True)
+        rst = Style("Frank Ruhl Libre", 10)
+        lh = 13.2
+        p.fillRect(QRectF(m, y, W, lh + 2), QColor("#d6d6d6"))
+        for x, t in zip(xs, ("יום", "מסכת", "רא״ש עמ'", "רי״ף עמ'")):
+            design.text_c(p, x, y + lh - 2.5, t, hst, "#000000")
+        y += lh + 4
+        for k, row in enumerate(rows):
+            if k % 2:
+                p.fillRect(QRectF(m, y, W, lh), QColor("#efefef"))
+            for x, t in zip(xs, row):
+                design.text_c(p, x, y + lh - 3, t, rst, "#000000")
+            y += lh
+    pg = Page(pw, ph)
+    pg.paint = [paint]
+    pg.numbered = True
+    return pg
 
 
 def report(books, files):
