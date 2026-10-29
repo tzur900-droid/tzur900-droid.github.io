@@ -19,7 +19,9 @@
     slant: 0,      // degrees
     spacing: 1,    // 0.6 .. 1.8
     round: 0,      // 0 .. 1: roundness of the corners
-    letters: {},   // per glyph name: {width, height, weight, shift}
+    letters: {},   // per glyph name: {width, height, weight, shift, depth}
+    points: {},    // per glyph name: moved points {"contour.segment" or "contour.segment.a|b": [dx, dy]}
+    parts: {},     // per glyph name: [{type: "add", polys, dx, dy, s} | {type: "cut", rect: [x0, y0, x1, y1]}]
   };
 
   // ---------------------------------------------------------------- reading the font
@@ -226,7 +228,7 @@
     // thinning eats the hairlines quickly, so it goes slower than thickening
     const soft = (v) => (v < 0 ? v * 0.45 : v) * unit;
     return {
-      sx, sy, k, dx: dsb, dy,
+      sx, sy, k, dx: dsb, dy, depth: L.depth || 1,
       dv: soft(w - S.contrast * 0.5),  // grows the vertical strokes (sideways)
       dh: soft(w + S.contrast * 0.5),  // grows the horizontal strokes (up and down)
       r: S.round * 0.02 * model.upm,
@@ -234,8 +236,9 @@
     };
   }
 
+  // (below the line, a letter's tail is longer or shorter by its own factor)
   const movePoint = (t, p) => {
-    const y = p[1] * t.sy + t.dy;
+    const y = (p[1] < 0 ? p[1] * t.depth : p[1]) * t.sy + t.dy;
     return [p[0] * t.sx + y * t.k + t.dx, y];
   };
 
@@ -282,6 +285,147 @@
       return paths.map((p) => G.fitContour(p)).filter((c) => c && c.length);
     }
     return paths.map((p) => p.map((q, i) => G.lineSeg([q.X / SC, q.Y / SC], [p[(i + 1) % p.length].X / SC, p[(i + 1) % p.length].Y / SC])));
+  }
+
+  // ---------------------------------------------------------------- editing by hand
+
+  const isLine = (s) => {
+    const dx = s[3][0] - s[0][0], dy = s[3][1] - s[0][1], l = Math.hypot(dx, dy) || 1;
+    const off = (p) => Math.abs((p[0] - s[0][0]) * dy - (p[1] - s[0][1]) * dx) / l;
+    return off(s[1]) < 0.5 && off(s[2]) < 0.5;
+  };
+
+  // The outline with points moved by hand. A point on the outline is "contour.segment" (the end
+  // of that segment, which is also the start of the next one) and takes its handles along; a
+  // handle is "contour.segment.a" (the first control point of the segment) or ".b" (the second).
+  // A straight segment stays straight.
+  function movePoints(contours, edits) {
+    if (!edits) return contours;
+    const out = contours.map((c) => c.map((s) => s.map((p) => p.slice())));
+    contours.forEach((c, ci) => {
+      const n = c.length;
+      const straight = c.map(isLine);
+      for (let si = 0; si < n; si++) {
+        const e = edits[ci + "." + si];
+        if (!e) continue;
+        const a = out[ci][si], b = out[ci][(si + 1) % n];
+        for (const p of [a[3], a[2], b[0], b[1]]) { p[0] += e[0]; p[1] += e[1]; }
+      }
+      for (let si = 0; si < n; si++) {
+        for (const [h, k] of [["a", 1], ["b", 2]]) {
+          const e = edits[ci + "." + si + "." + h];
+          if (e && !straight[si]) { out[ci][si][k][0] += e[0]; out[ci][si][k][1] += e[1]; }
+        }
+        if (straight[si]) out[ci][si] = G.lineSeg(out[ci][si][0], out[ci][si][3]);
+      }
+    });
+    return out;
+  }
+
+  // The points of an outline, for the editor: on the outline and handles (not of straight lines).
+  function outlinePoints(contours) {
+    const pts = [];
+    contours.forEach((c, ci) => c.forEach((s, si) => {
+      pts.push({ id: ci + "." + si, x: s[3][0], y: s[3][1], on: true });
+      if (!isLine(s)) {
+        const prev = s[0], next = s[3];
+        pts.push({ id: ci + "." + si + ".a", x: s[1][0], y: s[1][1], on: false, to: [prev[0], prev[1]] });
+        pts.push({ id: ci + "." + si + ".b", x: s[2][0], y: s[2][1], on: false, to: [next[0], next[1]] });
+      }
+    }));
+    return pts;
+  }
+
+  // A part taken from a letter, where it is put: scaled around its middle, then moved.
+  function placedPart(p) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const poly of p.polys) for (const q of poly) {
+      x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]);
+    }
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, s = p.s || 1;
+    return p.polys.map((poly) => poly.map((q) => [cx + (q[0] - cx) * s + (p.dx || 0), cy + (q[1] - cy) * s + (p.dy || 0)]));
+  }
+
+  // The outline with the parts added and the areas cut away. Returns cubic contours.
+  function applyParts(contours, parts, fit) {
+    if (!parts || !parts.length) return contours;
+    const C = ClipperLib, SC = G.SCALE;
+    const toInt = (poly) => poly.map((q) => ({ X: Math.round(q[0] * SC), Y: Math.round(q[1] * SC) }));
+    const cl0 = new C.Clipper();
+    cl0.AddPaths(contours.map(G.flatten), C.PolyType.ptSubject, true);
+    let paths = [];
+    cl0.Execute(C.ClipType.ctUnion, paths, C.PolyFillType.pftNonZero, C.PolyFillType.pftNonZero);
+    for (const p of parts) {
+      const cl = new C.Clipper();
+      cl.AddPaths(paths, C.PolyType.ptSubject, true);
+      let clip;
+      if (p.type === "cut") {
+        const [x0, y0, x1, y1] = p.rect;
+        clip = [toInt([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])];
+      } else clip = placedPart(p).map(toInt);
+      cl.AddPaths(clip, C.PolyType.ptClip, true);
+      const sol = [];
+      cl.Execute(p.type === "cut" ? C.ClipType.ctDifference : C.ClipType.ctUnion, sol, C.PolyFillType.pftNonZero, C.PolyFillType.pftNonZero);
+      paths = sol;
+    }
+    paths = C.Clipper.CleanPolygons(paths, 0.1 * SC).filter((p) => p.length > 2 && Math.abs(C.Clipper.Area(p)) > 4 * SC * SC);
+    if (fit) {
+      G.ensurePaper();
+      return paths.map((p) => G.fitContour(p)).filter((c) => c && c.length);
+    }
+    return paths.map((p) => p.map((q, i) => G.lineSeg([q.X / SC, q.Y / SC], [p[(i + 1) % p.length].X / SC, p[(i + 1) % p.length].Y / SC])));
+  }
+
+  // The shape of a part of a letter inside a rectangle, as polygons (to take into another letter).
+  function cutOut(contours, rect) {
+    const C = ClipperLib, SC = G.SCALE;
+    const [x0, y0, x1, y1] = rect;
+    const cl = new C.Clipper();
+    cl.AddPaths(contours.map(G.flatten), C.PolyType.ptSubject, true);
+    cl.AddPaths([[[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map((q) => ({ X: Math.round(q[0] * SC), Y: Math.round(q[1] * SC) }))], C.PolyType.ptClip, true);
+    const sol = [];
+    cl.Execute(C.ClipType.ctIntersection, sol, C.PolyFillType.pftNonZero, C.PolyFillType.pftNonZero);
+    return C.Clipper.CleanPolygons(sol, 0.5 * SC)
+      .filter((p) => p.length > 2 && Math.abs(C.Clipper.Area(p)) > 9 * SC * SC)
+      .map((p) => p.map((q) => [Math.round(q.X / SC), Math.round(q.Y / SC)]));
+  }
+
+  // A glyph with the hand edits (points, then parts), before the changes of the whole font.
+  function editedContours(model, S, i, fit) {
+    const g = model.glyphs[i];
+    let c = movePoints(g.contours, S.points && S.points[g.name]);
+    const parts = S.parts && S.parts[g.name];
+    if (parts && parts.length) {
+      try { c = applyParts(c, parts, fit); } catch (e) { /* keep the points only */ }
+    }
+    return c;
+  }
+
+  // A glyph as it comes out in the font.
+  function finalContours(model, S, i, t, opts) {
+    let contours = editedContours(model, S, i, opts.fit !== false).map((c) => c.map((s) => s.map((p) => movePoint(t, p))));
+    const slow = Math.abs(t.dv) >= 0.3 || Math.abs(t.dh) >= 0.3 || t.r > 0.5;
+    if (slow && contours.length && (!opts.only || opts.only.has(i))) {
+      try { contours = growOutline(contours, t, opts.fit !== false); } catch (e) { /* keep it moved only */ }
+    }
+    return contours;
+  }
+
+  // What the letter editor needs about one glyph.
+  function editView(model, settings, i) {
+    const S = Object.assign({}, SETTINGS, settings || {});
+    const t = glyphChange(model, S, i);
+    const edited = movePoints(model.glyphs[i].contours, S.points && S.points[model.glyphs[i].name]);
+    return {
+      t,
+      move: (p) => movePoint(t, p),
+      // a move on the screen as a move of the point in the font before its changes
+      unmove: (dx, dy) => [(dx - (dy * t.k)) / t.sx, dy / t.sy],
+      points: outlinePoints(edited),
+      edited,
+      final: finalContours(model, S, i, t, { fit: false }),
+      parts: ((S.parts && S.parts[model.glyphs[i].name]) || []).map((p) => (p.type === "add" ? placedPart(p) : null)),
+    };
   }
 
   // ---------------------------------------------------------------- GPOS
@@ -407,11 +551,7 @@
     let yMax = 0, yMin = 0;
     const otGlyphs = model.glyphs.map((g, i) => {
       const t = changes[i];
-      let contours = g.contours.map((c) => c.map((s) => s.map((p) => movePoint(t, p))));
-      const slow = Math.abs(t.dv) >= 0.3 || Math.abs(t.dh) >= 0.3 || t.r > 0.5;
-      if (slow && contours.length && (!opts.only || opts.only.has(i))) {
-        try { contours = growOutline(contours, t, opts.fit !== false); } catch (e) { /* keep it moved only */ }
-      }
+      const contours = finalContours(model, S, i, t, opts);
       const path = new opentype.Path();
       for (const c of contours) {
         const r = Math.round;
@@ -483,5 +623,5 @@
     return out;
   }
 
-  FontMaker.Outline = { SETTINGS, load, build, glyphsFor, bbox };
+  FontMaker.Outline = { SETTINGS, load, build, glyphsFor, bbox, editView, cutOut, editedContours };
 })();

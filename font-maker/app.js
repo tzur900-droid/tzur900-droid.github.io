@@ -47,6 +47,7 @@
     { key: "width", label: "רוחב האות", min: 0.6, max: 1.6, step: 0.08, base: 1, fmt: (v) => Math.round(v * 100) + "%", about: "Multiplies the width of this letter." },
     { key: "height", label: "גובה האות", min: 0.7, max: 1.4, step: 0.06, base: 1, fmt: (v) => Math.round(v * 100) + "%", about: "Multiplies the height of this letter, from the line up." },
     { key: "weight", label: "עובי האות", min: -1, max: 1, step: 0.25, base: 0, fmt: (v) => (v > 0 ? "+" : "") + Math.round(v * 100), about: "Added to the weight of the whole font, for this letter." },
+    { key: "depth", label: "אורך הזנב (מתחת לשורה)", min: 0.5, max: 1.8, step: 0.15, base: 1, fmt: (v) => Math.round(v * 100) + "%", about: "Multiplies how far this letter goes below the line (the tails of ך ן ף ץ ק)." },
     { key: "shift", label: "הזזה למעלה / למטה", min: -0.3, max: 0.3, step: 0.04, base: 0, fmt: (v) => (v > 0 ? "+" : "") + Math.round(v * 100), about: "Moves this letter up (positive) or down, in parts of the letter height." },
   ];
 
@@ -59,7 +60,7 @@
   let olUndo = [];
 
   function olDefaults() {
-    return Object.assign({}, FontMaker.Outline.SETTINGS, { letters: {} });
+    return Object.assign({}, FontMaker.Outline.SETTINGS, { letters: {}, points: {}, parts: {} });
   }
 
   const $ = (id) => document.getElementById(id);
@@ -119,6 +120,21 @@
       const v = Number(p && p[s.key]);
       if (isFinite(v)) out[s.key] = Math.min(s.max, Math.max(s.min, v));
     }
+    const P = p && p.points;
+    if (P && typeof P === "object") {
+      for (const g in P) for (const k in P[g]) {
+        const v = P[g][k];
+        if (/^\d+\.\d+(\.[ab])?$/.test(k) && Array.isArray(v) && isFinite(v[0]) && isFinite(v[1])) (out.points[g] = out.points[g] || {})[k] = [Number(v[0]), Number(v[1])];
+      }
+    }
+    const PA = p && p.parts;
+    if (PA && typeof PA === "object") {
+      for (const g in PA) {
+        const list = (Array.isArray(PA[g]) ? PA[g] : []).filter((x) => x && (x.type === "cut" ? Array.isArray(x.rect) && x.rect.length === 4 : Array.isArray(x.polys)));
+        if (list.length) out.parts[g] = list.map((x) => (x.type === "cut" ? { type: "cut", rect: x.rect.map(Number) } :
+          { type: "add", polys: x.polys, dx: Number(x.dx) || 0, dy: Number(x.dy) || 0, s: Number(x.s) || 1 }));
+      }
+    }
     const L = p && p.letters;
     if (L && typeof L === "object") {
       for (const g in L) {
@@ -177,14 +193,14 @@
       chips.appendChild(b);
     });
     $("surprise").addEventListener("click", () => {
-      if (mode === "outline") ol = Object.assign(surpriseOutline(), { letters: ol.letters });
+      if (mode === "outline") ol = Object.assign(surpriseOutline(), { letters: ol.letters, points: ol.points, parts: ol.parts });
       else prm = Object.assign(surprise(), { base: prm.base, edits: prm.edits, hand: prm.hand });
       markPreset(null);
       syncControls();
       changed();
     });
     $("reset").addEventListener("click", () => {
-      if (mode === "outline") ol = Object.assign(olDefaults(), { letters: ol.letters });
+      if (mode === "outline") ol = Object.assign(olDefaults(), { letters: ol.letters, points: ol.points, parts: ol.parts });
       else prm = Object.assign({}, D, setDefaults(prm.base), { base: prm.base, edits: prm.edits, hand: prm.hand });
       markPreset(null);
       syncControls();
@@ -412,6 +428,7 @@
     svg.addEventListener("pointercancel", endDrag);
     svg.addEventListener("pointerleave", () => { if (!drag) showPart(null); });
     $("ed-undo").addEventListener("click", () => {
+      if (mode === "outline") { olUndoLast(); return; }
       if (!undo.length) return;
       const u = JSON.parse(undo.pop());
       prm.edits = u.edits;
@@ -421,7 +438,12 @@
     $("ed-reset").addEventListener("click", () => {
       if (mode === "outline") {
         const g = glyphOf(charOf(current));
-        if (g && ol.letters[g]) { delete ol.letters[g]; changed(); }
+        if (g && (ol.letters[g] || ol.points[g] || ol.parts[g])) {
+          olPush();
+          delete ol.letters[g]; delete ol.points[g]; delete ol.parts[g];
+          olSel.clear(); selPart = -1;
+          changed();
+        }
         return;
       }
       if (!prm.edits[current]) return;
@@ -433,7 +455,13 @@
     });
     $("ed-reset-all").addEventListener("click", () => {
       if (mode === "outline") {
-        if (Object.keys(ol.letters).length && confirm("להחזיר את כל האותיות שערכת לצורה של הגופן?")) { ol.letters = {}; changed(); }
+        if ((Object.keys(ol.letters).length || Object.keys(ol.points).length || Object.keys(ol.parts).length) &&
+          confirm("להחזיר את כל האותיות שערכת לצורה של הגופן?")) {
+          olPush();
+          ol.letters = {}; ol.points = {}; ol.parts = {};
+          olSel.clear(); selPart = -1;
+          changed();
+        }
         return;
       }
       if (!Object.keys(prm.edits).length) return;
@@ -458,7 +486,7 @@
 
   function select(name) {
     current = name;
-    if (mode === "outline") { drawOutlineEditor(); return; }
+    if (mode === "outline") { olSel.clear(); selPart = -1; borrow.letterSet = false; borrow.rect = null; drawOutlineEditor(); return; }
     variants = makeVariants(false);
     drawEditor();
   }
@@ -913,9 +941,14 @@
     $("status").textContent = "טוען את " + f.name + "…";
     try {
       const buf = await FontMaker.libraryFile(f.file);
+      // on the first load the saved hand edits are for this font; after that, another font drops them
+      const hadModel = !!model;
+      const fresh = hadModel && (!model.meta.library || model.meta.library.id !== f.id);
+      if (fresh && (Object.keys(ol.points).length || Object.keys(ol.parts).length) && model &&
+        !confirm("לעבור לגופן אחר? הנקודות שהזזת והחלקים שהוספת שייכים לגופן הזה, והם יימחקו.")) { afterFont(); return; }
       model = FontMaker.Outline.load(buf, { library: f });
       src = { id: f.id };
-      dropMissingLetters();
+      dropMissingLetters(fresh);
       $("status").textContent = "";
     } catch (e) {
       $("status").textContent = "לא הצלחתי לטעון את הגופן: " + e.message;
@@ -935,7 +968,7 @@
       }
       model = m;
       src = { file: file.name };
-      dropMissingLetters();
+      dropMissingLetters(true);
       $("status").textContent = "הגופן נטען: " + file.name;
     } catch (e) {
       $("status").textContent = "לא הצלחתי לקרוא את הקובץ (צריך TTF, OTF או WOFF): " + e.message;
@@ -943,8 +976,10 @@
     afterFont();
   }
 
-  function dropMissingLetters() {
+  // Hand edits belong to the glyphs of one font; another font starts without them.
+  function dropMissingLetters(newFont) {
     for (const g in ol.letters) if (!model.glyphs.some((x) => x.name === g)) delete ol.letters[g];
+    if (newFont) { ol.points = {}; ol.parts = {}; olStack.length = 0; }
   }
 
   // What license the font has, from the library or from the font itself.
@@ -1006,18 +1041,19 @@
     document.querySelectorAll("#letters button").forEach((b) => {
       const g = glyphOf(charOf(b.dataset.name));
       b.classList.toggle("on", b.dataset.name === current);
-      b.classList.toggle("edited", !!(g && ol.letters[g]));
-      b.classList.toggle("hand", !!(g && ol.letters[g]));
+      const ed = !!(g && (ol.letters[g] || ol.points[g] || ol.parts[g]));
+      b.classList.toggle("edited", ed);
+      b.classList.toggle("hand", ed);
       b.disabled = !g;
     });
     const box = $("ol-letter");
     const ch = charOf(current);
     const g = glyphOf(ch);
-    if (!g) { box.textContent = model ? "האות הזו לא נמצאת בגופן." : ""; return; }
+    if (!g) { box.textContent = model ? "האות הזו לא נמצאת בגופן." : ""; $("ol-svg").textContent = ""; return; }
     const L = ol.letters[g] || {};
     if (box.dataset.for !== g) {
       box.dataset.for = g;
-      box.innerHTML = `<p class="ol-cur pv">${ch}</p>` + LETTER_KEYS.map((k) => `<div class="slider"><label class="lbl" for="l-${k.key}"><span>${k.label}</span><span class="val" id="lv-${k.key}"></span></label>
+      box.innerHTML = LETTER_KEYS.map((k) => `<div class="slider"><label class="lbl" for="l-${k.key}"><span>${k.label}</span><span class="val" id="lv-${k.key}"></span></label>
         <input type="range" id="l-${k.key}" min="${k.min}" max="${k.max}" step="0.01"></div>`).join("");
       for (const k of LETTER_KEYS) {
         $("l-" + k.key).addEventListener("input", (ev) => {
@@ -1028,6 +1064,7 @@
           if (!Object.keys(e).length) delete ol.letters[g];
           changed();
         });
+        $("l-" + k.key).addEventListener("pointerdown", olPush);
       }
     }
     for (const k of LETTER_KEYS) {
@@ -1035,6 +1072,8 @@
       $("l-" + k.key).value = v;
       $("lv-" + k.key).textContent = k.fmt(v);
     }
+    drawOutlineSVG();
+    drawBorrow();
     // the letter among others, in the preview font
     const words = ($("ed-words").value || "").trim();
     const line = $("ol-line");
@@ -1051,6 +1090,454 @@
     }
   }
 
+  // ---- dragging points of a letter of an existing font, cutting areas, taking parts
+
+  const olSel = new Set();        // selected points ("contour.segment", ".a", ".b")
+  let selPart = -1, olDrag = null, olTool = "move", olView = null;
+  const olStack = [];             // undo: the hand edits before each change
+  const borrowModels = {};        // fonts parts are taken from, by library id
+  let borrow = { id: null, letter: null, rect: null, drag: null };
+
+  function olPush() {
+    olStack.push(JSON.stringify({ letters: ol.letters, points: ol.points, parts: ol.parts }));
+    if (olStack.length > 80) olStack.shift();
+  }
+
+  function olUndoLast() {
+    if (!olStack.length) return;
+    const u = JSON.parse(olStack.pop());
+    ol.letters = u.letters; ol.points = u.points; ol.parts = u.parts;
+    olSel.clear(); selPart = -1;
+    changed();
+  }
+
+  const curGlyph = () => {
+    const ch = charOf(current);
+    const i = model && model.byChar[ch.codePointAt(0)];
+    return i === undefined || i === null ? -1 : i;
+  };
+
+  function svgPoint(svg, ev) {
+    const pt = svg.createSVGPoint();
+    pt.x = ev.clientX;
+    pt.y = ev.clientY;
+    const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return [q.x, -q.y];
+  }
+
+  function pathOf(contours) {
+    let d = "";
+    for (const c of contours) {
+      if (!c.length) continue;
+      d += `M${c[0][0][0]} ${-c[0][0][1]}`;
+      for (const s of c) d += `C${s[1][0]} ${-s[1][1]} ${s[2][0]} ${-s[2][1]} ${s[3][0]} ${-s[3][1]}`;
+      d += "Z";
+    }
+    return d;
+  }
+
+  function polyPath(polys) {
+    return polys.map((p) => "M" + p.map((q) => q[0] + " " + -q[1]).join("L") + "Z").join("");
+  }
+
+  function insidePoly(polys, x, y) {
+    let inside = false;
+    for (const p of polys) {
+      for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+        if ((p[i][1] > y) !== (p[j][1] > y) && x < ((p[j][0] - p[i][0]) * (y - p[i][1])) / (p[j][1] - p[i][1]) + p[i][0]) inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  function drawOutlineSVG() {
+    const svg = $("ol-svg");
+    const gi = curGlyph();
+    if (!model || gi < 0) { svg.textContent = ""; return; }
+    const gname = model.glyphs[gi].name;
+    const v = FontMaker.Outline.editView(model, ol, gi);
+    olView = v;
+    const mv = v.move;
+    const H = model.H, upm = model.upm;
+    // guides: the line, the top of the letters, and how far letters go below and above
+    const qof = model.byChar[0x5e7], lamed = model.byChar[0x5dc];
+    const bbQ = qof !== undefined && FontMaker.Outline.bbox(model.glyphs[qof].contours);
+    const bbL = lamed !== undefined && FontMaker.Outline.bbox(model.glyphs[lamed].contours);
+    const lines = [[0, "main"], [H, "main"], [bbQ ? bbQ.y0 : -H * 0.4, ""], [bbL ? bbL.y1 : H * 1.4, ""]].map(([y, c]) => [mv([0, y])[1], c]);
+    let top = Math.max(...lines.map((l) => l[0])) + upm * 0.08, bottom = Math.min(...lines.map((l) => l[0])) - upm * 0.08;
+    let lo = 0, hi = v.t.advance || H;
+    for (const p of v.points) { const q = mv([p.x, p.y]); lo = Math.min(lo, q[0]); hi = Math.max(hi, q[0]); top = Math.max(top, q[1] + 40); bottom = Math.min(bottom, q[1] - 40); }
+    let w = Math.max(hi - lo, H * 1.2) + upm * 0.16, x0 = (lo + hi) / 2 - w / 2;
+    if (olDrag && olDrag.view) [x0, top, w, bottom] = olDrag.view;
+    svg.setAttribute("viewBox", `${x0} ${-top} ${w} ${top - bottom}`);
+    svg.textContent = "";
+    const upp = (top - bottom) / (svg.clientHeight || 440);
+    v.upp = upp;
+    v.view = [x0, top, w, bottom];
+    v.snapY = lines.map((l) => l[0]);
+    for (const [y, c] of lines) el("line", { x1: x0, x2: x0 + w, y1: -y, y2: -y, class: "guide " + c }, svg);
+    el("line", { x1: 0, x2: 0, y1: -top, y2: -bottom, class: "guide" }, svg);
+    if (v.t.advance) el("line", { x1: v.t.advance, x2: v.t.advance, y1: -top, y2: -bottom, class: "guide" }, svg);
+    el("path", { d: pathOf(v.final), class: "ink", "fill-rule": "nonzero" }, svg);
+    // the parts taken from other letters, and the areas cut away
+    const parts = ol.parts[gname] || [];
+    parts.forEach((p, i) => {
+      if (p.type === "add") {
+        el("path", { d: polyPath(v.parts[i].map((poly) => poly.map(mv))), class: "piece" + (i === selPart ? " sel" : ""), "fill-rule": "nonzero" }, svg);
+      } else {
+        const [a, b, c, d] = p.rect;
+        const q = [[a, b], [c, b], [c, d], [a, d]].map(mv);
+        el("path", { d: "M" + q.map((z) => z[0] + " " + -z[1]).join("L") + "Z", class: "cutzone" + (i === selPart ? " sel" : "") }, svg);
+      }
+    });
+    el("path", { d: pathOf(v.edited.map((c) => c.map((s) => s.map(mv)))), class: "line" }, svg);
+    if (olDrag && olDrag.snapped) {
+      const [sx, sy] = olDrag.snapped;
+      if (sy !== null) el("line", { x1: x0, x2: x0 + w, y1: -sy, y2: -sy, class: "snap" }, svg);
+      if (sx !== null) el("line", { x1: sx, x2: sx, y1: -top, y2: -bottom, class: "snap" }, svg);
+    }
+    for (const p of v.points) {
+      if (p.on) continue;
+      const a = mv(p.to), b = mv([p.x, p.y]);
+      el("line", { x1: a[0], y1: -a[1], x2: b[0], y2: -b[1], class: "arm" }, svg);
+    }
+    for (const p of v.points) {
+      const q = mv([p.x, p.y]);
+      const sel = olSel.has(p.id) ? " sel" : "";
+      if (p.on) el("circle", { cx: q[0], cy: -q[1], r: 5 * upp, class: "pt" + sel }, svg);
+      else el("rect", { x: q[0] - 3.5 * upp, y: -q[1] - 3.5 * upp, width: 7 * upp, height: 7 * upp, class: "pt off" + sel }, svg);
+    }
+    if (olDrag && olDrag.band) {
+      const [a, b] = olDrag.band;
+      el("rect", { x: Math.min(a[0], b[0]), y: -Math.max(a[1], b[1]), width: Math.abs(a[0] - b[0]), height: Math.abs(a[1] - b[1]), class: "band" + (olDrag.kind === "cut" ? " cut" : "") }, svg);
+    }
+    // the controls of the selected part
+    const ctl = $("ol-part-ctl");
+    const sp = parts[selPart];
+    ctl.classList.toggle("hidden", !sp);
+    if (sp) {
+      $("ol-part-s").disabled = sp.type !== "add";
+      $("ol-part-s").value = sp.s || 1;
+      $("ol-part-v").textContent = sp.type === "add" ? Math.round((sp.s || 1) * 100) + "%" : "אזור מחוק";
+    }
+    $("ol-hint").textContent = olTool === "cut" ? "גוררים מלבן על האזור שרוצים למחוק מהאות." :
+      olSel.size ? `${olSel.size} נקודות מסומנות — גוררים אחת מהן כדי להזיז את כולן.` :
+      sp ? "החלק מסומן: גוררים אותו כדי להזיז, משנים את הגודל למטה." : "לוחצים על נקודה וגוררים, או גוררים מלבן כדי לסמן כמה נקודות.";
+  }
+
+  function olPick(x, y) {
+    const v = olView;
+    let best = null, bd = Infinity;
+    for (const p of v.points) {
+      const q = v.move([p.x, p.y]);
+      const d = Math.hypot(q[0] - x, q[1] - y) + (p.on ? 0 : 3 * v.upp);
+      if (d < bd) { bd = d; best = p; }
+    }
+    return bd < 12 * v.upp ? best : null;
+  }
+
+  function olPartAt(x, y) {
+    const gname = model.glyphs[curGlyph()].name;
+    const parts = ol.parts[gname] || [];
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      if (p.type === "add" && insidePoly(olView.parts[i].map((poly) => poly.map(olView.move)), x, y)) return i;
+      if (p.type === "cut") {
+        const [a, b, c, d] = p.rect;
+        if (insidePoly([[[a, b], [c, b], [c, d], [a, d]].map(olView.move)], x, y)) return i;
+      }
+    }
+    return -1;
+  }
+
+  function olDown(ev) {
+    if (!olView) return;
+    const svg = $("ol-svg");
+    svg.focus();
+    const [x, y] = svgPoint(svg, ev);
+    const gname = model.glyphs[curGlyph()].name;
+    svg.setPointerCapture(ev.pointerId);
+    if (olTool === "cut") {
+      olDrag = { kind: "cut", band: [[x, y], [x, y]], view: olView.view };
+      return;
+    }
+    const p = olPick(x, y);
+    if (p) {
+      if (ev.shiftKey) { if (olSel.has(p.id)) olSel.delete(p.id); else olSel.add(p.id); }
+      else if (!olSel.has(p.id)) { olSel.clear(); olSel.add(p.id); }
+      selPart = -1;
+      olPush();
+      const ed = (ol.points[gname] = ol.points[gname] || {});
+      const ids = [...olSel];
+      olDrag = {
+        kind: "points", from: [x, y], ids, base: ids.map((id) => (ed[id] || [0, 0]).slice()),
+        p0: olView.move([p.x, p.y]), view: olView.view, snapped: null,
+        others: olView.points.filter((q) => q.on && !olSel.has(q.id)).map((q) => olView.move([q.x, q.y])[0]),
+      };
+      drawOutlineSVG();
+      return;
+    }
+    const pi = olPartAt(x, y);
+    if (pi >= 0) {
+      selPart = pi;
+      olSel.clear();
+      const part = ol.parts[gname][pi];
+      olPush();
+      olDrag = { kind: "part", from: [x, y], base: [part.dx || 0, part.dy || 0], view: olView.view };
+      drawOutlineSVG();
+      return;
+    }
+    if (!ev.shiftKey) olSel.clear();
+    selPart = -1;
+    olDrag = { kind: "band", band: [[x, y], [x, y]], view: olView.view };
+    drawOutlineSVG();
+  }
+
+  function olMove(ev) {
+    if (!olDrag) return;
+    const svg = $("ol-svg");
+    const [x, y] = svgPoint(svg, ev);
+    const gname = model.glyphs[curGlyph()].name;
+    if (olDrag.band) {
+      olDrag.band[1] = [x, y];
+    } else {
+      let Dx = x - olDrag.from[0], Dy = y - olDrag.from[1];
+      if (ev.shiftKey) { if (Math.abs(Dx) > Math.abs(Dy)) Dy = 0; else Dx = 0; }
+      let sx = null, sy = null;
+      if (olDrag.kind === "points" && $("ol-snap").checked) {
+        const near = 8 * olView.upp;
+        for (const ly of olView.snapY) if (Math.abs(olDrag.p0[1] + Dy - ly) < near) { Dy = ly - olDrag.p0[1]; sy = ly; break; }
+        for (const lx of olDrag.others) if (Math.abs(olDrag.p0[0] + Dx - lx) < near) { Dx = lx - olDrag.p0[0]; sx = lx; break; }
+      }
+      olDrag.snapped = [sx, sy];
+      const [dx, dy] = olView.unmove(Dx, Dy);
+      if (olDrag.kind === "points") {
+        const ed = ol.points[gname];
+        olDrag.ids.forEach((id, i) => { ed[id] = [Math.round(olDrag.base[i][0] + dx), Math.round(olDrag.base[i][1] + dy)]; });
+      } else if (olDrag.kind === "part") {
+        const part = ol.parts[gname][selPart];
+        part.dx = Math.round(olDrag.base[0] + dx);
+        part.dy = Math.round(olDrag.base[1] + dy);
+      }
+    }
+    if (!olDrag.frame) olDrag.frame = requestAnimationFrame(() => { if (olDrag) olDrag.frame = 0; drawOutlineSVG(); });
+  }
+
+  function olUp() {
+    if (!olDrag) return;
+    const d = olDrag;
+    olDrag = null;
+    const gname = model.glyphs[curGlyph()].name;
+    if (d.kind === "band") {
+      const [a, b] = d.band;
+      const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+      for (const p of olView.points) {
+        const q = olView.move([p.x, p.y]);
+        if (q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1) olSel.add(p.id);
+      }
+      drawOutlineSVG();
+      return;
+    }
+    if (d.kind === "cut") {
+      const [a, b] = d.band;
+      if (Math.abs(a[0] - b[0]) < 6 * olView.upp || Math.abs(a[1] - b[1]) < 6 * olView.upp) { drawOutlineSVG(); return; }
+      // the corners in the font before its changes
+      const t = olView.t;
+      const back = (q) => { const yy = (q[1] - t.dy) / t.sy; return [(q[0] - t.dx - q[1] * t.k) / t.sx, yy]; };
+      const cs = [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]].map(back);
+      const rect = [Math.min(...cs.map((c) => c[0])), Math.min(...cs.map((c) => c[1])), Math.max(...cs.map((c) => c[0])), Math.max(...cs.map((c) => c[1]))].map(Math.round);
+      olPush();
+      (ol.parts[gname] = ol.parts[gname] || []).push({ type: "cut", rect });
+      selPart = ol.parts[gname].length - 1;
+      changed();
+      return;
+    }
+    if (d.kind === "points") {
+      const ed = ol.points[gname];
+      for (const k in ed) if (!ed[k][0] && !ed[k][1]) delete ed[k];
+      if (!Object.keys(ed).length) delete ol.points[gname];
+    }
+    changed();
+  }
+
+  function olKey(ev) {
+    if (!olView || mode !== "outline") return;
+    const gname = model.glyphs[curGlyph()].name;
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") { ev.preventDefault(); olUndoLast(); return; }
+    if ((ev.key === "Delete" || ev.key === "Backspace") && selPart >= 0) {
+      ev.preventDefault();
+      olPush();
+      ol.parts[gname].splice(selPart, 1);
+      if (!ol.parts[gname].length) delete ol.parts[gname];
+      selPart = -1;
+      changed();
+      return;
+    }
+    if (ev.key === "Escape") { olSel.clear(); selPart = -1; drawOutlineSVG(); return; }
+    const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    if (arrows[ev.key] && (olSel.size || selPart >= 0)) {
+      ev.preventDefault();
+      const step = (ev.shiftKey ? 20 : 4) * model.upm / 1000;
+      const [dx, dy] = olView.unmove(arrows[ev.key][0] * step, arrows[ev.key][1] * step);
+      olPush();
+      if (selPart >= 0) {
+        const p = ol.parts[gname][selPart];
+        if (p.type === "add") { p.dx = Math.round((p.dx || 0) + dx); p.dy = Math.round((p.dy || 0) + dy); }
+      } else {
+        const ed = (ol.points[gname] = ol.points[gname] || {});
+        for (const id of olSel) { const e = ed[id] || [0, 0]; ed[id] = [Math.round(e[0] + dx), Math.round(e[1] + dy)]; }
+      }
+      changed();
+    }
+  }
+
+  // ---- the letter parts are taken from
+
+  async function borrowModel(id) {
+    if (id === "self") return model;
+    if (!borrowModels[id]) {
+      const f = FontMaker.library.find((x) => x.id === id);
+      borrowModels[id] = FontMaker.Outline.load(await FontMaker.libraryFile(f.file), { library: f });
+    }
+    return borrowModels[id];
+  }
+
+  function buildBorrow() {
+    const fs = $("bor-font");
+    const o0 = document.createElement("option");
+    o0.value = "self";
+    o0.textContent = "הגופן שאני עורך (אות אחרת)";
+    fs.appendChild(o0);
+    for (const f of FontMaker.library) {
+      const o = document.createElement("option");
+      o.value = f.id;
+      o.textContent = f.name;
+      fs.appendChild(o);
+    }
+    fs.value = "notoserif";
+    const ls = $("bor-letter");
+    for (const ch of "אבגדהוזחטיכךלמםנןסעפףצץקרשת") {
+      const o = document.createElement("option");
+      o.value = ch;
+      o.textContent = ch;
+      ls.appendChild(o);
+    }
+    fs.addEventListener("change", () => { borrow.rect = null; drawBorrow(); });
+    ls.addEventListener("change", () => { borrow.rect = null; borrow.letterSet = true; drawBorrow(); });
+    const svg = $("bor-svg");
+    svg.addEventListener("pointerdown", (ev) => {
+      if (!borrow.view) return;
+      svg.setPointerCapture(ev.pointerId);
+      const p = svgPoint(svg, ev);
+      borrow.drag = [p, p];
+      drawBorrowRect();
+    });
+    svg.addEventListener("pointermove", (ev) => {
+      if (!borrow.drag) return;
+      borrow.drag[1] = svgPoint(svg, ev);
+      drawBorrowRect();
+    });
+    const up = () => {
+      if (!borrow.drag) return;
+      const [a, b] = borrow.drag;
+      borrow.drag = null;
+      const k = borrow.view.k;
+      borrow.rect = Math.abs(a[0] - b[0]) > 4 && Math.abs(a[1] - b[1]) > 4 ?
+        [Math.min(a[0], b[0]) / k, Math.min(a[1], b[1]) / k, Math.max(a[0], b[0]) / k, Math.max(a[1], b[1]) / k] : null;
+      drawBorrowRect();
+    };
+    svg.addEventListener("pointerup", up);
+    svg.addEventListener("pointercancel", up);
+    $("bor-add").addEventListener("click", addBorrowed);
+  }
+
+  async function drawBorrow() {
+    if (!model) return;
+    const svg = $("bor-svg");
+    if (!borrow.letterSet) $("bor-letter").value = charOf(current) || "א";
+    const id = $("bor-font").value, ch = $("bor-letter").value;
+    let bm;
+    try { bm = await borrowModel(id); } catch (e) { svg.textContent = ""; return; }
+    const gi = bm.byChar[ch.codePointAt(0)];
+    if (gi === undefined) { svg.textContent = ""; borrow.view = null; return; }
+    // shown at the size of the letters of my font
+    const k = model.H / bm.H;
+    const contours = bm.glyphs[gi].contours.map((c) => c.map((s) => s.map((p) => [p[0] * k, p[1] * k])));
+    const bb = FontMaker.Outline.bbox(contours) || { x0: 0, x1: model.H, y0: 0, y1: model.H };
+    const pad = model.H * 0.15;
+    const top = Math.max(bb.y1, model.H) + pad, bottom = Math.min(bb.y0, 0) - pad;
+    const x0 = bb.x0 - pad, w = Math.max(bb.x1 - bb.x0 + 2 * pad, (top - bottom) * 1.2);
+    svg.setAttribute("viewBox", `${x0 - (w - (bb.x1 - bb.x0 + 2 * pad)) / 2} ${-top} ${w} ${top - bottom}`);
+    borrow.view = { k, gi, bm, contours };
+    svg.textContent = "";
+    el("line", { x1: -10000, x2: 10000, y1: 0, y2: 0, class: "guide" }, svg);
+    el("path", { d: pathOf(contours), class: "ink", "fill-rule": "nonzero" }, svg);
+    borrow.rectEl = el("rect", { class: "band hidden" }, svg);
+    drawBorrowRect();
+  }
+
+  function drawBorrowRect() {
+    const r = borrow.rectEl;
+    if (!r) return;
+    const k = borrow.view ? borrow.view.k : 1;
+    let a, b;
+    if (borrow.drag) [a, b] = borrow.drag;
+    else if (borrow.rect) { a = [borrow.rect[0] * k, borrow.rect[1] * k]; b = [borrow.rect[2] * k, borrow.rect[3] * k]; }
+    r.classList.toggle("hidden", !a);
+    $("bor-add").disabled = !borrow.rect;
+    if (!a) return;
+    r.setAttribute("x", Math.min(a[0], b[0]));
+    r.setAttribute("y", -Math.max(a[1], b[1]));
+    r.setAttribute("width", Math.abs(a[0] - b[0]));
+    r.setAttribute("height", Math.abs(a[1] - b[1]));
+  }
+
+  function addBorrowed() {
+    const gi = curGlyph();
+    if (!borrow.rect || !borrow.view || gi < 0) return;
+    const { bm, k } = borrow.view;
+    const src = FontMaker.Outline.editedContours(bm, bm === model ? ol : {}, borrow.view.gi, false);
+    let polys = FontMaker.Outline.cutOut(src, borrow.rect);
+    if (!polys.length) { $("ol-hint").textContent = "במלבן שסימנת אין חלק מהאות. סמן מלבן שעובר על הקווים."; return; }
+    polys = polys.map((p) => p.map((q) => [Math.round(q[0] * k), Math.round(q[1] * k)]));
+    const gname = model.glyphs[gi].name;
+    olPush();
+    (ol.parts[gname] = ol.parts[gname] || []).push({ type: "add", polys, dx: 0, dy: 0, s: 1 });
+    selPart = ol.parts[gname].length - 1;
+    olSel.clear();
+    changed();
+    $("ol-svg").scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function buildOutlineEditor() {
+    const svg = $("ol-svg");
+    svg.addEventListener("pointerdown", olDown);
+    svg.addEventListener("pointermove", olMove);
+    svg.addEventListener("pointerup", olUp);
+    svg.addEventListener("pointercancel", olUp);
+    svg.addEventListener("keydown", olKey);
+    document.querySelectorAll("input[name=oltool]").forEach((r) => r.addEventListener("change", () => {
+      olTool = r.value;
+      drawOutlineSVG();
+    }));
+    $("ol-part-s").addEventListener("pointerdown", olPush);
+    $("ol-part-s").addEventListener("input", () => {
+      const gname = model.glyphs[curGlyph()].name;
+      const p = (ol.parts[gname] || [])[selPart];
+      if (p && p.type === "add") { p.s = Number($("ol-part-s").value); changed(); }
+    });
+    $("ol-part-del").addEventListener("click", () => {
+      const gname = model.glyphs[curGlyph()].name;
+      if (!ol.parts[gname] || selPart < 0) return;
+      olPush();
+      ol.parts[gname].splice(selPart, 1);
+      if (!ol.parts[gname].length) delete ol.parts[gname];
+      selPart = -1;
+      changed();
+    });
+    buildBorrow();
+  }
+
   // ---------------------------------------------------------------- asking in words
 
   const KEY_STORE = "font-maker-ai-key";
@@ -1065,8 +1552,9 @@
       }).join("; ");
       return {
         about: `The font is based on the existing font "${model ? model.names.family : ""}". The settings change it; at their neutral values it is the original font.`,
-        keys: OUTLINE_SLIDERS.map((k) => ({ key: k.key, label: k.label, min: k.min, max: k.max, step: k.aiStep, value: ol[k.key], about: k.about })),
-        letterKeys: LETTER_KEYS.map((k) => ({ key: k.key, label: k.label, min: k.min, max: k.max, step: k.step, base: k.base, about: k.about })),
+        keys: OUTLINE_SLIDERS.map((k) => ({ key: k.key, label: k.label, fmt: k.fmt, min: k.min, max: k.max, step: k.aiStep, value: ol[k.key], neutral: FontMaker.Outline.SETTINGS[k.key], about: k.about })),
+        letterKeys: LETTER_KEYS.map((k) => ({ key: k.key, label: k.label, fmt: k.fmt, min: k.min, max: k.max, step: k.step, base: k.base, about: k.about })),
+        fonts: FontMaker.library.map((f) => ({ id: f.id, name: f.name, family: f.file.replace(/[-.].*$/, "") })),
         letterValue: (L, key) => {
           const g = glyphOf(L);
           const k = LETTER_KEYS.find((x) => x.key === key);
@@ -1077,7 +1565,7 @@
     }
     return {
       about: "The letters are drawn by the program from a skeleton with a broad pen; the settings shape every letter.",
-      keys: SLIDERS.map((k) => ({ key: k.key, label: k.label, min: k.min, max: k.max, step: (k.max - k.min) / 6, value: prm[k.key], about: k.help || "" })),
+      keys: SLIDERS.map((k) => ({ key: k.key, label: k.label, fmt: k.fmt, min: k.min, max: k.max, step: (k.max - k.min) / 6, value: prm[k.key], neutral: D[k.key], about: k.help || "" })),
       letterKeys: null,
     };
   }
@@ -1107,10 +1595,15 @@
       const k = sliders().find((x) => x.key === c.key);
       if (k) parts.push(k.label + ": " + k.fmt(c.value));
     }
+    // one change of several letters is said once: "ך ן ף — אורך הזנב: 115%"
+    const same = new Map();
     for (const c of res.letters) {
       const k = LETTER_KEYS.find((x) => x.key === c.key);
-      if (k) parts.push(c.letter + " — " + k.label + ": " + k.fmt(c.value));
+      if (!k) continue;
+      const t = k.label + ": " + k.fmt(c.value);
+      same.set(t, (same.get(t) || []).concat(c.letter));
     }
+    for (const [t, ls] of same) parts.push(ls.join(" ") + " — " + t);
     return parts.join(" · ");
   }
 
@@ -1139,19 +1632,27 @@
       return;
     }
     $("ai-go").disabled = false;
-    if (!res.settings.length && !res.letters.length) {
+    if (res.undo) {
+      const last = $("ai-log").querySelector("li:not(.undone) button");
+      if (last) { last.click(); $("ai-msg").textContent = "ביטלתי את השינוי האחרון."; }
+      else $("ai-msg").textContent = "אין שינוי לבטל.";
+      $("ai-text").value = "";
+      return;
+    }
+    if (res.font && mode === "outline") await chooseFont(res.font.id);
+    if (!res.settings.length && !res.letters.length && !res.font) {
       $("ai-msg").textContent = res.explanation || "לא היה מה לשנות.";
       return;
     }
     olUndo.push(before);
     aiApply(res);
-    const done = describeChanges(res);
+    const done = (res.font ? "גופן: " + res.font.name + (res.settings.length || res.letters.length ? " · " : "") : "") + describeChanges(res);
     $("ai-msg").textContent = "";
     aiHistory.push({ text, explanation: res.explanation || done });
     const li = document.createElement("li");
     li.innerHTML = `<b></b><span></span><button type="button" class="btn ghost small">↶ ביטול</button>`;
     li.querySelector("b").textContent = text;
-    li.querySelector("span").textContent = (res.explanation ? res.explanation + " " : "") + "(" + done + ")";
+    li.querySelector("span").textContent = key && res.explanation ? res.explanation + " (" + done + ")" : done;
     li.querySelector("button").addEventListener("click", () => {
       ol = sanitizeOutline(JSON.parse(before.ol));
       prm = sanitize(JSON.parse(before.prm));
@@ -1172,7 +1673,7 @@
     $("ai-text").addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); aiGo(); }
     });
-    const sum = () => { $("ai-key-sum").textContent = $("ai-key").value.trim() ? "✓ Claude מחובר (מפתח API)" : "בינה מלאכותית (Claude): להבנה של כל בקשה"; };
+    const sum = () => { $("ai-key-sum").textContent = $("ai-key").value.trim() ? "✓ Claude מחובר (מפתח API)" : "רוצה שגם בקשות מסובכות יובנו? Claude (לא חובה)"; };
     $("ai-key").addEventListener("input", sum);
     sum();
   }
@@ -1283,6 +1784,7 @@
   buildBases();
   buildLibrary();
   buildAI();
+  buildOutlineEditor();
   load();
   buildEditor();
   markPreset(SLIDERS.every((s) => prm[s.key] === D[s.key]) ? 0 : null);

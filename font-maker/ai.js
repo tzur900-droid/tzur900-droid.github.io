@@ -1,85 +1,245 @@
-// Changing the font by asking in words. With an Anthropic API key, Claude reads the request and
-// answers with the new settings (through a tool whose input is the settings). Without a key,
-// simple requests are understood here: "עבה יותר", "צר מאוד", "האות ש רחבה יותר", "נטוי".
+// Changing the font by asking in words. The built-in assistant understands requests here, with no
+// key and no internet. With an Anthropic API key, Claude reads any request and answers with the new
+// settings (through a tool whose input is the settings).
 (function () {
   "use strict";
 
   const MODEL = "claude-opus-5-5";
 
-  // ---------------------------------------------------------------- simple requests, no key
+  // ---------------------------------------------------------------- the built-in assistant
+  //
+  // It runs here, without internet and without a key. It is not a language model: it knows the
+  // words people use for the shape of letters (in many forms: "עבה", "תעבה", "להעבות", "יותר עובי"),
+  // how much ("קצת", "מאוד", "ב־20%", "פי 2", "10 מעלות"), about what (the whole font, "האות ש",
+  // "הסופיות"), styles ("לכותרת", "לילדים", "אלגנטי"), going back ("תחזיר", "בטל"), and changing
+  // to another font of the library ("תחליף לחיבו"). It forgives small spelling mistakes.
 
-  const WORDS = [
-    { key: "weight", up: ["עבה", "עבות", "מודגש", "מודגשת", "כבד", "כבדה", "שמן", "שמנה", "בולט", "בולטת", "חזק"], down: ["דק", "דקה", "דקות", "רזה", "עדין", "עדינה", "קל", "קלה", "בהיר"] },
-    { key: "width", up: ["רחב", "רחבה", "רחבות", "רחבים"], down: ["צר", "צרה", "צרות", "צרים", "דחוס", "דחוסה"] },
-    { key: "height", up: ["גבוה", "גבוהה", "גבוהות", "גדול", "גדולה", "גדולות"], down: ["נמוך", "נמוכה", "נמוכות", "קטן", "קטנה", "קטנות"] },
-    { key: "slant", up: ["נטוי", "נטויה", "נטויות", "נוטה", "אלכסוני"], zero: ["ישר", "ישרה", "זקוף", "זקופה"] },
-    { key: "round", up: ["עגול", "עגולה", "עגולות", "מעוגל", "מעוגלת", "רך", "רכה"], down: ["חד", "חדה", "חדות", "מחודד"] },
-    { key: "spacing", up: ["מרווח", "מרווחת", "מרווחות", "פזור", "מפוזר", "אוורירי"], down: ["צפוף", "צפופה", "צפופות", "צמוד", "צמודה", "צמודות"] },
-    { key: "contrast", up: ["ניגודיות", "קונטרסט"], down: ["אחיד", "אחידה", "אחידות"] },
-    { key: "shift", up: ["למעלה"], down: ["למטה"], letterOnly: true },
+  // words for a setting and the way they push it: +1 more, -1 less, 0 back to normal
+  const LEX = [
+    ["weight", 1, "עבה עבות עבים עבי מעובה תעבה תעבי להעבות העבה מודגש מודגשת מודגשות בולד בולט בולטת כבד כבדה כבדות שמן שמנה שמנות חזק חזקה כהה כהות שחור עובי"],
+    ["weight", -1, "דק דקה דקות דקים תדק תדקק להדק רזה רזות תרזה עדין עדינה עדינות קל קלה קלות בהיר בהירה לייט אוורירי"],
+    ["width", 1, "רחב רחבה רחבות רחבים תרחיב תרחיבי להרחיב הרחב מורחב מורחבת רוחב"],
+    ["width", -1, "צר צרה צרות צרים תצר תצרי להצר דחוס דחוסה דחוסות תדחוס צפוף-אותיות מוצר"],
+    ["height", 1, "גבוה גבוהה גבוהות גבוהים תגביה להגביה גובה גדול גדולה גדולות"],
+    ["height", -1, "נמוך נמוכה נמוכות נמוכים תנמיך להנמיך קטן קטנה קטנות שטוח שטוחה"],
+    ["depth", 1, "ארוך ארוכה ארוכות ארוכים תאריך להאריך זנב זנבות"],
+    ["depth", -1, "קצר קצרה קצרות קצרים תקצר לקצר"],
+    ["slant", 1, "נטוי נטויה נטויות נוטה נוטות תטה להטות הטה אלכסוני אלכסונית איטלקי איטליק נטייה"],
+    ["slant", 0, "ישר ישרה ישרות זקוף זקופה זקופות עומד"],
+    ["round", 1, "עגול עגולה עגולות עגולים מעוגל מעוגלת מעוגלות תעגל לעגל רך רכה רכות רכים חמוד חמודה עיגול"],
+    ["round", -1, "חד חדה חדות חדים מחודד מחודדת תחדד לחדד מרובע מרובעת זוויתי"],
+    ["spacing", 1, "מרווח מרווחת מרווחות מרווחים פזור מפוזר תרווח לרווח ריווח רווח מפורד"],
+    ["spacing", -1, "צפוף צפופה צפופות צמוד צמודה צמודות תצופף תקרב לקרב צמודים"],
+    ["contrast", 1, "ניגודיות קונטרסט מנוגד"],
+    ["contrast", 0, "אחיד אחידה אחידות"],
+    ["shift", 1, "למעלה תעלה להעלות הרם"],
+    ["shift", -1, "למטה תוריד-אותה תנמיך-אותה"],
   ];
 
-  function hasWord(text, w) {
-    return new RegExp("(^|[^א-ת])(ו|ה|ש|ול|יותר )?" + w + "($|[^א-ת])").test(text);
+  const MORE = "יותר הגדל תגדיל להגדיל הוסף תוסיף להוסיף העלה תעלה להעלות הגבר תגביר להגביר";
+  const LESS = "פחות הקטן תקטין להקטין הורד תוריד להוריד הפחת תפחית להפחית צמצם תצמצם";
+  const NONE = "בלי ללא אפס תבטל לבטל";
+  const BACK = "תחזיר להחזיר החזר תחזירי איפוס אפס-הכל לאפס מקורי מקורית המקור כמקור רגיל רגילה";
+  const UNDO = ["תבטל את זה", "בטל את זה", "בטל את השינוי", "תבטל את השינוי", "אחורה", "חזור אחורה", "לא אהבתי", "תחזיר את מה שהיה"];
+
+  // styles: several settings at once, as a move of each (in steps)
+  const STYLES = [
+    ["כותרת כותרות לכותרת לכותרות לשלט שלט בולט-מאוד פוסטר", { weight: 2, spacing: -0.5 }],
+    ["ילדים לילדים ילדותי ילדותית שמח שמחה חמוד חמודה כיף מצחיק מצחיקה", { round: 2, weight: 1 }],
+    ["אלגנטי אלגנטית יוקרתי יוקרתית מעודן מעודנת חגיגי חגיגית", { weight: -1, spacing: 0.7, contrast: 1 }],
+    ["מודרני מודרנית נקי נקייה מינימליסטי מינימליסטית טכנולוגי", { contrast: -1, round: -1 }],
+    ["קלאסי קלאסית מסורתי מסורתית ספרותי ספרותית תורני ישן ישנה עתיק עתיקה", { contrast: 1.5 }],
+    ["רציני רצינית רשמי רשמית מכובד מכובדת", { round: -2, slant: -9 }],
+    ["כתב-יד בכתב-יד ידני ידנית זורם זורמת", { slant: 1, round: 1 }],
+    ["קריא קריאה נוח-לקריאה לקריאה לספר לטקסט", { spacing: 0.7, weight: 0.5 }],
+    ["חסכוני חסכונית לחסוך-מקום", { width: -1, spacing: -0.7 }],
+  ];
+
+  const GROUPS = [
+    [/(?:ה)?(?:אותיות\s+)?(?:ה)?סופיות/, "ךםןףץ"],
+    [/(?:ה)?אותיות\s+(?:ה)?יורדות|(?:ה)?זנבות/, "ךןףץק"],
+    [/בג"?ד\s*כפ"?ת/, "בגדכפת"],
+  ];
+  const PREFIXES = ["וכש", "וש", "וה", "וב", "ול", "וכ", "ומ", "שה", "שב", "של", "שכ", "כש", "מה", "לה", "בה", "ו", "ה", "ב", "ל", "כ", "מ", "ש"];
+
+  function levenshtein(a, b) {
+    if (Math.abs(a.length - b.length) > 1) return 9;
+    const d = [];
+    for (let i = 0; i <= a.length; i++) { d[i] = [i]; }
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    return d[a.length][b.length];
   }
 
-  // "האות ש", "את ה־ש", "האותיות ש ו־ל": the letters a request is about.
-  function lettersIn(text) {
-    const out = [];
-    const re = /(?:האותיות|האות|אות|אותיות|את ה[־-]?|ה[־-])\s*((?:[א-ת](?:[׳']|\s|,|ו[־-]?)*)+)/g;
-    let m;
-    while ((m = re.exec(text))) {
-      for (const ch of m[1].replace(/ו[־-]/g, " ").split(/[\s,]+/)) {
-        if (/^[א-ת]$/.test(ch)) out.push(ch);
-      }
+  const words = (list) => list.split(/\s+/).map((w) => w.replace(/-/g, " "));
+  const LEXW = LEX.map(([key, dir, list]) => ({ key, dir, words: words(list) }));
+  const STOP = new Set(words("את של הגופן גופן אותו אותה שיהיה שיהיו יותר פחות תעשה תעשי לעשות אני רוצה משהו מעלות אחוז האות האותיות אותיות קצת מאוד הרבה ממש בבקשה תודה כמו שזה עכשיו כל"));
+  const ALL = new Map();
+  LEXW.forEach((e) => e.words.forEach((w) => { if (!w.includes(" ")) ALL.set(w, e); }));
+
+  // the setting a word speaks of, from its own form, without its prefix, or with one mistake
+  function lookup(tok) {
+    const tries = [tok];
+    for (const p of PREFIXES) if (tok.startsWith(p) && tok.length - p.length >= 2) tries.push(tok.slice(p.length));
+    for (const t of tries) if (ALL.has(t)) return ALL.get(t);
+    // one spelling mistake, in a whole word that is not a common word
+    if (tok.length >= 4 && !STOP.has(tok)) {
+      for (const [w, e] of ALL) if (w.length >= 4 && levenshtein(tok, w) === 1) return e;
     }
+    return null;
+  }
+
+  const has = (text, list) => words(list).some((w) => new RegExp("(^|[^א-ת])(ו|ה|ש|ל|ב|כ|מ)?" + w + "($|[^א-ת])").test(text));
+
+  function clean(text) {
+    return " " + text.replace(/[֑-ׇ]/g, "").replace(/[״"]/g, '"').replace(/[׳']/g, "'").replace(/[־–—]/g, "-") + " ";
+  }
+
+  // "האות ש", "את ה-ש", "האותיות ש, ל ו-מ", "'ש'", "הסופיות": the letters a request is about
+  function lettersIn(t) {
+    const out = [];
+    for (const [re, letters] of GROUPS) if (re.test(t)) out.push(...letters);
+    const re = /(?:(?:^|\s)(?:האותיות|האות|אותיות|אות)\s+|של ה-|את ה-|ב-?ה-|(?:^|\s)ה-|ל-ה?-?)((?:[א-ת](?=[\s,'"-]|$)(?:['"]|\s|,|ו-?|-)*)+)/g;
+    let m;
+    while ((m = re.exec(t))) {
+      for (const ch of m[1].replace(/ו-?(?=[א-ת](?:[\s,'"]|$))/g, " ").split(/[\s,'"-]+/)) if (/^[א-ת]$/.test(ch)) out.push(ch);
+    }
+    const q = /'([א-ת])'/g;
+    while ((m = q.exec(t))) out.push(m[1]);
     return [...new Set(out)];
   }
 
-  // ctx: {keys: [{key, min, max, step, value}], letterKeys: [{key, min, max, step}] | null,
-  //       letterValue(letter, key)}
+  // how much: a word, a number of percents, times, or degrees
+  function amountIn(t) {
+    const r = { times: 1, percent: null, factor: null, degrees: null, max: false };
+    if (/מאוד|הרבה|ממש|בהרבה|לגמרי|משמעותית|חזק/.test(t)) r.times = 2;
+    if (/קצת|מעט|טיפה|קצת-יותר|במעט|קצת יותר/.test(t)) r.times = 0.5;
+    if (/הכי|מקסימום|מקסימלי|עד הסוף/.test(t)) r.max = true;
+    let m = t.match(/(\d+(?:\.\d+)?)\s*(?:%|אחוז)/);
+    if (m) r.percent = Number(m[1]);
+    m = t.match(/פי\s*(\d+(?:\.\d+)?)/);
+    if (m) r.factor = Number(m[1]);
+    if (/בחצי|לחצי|חצי/.test(t)) r.factor = r.factor || 0.5;
+    m = t.match(/(\d+(?:\.\d+)?)\s*מעלות/);
+    if (m) r.degrees = Number(m[1]);
+    return r;
+  }
+
+  function fontIn(t, fonts) {
+    if (!fonts || !/תחליף|תעבור|החלף|לעבור|מבוסס|גופן\s|תתחיל|כמו\s/.test(t)) return null;
+    let best = null;
+    for (const f of fonts) {
+      for (const n of [f.name, f.id, f.family].filter(Boolean)) {
+        const nn = String(n).replace(/[״"]/g, "").toLowerCase();
+        const tt = t.replace(/[״"]/g, "").toLowerCase();
+        if (nn.length >= 2 && tt.includes(nn) && (!best || nn.length > best.len)) best = { id: f.id, name: f.name, len: nn.length };
+        const first = nn.split(/[\s-]/)[0];
+        if (!best && first.length >= 3 && tt.includes(first)) best = { id: f.id, name: f.name, len: first.length };
+      }
+    }
+    return best;
+  }
+
+  // ctx: {keys: [{key, label, min, max, step, value, neutral}], letterKeys: [{key, label, min, max, step, base}] | null,
+  //       letterValue(letter, key), fonts: [{id, name, family}]}
   function simple(text, ctx) {
-    // each part of the request on its own: "עבה יותר, והאות ש רחבה" is two changes
-    const parts = text.split(/[,.;!?\n]+| ו(?=(?:האות|האותיות|את ה|ה[־-]))/).filter((p) => p.trim());
-    const out = { settings: [], letters: [], explanation: "" };
-    for (const p of parts) {
-      const r = simplePart(p, ctx);
-      out.settings.push(...r.settings);
-      out.letters.push(...r.letters);
-    }
-    if (!out.settings.length && !out.letters.length) {
-      out.explanation = "לא הבנתי מה לשנות. אפשר לכתוב למשל: \"עבה יותר\", \"צר מאוד\", \"נטוי\", \"עגול יותר\", \"האות ש רחבה יותר\". עם מפתח API אפשר לכתוב כל בקשה במילים חופשיות.";
-    }
+    const out = { settings: [], letters: [], explanation: "", font: null, undo: false };
+    const all = clean(text);
+    if (UNDO.some((u) => all.includes(u))) { out.undo = true; out.explanation = "מבטל את השינוי האחרון."; return out; }
+    const font = fontIn(all, ctx.fonts);
+    if (font) out.font = font;
+    // each part on its own: "עבה יותר, והאות ש רחבה" is two changes
+    const parts = all.split(/[,.;!?\n]+| ו(?=(?:האות|האותיות|את ה|ה-|הסופיות))| אבל /).filter((p) => p.trim());
+    const set = {}, lset = {};
+    for (const p of parts) part(clean(p), ctx, set, lset);
+    for (const k in set) out.settings.push({ key: k, value: set[k] });
+    for (const id in lset) { const [letter, key] = id.split("|"); out.letters.push({ letter, key, value: lset[id] }); }
+    if (!out.settings.length && !out.letters.length && !out.font) {
+      out.explanation = "לא הבנתי מה לשנות. אפשר לכתוב למשל: \"עבה יותר\", \"צר קצת\", \"נטוי ב-10 מעלות\", \"עגול מאוד\", " +
+        "\"האות ש רחבה יותר\", \"הסופיות ארוכות יותר\", \"תעשה אותו מתאים לכותרת\", \"תחזיר את הרוחב\", \"תחליף לחיבו\".";
+    } else out.explanation = "הבנתי: " + understood(out, ctx);
     return out;
   }
 
-  function simplePart(text, ctx) {
-    const t = " " + text + " ";
-    const amount = /מאוד|הרבה|ממש|לגמרי/.test(t) ? 2 : /קצת|מעט|טיפה|קצת יותר/.test(t) ? 0.5 : 1;
-    const less = /פחות/.test(t) ? -1 : 1;
-    const letters = ctx.letterKeys ? lettersIn(t) : [];
-    const settings = [], letterChanges = [];
-    for (const w of WORDS) {
-      let dir = 0;
-      if (w.up.some((x) => hasWord(t, x))) dir = 1;
-      if (w.down && w.down.some((x) => hasWord(t, x))) dir = -1;
-      const zero = w.zero && w.zero.some((x) => hasWord(t, x));
-      if (!dir && !zero) continue;
-      dir *= less;
-      if (letters.length && ctx.letterKeys) {
-        const lk = ctx.letterKeys.find((k) => k.key === w.key);
+  function part(t, ctx, set, lset) {
+    const amt = amountIn(t);
+    const more = has(t, MORE), less = has(t, LESS), none = has(t, NONE), back = has(t, BACK);
+    let letters = ctx.letterKeys ? lettersIn(t) : [];
+    const found = [];
+    // the words of the request, one by one
+    for (const tok of t.split(/[^א-ת"'-]+/).filter(Boolean)) {
+      if (STOP.has(tok)) continue;
+      const e = lookup(tok.replace(/["'-]/g, ""));
+      if (e && !found.some((f) => f.key === e.key)) found.push({ key: e.key, dir: e.dir });
+    }
+    // two-word phrases ("כתב יד", "נוח לקריאה") are in the styles
+    for (const [list, moves] of STYLES) {
+      if (has(t, list)) for (const k in moves) if (!found.some((f) => f.key === k)) found.push({ key: k, dir: Math.sign(moves[k]), mult: Math.abs(moves[k]) });
+    }
+    // tails belong to letters: with no letter named, the letters that have one
+    if (ctx.letterKeys && !letters.length && found.some((f) => f.key === "depth")) letters = [..."ךןףץק"];
+    // "תחזיר את הכל" / "כמו המקור" with no setting: every setting back
+    if (back && !found.length && !letters.length) {
+      for (const k of ctx.keys) set[k.key] = k.neutral;
+      return;
+    }
+    for (const f of found) {
+      let dir = f.dir;
+      if (less && dir !== 0) dir = -dir;
+      else if (less && dir === 0) dir = -1;
+      if (more && dir === 0) dir = 1;
+      const toNeutral = back || (none && f.dir !== -1) || (f.dir === 0 && !more && !less);
+      if (letters.length) {
+        const lk = ctx.letterKeys.find((k) => k.key === f.key);
         if (!lk) continue;
         for (const L of letters) {
-          const v = ctx.letterValue(L, w.key);
-          letterChanges.push({ letter: L, key: w.key, value: clamp(zero ? lk.base : v + dir * lk.step * amount, lk.min, lk.max) });
+          const now = lset[L + "|" + f.key] !== undefined ? lset[L + "|" + f.key] : ctx.letterValue(L, f.key);
+          lset[L + "|" + f.key] = newValue(lk, now, dir, amt, f.mult, toNeutral, lk.base, true);
         }
-      } else if (!w.letterOnly) {
-        const k = ctx.keys.find((x) => x.key === w.key);
+      } else {
+        const k = ctx.keys.find((x) => x.key === f.key);
         if (!k) continue;
-        settings.push({ key: w.key, value: clamp(zero ? 0 : k.value + dir * k.step * amount, k.min, k.max) });
+        const now = set[f.key] !== undefined ? set[f.key] : k.value;
+        set[f.key] = newValue(k, now, dir, amt, f.mult, toNeutral, k.neutral, false);
       }
     }
-    return { settings, letters: letterChanges };
+  }
+
+  function newValue(k, now, dir, amt, mult, toNeutral, neutral, isLetter) {
+    if (toNeutral) return neutral;
+    if (amt.max) return dir > 0 ? k.max : dir < 0 ? k.min : neutral;
+    if (k.key === "slant" && amt.degrees !== null) return clamp(dir < 0 ? -amt.degrees : amt.degrees, k.min, k.max);
+    const multiplicative = ["width", "height", "spacing"].includes(k.key) || (isLetter && k.base === 1);
+    if (amt.factor !== null) {
+      if (multiplicative) return clamp(dir < 0 ? now / amt.factor : now * amt.factor, k.min, k.max);
+      return clamp(now + dir * k.step * amt.factor, k.min, k.max);
+    }
+    if (amt.percent !== null) {
+      if (multiplicative) return clamp(now * (1 + (dir || 1) * amt.percent / 100), k.min, k.max);
+      return clamp(now + (dir || 1) * (k.max - k.min) * amt.percent / 100, k.min, k.max);
+    }
+    // a slant asked for with no number: a usual italic angle
+    if (k.key === "slant" && dir > 0 && Math.abs(now) < 0.5) return clamp(8 * amt.times * (mult || 1), k.min, k.max);
+    return clamp(now + dir * k.step * amt.times * (mult || 1), k.min, k.max);
+  }
+
+  function understood(out, ctx) {
+    const parts = [];
+    if (out.font) parts.push("לעבור לגופן " + out.font.name);
+    for (const c of out.settings) {
+      const k = ctx.keys.find((x) => x.key === c.key);
+      parts.push((k ? k.label : c.key) + " " + (k && k.fmt ? k.fmt(c.value) : c.value));
+    }
+    const same = new Map();
+    for (const c of out.letters) {
+      const k = ctx.letterKeys.find((x) => x.key === c.key);
+      const t = (k ? k.label : c.key) + " " + (k && k.fmt ? k.fmt(c.value) : c.value);
+      same.set(t, (same.get(t) || []).concat(c.letter));
+    }
+    for (const [t, ls] of same) parts.push(ls.join(" ") + ": " + t);
+    return parts.join(", ") + ".";
   }
 
   function clamp(v, a, b) { return Math.min(b, Math.max(a, Math.round(v * 1000) / 1000)); }

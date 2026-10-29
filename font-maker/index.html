@@ -101,15 +101,16 @@
     <section class="ai" aria-label="שינוי במילים">
       <h2>✨ לבקש שינוי במילים</h2>
       <div class="ai-row">
-        <textarea id="ai-text" rows="2" placeholder="למשל: תעשה את הגופן עבה יותר ומעט רחב. או: האות ש רחבה יותר והאות ל גבוהה יותר."></textarea>
+        <textarea id="ai-text" rows="2" placeholder="כותבים מה לשנות, למשל: תעשה אותו עבה יותר ונטוי, והאות ש רחבה יותר. או: מתאים לכותרת. או: הסופיות ארוכות יותר."></textarea>
         <button type="button" class="btn primary" id="ai-go">שנה</button>
       </div>
       <p class="status" id="ai-msg" role="status"></p>
       <ol class="ai-log" id="ai-log"></ol>
       <details class="ai-key">
-        <summary id="ai-key-sum">בינה מלאכותית (Claude): להבנה של כל בקשה</summary>
-        <p class="hint">בלי מפתח, התוכנה מבינה בקשות פשוטות ("עבה יותר", "צר", "נטוי", "עגול", "האות ש רחבה"). עם מפתח API של Anthropic,
-          Claude מבין כל בקשה במילים חופשיות. המפתח נשמר רק במחשב הזה, והשימוש מחויב בחשבון שלך אצל Anthropic.</p>
+        <summary id="ai-key-sum">רוצה שגם בקשות מסובכות יובנו? Claude (לא חובה)</summary>
+        <p class="hint">העוזר שבתוך התוכנה עובד בלי מפתח ובלי אינטרנט, ומבין בקשות כמו: "עבה יותר", "צר קצת", "נטוי ב-10 מעלות", "האות ש רחבה יותר",
+          "הסופיות ארוכות יותר", "מתאים לכותרת", "לילדים", "אלגנטי", "תחזיר את הרוחב", "תחליף לחיבו", "תבטל". בקשה שהוא לא מבין — אפשר
+          לנסח אחרת, או לחבר את Claude עם מפתח API של Anthropic, ואז כל בקשה במילים חופשיות מובנת. המפתח נשמר רק במחשב הזה, והשימוש מחויב בחשבון שלך אצל Anthropic.</p>
         <label class="field">מפתח API
           <input type="password" id="ai-key" dir="ltr" autocomplete="off" placeholder="sk-ant-...">
         </label>
@@ -123,6 +124,35 @@
 
       <div class="outline-only">
         <p class="hint">בוחרים אות ומשנים רק אותה. השינוי מתווסף על השינויים של כל הגופן.</p>
+
+        <h3>לגרור נקודות</h3>
+        <p class="hint"><span class="key on"></span> נקודה על הקו, <span class="key off"></span> ידית שמכופפת את העיקול. אפשר לסמן כמה נקודות:
+          לגרור מלבן סביבן, או Shift ולחיצה. חצים במקלדת = הזזה קטנה. <b>Shift</b> בזמן גרירה = רק ישר.</p>
+        <div class="toggles">
+          <div class="seg tools" role="radiogroup" aria-label="כלי">
+            <label><input type="radio" name="oltool" value="move" checked> ✋ הזזה</label>
+            <label><input type="radio" name="oltool" value="cut"> ✂️ מחיקת אזור</label>
+          </div>
+          <label><input type="checkbox" id="ol-snap" checked> הצמדה לקווים</label>
+        </div>
+        <p class="part" id="ol-hint"></p>
+        <div class="ed-wrap"><svg id="ol-svg" tabindex="0" role="img" aria-label="האות בעריכה"></svg></div>
+        <div class="part-ctl hidden" id="ol-part-ctl">
+          <div class="slider"><label class="lbl" for="ol-part-s"><span>גודל החלק</span><span class="val" id="ol-part-v"></span></label>
+            <input type="range" id="ol-part-s" min="0.3" max="2" step="0.01"></div>
+          <button type="button" class="btn ghost small" id="ol-part-del">🗑 מחיקת החלק</button>
+        </div>
+
+        <h3>לקחת חלק מאות של גופן אחר</h3>
+        <p class="hint">בוחרים גופן ואות, מסמנים מלבן סביב החלק שרוצים, ולוחצים "הוספה לאות שלי". אחר כך גוררים אותו למקום.</p>
+        <div class="bor-row">
+          <select id="bor-font" aria-label="מאיזה גופן"></select>
+          <select id="bor-letter" aria-label="מאיזו אות"></select>
+        </div>
+        <div class="ed-wrap"><svg id="bor-svg" role="img" aria-label="האות שממנה לוקחים"></svg></div>
+        <button type="button" class="btn ghost small" id="bor-add" disabled>➕ הוספה לאות שלי</button>
+
+        <h3>רוחב, גובה ועובי של האות</h3>
         <div id="ol-letter"></div>
         <div class="ol-line pv" id="ol-line"></div>
       </div>
@@ -155,7 +185,7 @@
       <div id="ed-checks" class="checks draw-only"></div>
 
       <div class="row">
-        <button type="button" class="btn ghost small draw-only" id="ed-undo">↶ ביטול</button>
+        <button type="button" class="btn ghost small" id="ed-undo">↶ ביטול</button>
         <button type="button" class="btn ghost small" id="ed-reset">החזרת האות למקור</button>
         <button type="button" class="btn ghost small" id="ed-reset-all">החזרת כל האותיות</button>
       </div>
