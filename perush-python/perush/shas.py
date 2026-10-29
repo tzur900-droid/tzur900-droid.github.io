@@ -521,7 +521,13 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
             if len({src[i] for i, _ in own if sseq[i] not in weak}) < 2:
                 n = 0
             head = len(best) == 2 and e in mine and i0 == dh_end and best[0][1] == 0
-            if dense and (n >= 3 or head):
+            # and words that follow one another in both: three, or two in a chain of four
+            run = top = 1
+            for (ia, pa), (ib, pb) in zip(best, best[1:]):
+                run = run + 1 if (ib == ia + 1 and pb == pa + 1) else 1
+                top = max(top, run)
+            close = top >= 3 or (top >= 2 and len(best) >= 4)
+            if dense and ((n >= 3 and close) or head):
                 for k in range(i0, i1 + 1):
                     bold[k] = 1
                 if trace is not None:
@@ -2139,6 +2145,10 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         refs = [r for l in pg["text"] for r in getattr(l, "refs", [l.unit.ref]) if l.unit.kind == "p"]
         amuds = sorted({(rif[j]["amud_n"], rif[j]["amud"]) for j in refs if rif[j].get("amud")})
         if amuds:
+            # a passage that brings a sugya from a far daf does not stretch the head: only
+            # the amudim near the page's middle one (two dafim each way)
+            mid = amuds[len(amuds) // 2][0]
+            amuds = [a for a in amuds if abs(a[0] - mid) <= 4]
             first, last = amuds[0][1], amuds[-1][1]
             prev = last
             xref.append(f"דף {first}" + (f"–{last}" if last != first else ""))
