@@ -998,17 +998,21 @@ RIF_FONT = "Drugulin CLM"    # Culmus (GPL); the one face it has is a book weigh
 
 class Book:
     def __init__(self, name, rosh, rif, comm, comm_name, page=(210, 297), margin=14, rosh_size=12, rif_size=11.5,
-                 comm_size=10, head_size=9, rif_lead=1.34):
+                 comm_size=10, head_size=9, rif_lead=1.34, inner=None, outer=None):
         self.name = name
         self.rosh, self.rif, self.comm, self.comm_name = rosh, rif, comm, comm_name
         self.pw, self.ph = page[0] * PT_PER_MM, page[1] * PT_PER_MM
-        self.m = margin * PT_PER_MM
-        self.W = self.pw - 2 * self.m
+        self.m = margin * PT_PER_MM          # at the head and the foot
+        # at the sides: wider at the binding (inner) than at the edge (outer)
+        self.m_in = (inner if inner is not None else margin) * PT_PER_MM
+        self.m_out = (outer if outer is not None else margin) * PT_PER_MM
+        self.W = self.pw - self.m_in - self.m_out
         self.hs = head_size
         self.head_h = head_size * 1.3 + 5 * PT_PER_MM
         self.H = self.ph - 2 * self.m - self.head_h
         self.gap = 5 * PT_PER_MM
         self.vgap = 2.5 * PT_PER_MM
+        self.ugap = 1.5 * PT_PER_MM        # between the Rif and the commentary under it
         self.st_rosh = Style("Frank Ruhl Libre", rosh_size)
         # the Rif in the letters of the Gemara of the Vilna Shas (Drugulin), the commentary in
         # square letters (Frank Ruhl) with its dibbur hamatchil in the Rif's letters
@@ -1028,7 +1032,8 @@ class Book:
             b = Style("Frank Ruhl Libre", st.size, True)
         else:
             b = st.with_bold(True)
-        lab = Style("David Libre", st.size * 1.08, True)
+        # מתני' and גמ': in the Rif great, as in the Gemara of Vilna; elsewhere a little larger
+        lab = Style(RIF_FONT, st.size * 1.6, True) if st.family == RIF_FONT else Style("David Libre", st.size * 1.08, True)
         big = Style(st.family, st.size * 1.3, True)
         gem = Style(st.family, st.size * 0.75)
         # the dibbur hamatchil bold and a quarter larger, to stand out over Rashi's wording
@@ -1054,8 +1059,6 @@ class Book:
         """day_at: siman index -> day number starting there."""
         units, perek = [], None
         for i, s in enumerate(self.rosh):
-            if i in day_at:
-                units.append(self.marker(day_at[i], self.st_rosh))
             if s["perek"] != perek:
                 perek = s["perek"]
                 if perek:
@@ -1072,7 +1075,7 @@ class Book:
                     w = next((t for t in toks if t[1] != "gem"), None)
                     if w is not None and w[1] != "label":
                         w[1] = "open"
-                    toks = [[s["num"], "open"]] + toks
+                    toks = [[s["num"], "open"] + ([f"יום {heb(day_at[i])}"] if i in day_at else [])] + toks
                 units.append(Unit("p", self.words(toks, self.st_rosh), i, k == 0))
         return units
 
@@ -1528,6 +1531,19 @@ class Book:
                 stretch(under, target, min(cap, self.lh_comm * 0.4 * len(under)))
             else:
                 stretch(below_top(c), target, cap)
+        if r["mode"] in ("long", "under") and r["text"]:
+            # the commentary under the Rif begins on its own line: the Rif's lines open a
+            # little, so that it ends just above it (no blank line between them)
+            under = [l for c in r["cols"] for l in c if l.y >= lim - EPS]
+            if under:
+                t0 = r["text"][0].y
+                tb = max(l.y + l.h for l in r["text"])
+                target = min(l.y for l in under) - self.ugap
+                if 0 < target - tb <= self.lh_comm * 1.3 and tb > t0 and (target - t0) / (tb - t0) <= 1.12:
+                    f = (target - t0) / (tb - t0)
+                    for l in r["text"]:
+                        l.y = t0 + (l.y - t0) * f
+                        l.h *= f
         if r["mode"] == "long":
             for c in r["cols"]:
                 open_under(c, self.H, self.lh_comm * 1.5)
@@ -1574,7 +1590,14 @@ class Book:
         allp = rosh_pages + rif_pages
         for n, pg in enumerate(allp):
             page = Page(self.pw, self.ph)
-            L, R, T = self.m, self.pw - self.m, self.m
+            # the binding: on the right of a left-hand page (in a Hebrew book the first page,
+            # and every other one after it, is a left-hand page), on the left of a right-hand one
+            if n % 2 == 0:
+                L, R = self.m_out, self.pw - self.m_in
+            else:
+                L, R = self.m_in, self.pw - self.m_out
+            T = self.m
+            mr, ml = (R + self.pw) / 2, L / 2        # the middles of the margins
             right = f"{self.name} · {title_rosh if pg and pg['kind'] == 'rosh' else title_rif}"
             center = xref[n]
             num = heb(first + n)
@@ -1587,46 +1610,37 @@ class Book:
             page.head = (right, center, num, self.head_style, T + self.hs * 1.3 * 0.8)
             page.rules.append((L, T + self.hs * 1.3 + 1 * PT_PER_MM, R))
             top = T + self.head_h
+            page.marks, page.boxes = [], []
+            # where a day begins: "יום" over its number in a grey box, in the margin beside
+            # the line (beside the Rif: in the space between it and the commentary)
+            bst = Style("Frank Ruhl Libre", 8, True)
+            sst = Style("Frank Ruhl Libre", 5.8, True)
+
+            mst = Style("Frank Ruhl Libre", 7.5, True)
+
+            def day_box(x, l, st):
+                for lab in [w.ref for w in l.words if isinstance(w.ref, str)]:
+                    if lab.startswith("יום "):
+                        word, num_ = lab.split(" ", 1)
+                        page.boxes.append((x, top + l.y + l.h * 0.5, word, num_, st))
+                    else:
+                        # another note in the margin (where the Rif has the place)
+                        page.marks.append((x, top + l.y + l.h * 0.72, lab, mst))
             if pg["kind"] == "rosh":
-                page.marks = []
-                mst = Style("Frank Ruhl Libre", 7.5, True)
                 for k, col in enumerate(pg["cols"]):
                     if col:
                         page.frames.append(Frame(col, R - k * (pg["colw"] + self.gap), top))
                     for l in col:
-                        labels = [w.ref for w in l.words if isinstance(w.ref, str)]
-                        if labels:
-                            # in the outer margin beside the line: the right column's on the right
-                            x = R + self.m / 2 if k == 0 else L - self.m / 2
-                            page.marks.append((x, top + l.y + l.h * 0.72, " ".join(labels), mst))
+                        day_box(mr if k == 0 else ml, l, bst)
             else:
-                # where a day begins: in the margin beside the line, of the Rif on the right,
-                # of the commentary on its column's side
-                page.marks = []
-                mst = Style("Frank Ruhl Libre", 7.5, True)
-                dst = Style("Frank Ruhl Libre", 6, True)
                 for l in pg["text"]:
-                    labels = [w.ref for w in l.words if isinstance(w.ref, str)]
-                    if not labels:
-                        continue
-                    # beside the Rif's line: in the space between it and the commentary on its
-                    # right, "יום" over the day's number; where the line runs across the page,
-                    # in the margin
-                    x = R - l.right + self.gap / 2 if l.right > 1 else R + self.m / 2
-                    yb = top + l.y + l.h * 0.72
-                    word, num = (labels[0].split(" ", 1) + [""])[:2]
-                    page.marks.append((x, yb - dst.size * 0.95, word, dst))
-                    page.marks.append((x, yb + dst.size * 0.15, num, dst))
-                sides = []
+                    day_box(R - l.right + self.gap / 2 if l.right > 1 else mr, l, sst if l.right > 1 else bst)
                 if pg["cols"]:
-                    sides.append((pg["cols"][0], R + self.m / 2))
+                    for l in pg["cols"][0]:
+                        day_box(mr, l, bst)
                 if len(pg["cols"]) > 1:
-                    sides.append((pg["cols"][1], L - self.m / 2))
-                for lines, x in sides:
-                    for l in lines:
-                        labels = [w.ref for w in l.words if isinstance(w.ref, str)]
-                        if labels:
-                            page.marks.append((x, top + l.y + l.h * 0.72, " ".join(labels), mst))
+                    for l in pg["cols"][1]:
+                        day_box(ml, l, bst)
                 if pg["text"]:
                     page.frames.append(Frame(pg["text"], R, top))
                 cols = pg["cols"]
@@ -2022,8 +2036,7 @@ def check_layout(book, rosh_pages, rif_pages):
     # in the commentary
     def days_in(words):
         return [w.ref for w in words if isinstance(w.ref, str) and w.ref.startswith("יום ")]
-    rosh_days = [" ".join(w.text for w in l.words) for pg in rosh_pages for c in pg["cols"] for l in c
-                 if l.unit.kind == "d"]
+    rosh_days = days_in(w for pg in rosh_pages for c in pg["cols"] for l in c for w in l.words)
     parts = [("הרא\"ש", rosh_days)]
     if rif_pages:
         parts.append(("הרי\"ף", days_in(w for pg in rif_pages for l in pg["text"] for w in l.words)))

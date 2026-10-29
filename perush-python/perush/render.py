@@ -1,5 +1,5 @@
 """Drawing laid-out pages: on screen (preview images) and into a PDF file."""
-from PySide6.QtCore import QMarginsF, QPointF, QSizeF, Qt
+from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt
 from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen
 
 from .textlayout import PT_PER_MM, metrics, qfont, space
@@ -63,6 +63,18 @@ def draw_page(p, page):
         from .textlayout import width as _w
         p.setFont(qfont(st))
         p.drawText(QPointF(x - _w(st, text) / 2, y), text)
+    for x, yc, word, num, st in getattr(page, "boxes", []):
+        # a day: a light grey box, "יום" over its number, centred on x and yc
+        from .textlayout import width as _w
+        small = st.__class__(st.family, st.size * 0.82, st.bold)
+        w = max(_w(small, word), _w(st, num)) + st.size * 0.9
+        h = small.size + st.size + st.size * 0.75
+        p.fillRect(QRectF(x - w / 2, yc - h / 2, w, h), QColor("#d6d6d6"))
+        p.setPen(QColor("black"))
+        p.setFont(qfont(small))
+        p.drawText(QPointF(x - _w(small, word) / 2, yc - h / 2 + st.size * 0.3 + small.size * 0.85), word)
+        p.setFont(qfont(st))
+        p.drawText(QPointF(x - _w(st, num) / 2, yc + h / 2 - st.size * 0.45), num)
     for fr in page.frames:
         for line in fr.lines:
             draw_line(p, line, fr.x_right - line.right, fr.top + line.y)
