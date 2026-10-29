@@ -166,6 +166,7 @@ python main.py project.json out.pdf
 | David CLM, Miriam CLM | — | פירושים בלי טעמים |
 | Aharoni CLM | — | כותרות |
 | Stam Ashkenaz CLM, Stam Sefarad CLM | — | כתב סת"ם (בלי ניקוד) — לשם הספר בעמוד השער |
+| Ezra SIL, Ezra SIL SR | ✓ | טקסט התורה — גופן מקראי קלאסי עם טעמים (רישיון SIL OFL; SR — ניקוד וטעמים במיקום מעט שונה) |
 | SBL Hebrew | ✓ | טקסט התורה — עם טעמים מדויקים (חינם לשימוש לא מסחרי; לספר שנמכר צריך רישיון מ־SBL, ראו `fonts/LICENSE-SBLHebrew.txt`) |
 
 **כתב רש"י** (לפירושים):

@@ -106,6 +106,7 @@ COMM_DEFAULTS = {
     "autoW": True,
     "cols": 2,
     "dhOnly": None,        # only the dibbur hamatchil bold (None = by the name: yes for the Ramban)
+    "paraBreak": None,     # each passage a paragraph: it ends centered, the next on a new line (None = the Ramban)
     "text": "",
 }
 
@@ -226,13 +227,22 @@ def tokenize(text):
 _DH = re.compile(r"^(.{1,90}?)\s+[-–—]\s+(.*)$", re.S)
 
 
+def is_ramban(comm):
+    return comm.get("name", "").replace('"', "").replace("״", "").startswith("רמבן")
+
+
+def para_break(comm):
+    """Whether each passage of the commentary is a paragraph of its own: its last line centered,
+    and the next passage beginning on a new line (as the Ramban is printed)."""
+    v = comm.get("paraBreak")
+    return is_ramban(comm) if v is None else bool(v)
+
+
 def dh_only(comm):
     """Whether only the dibbur hamatchil of each passage is bold. The Ramban quotes Rashi, with
     Rashi's own bold headwords, and the verse's words again: there only the first is bold."""
     v = comm.get("dhOnly")
-    if v is None:
-        return comm.get("name", "").replace('"', "").replace("״", "").startswith("רמבן")
-    return bool(v)
+    return is_ramban(comm) if v is None else bool(v)
 
 
 # the dibbur hamatchil begins within the first few words of a passage ('טעם …', 'אמר הכתוב בכאן …')

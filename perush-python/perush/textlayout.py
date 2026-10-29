@@ -102,6 +102,7 @@ class Word:
     ref: object = None  # where the word comes from (for following positions in the text)
     glue: bool = False  # never the last word of a line (it belongs with the word after it)
     join: bool = False  # ends with a maqaf: no space after it (a line may still end with it)
+    brk: bool = False   # ends its paragraph: the next word begins a new line (this line is centered)
 
 
 MAQAF = "\u05be"
@@ -134,7 +135,7 @@ def split_maqaf(words):
         parts = [x for x in re.split("(?<=" + MAQAF + ")", w.text) if x]
         for k, part in enumerate(parts):
             out.append(Word(part, w.style, width(w.style, part), w.ref, w.glue if k == len(parts) - 1 else False,
-                            join=k < len(parts) - 1))
+                            join=k < len(parts) - 1, brk=w.brk and k == len(parts) - 1))
     return out
 
 
@@ -171,7 +172,7 @@ def break_lines(words, base, lh, width_at, y0=0.0, align="justify", tight=1.0):
         nat = prev.w
         j = i + 1
         limit = w + 0.01
-        while j < n:
+        while j < n and not prev.brk:
             nxt = words[j]
             add = (0.0 if prev.join else sp) + nxt.w     # no space after a maqaf
             if nat + add > limit:
@@ -185,7 +186,8 @@ def break_lines(words, base, lh, width_at, y0=0.0, align="justify", tight=1.0):
             j -= 1
             w_ = cur.pop()
             nat -= gap_after(cur[-1], sp) + w_.w
-        lines.append(Line(cur, right, w, nat, lh, base, align, j >= n, y))
+        brk = cur[-1].brk
+        lines.append(Line(cur, right, w, nat, lh, base, "center" if brk else align, j >= n or brk, y))
         y += lh
         i = j
     return lines
@@ -229,8 +231,16 @@ def even_lines(lines, slack=10):
     stay short if it ends the paragraph (its .last is set); otherwise it is justified too.
     Each break is looked for within slack words of where line-by-line breaking put it.
     Returns True if the lines were changed."""
+    # paragraphs that end in a centered line (see Word.brk): each by itself
+    cuts = [k for k, l in enumerate(lines[:-1]) if l.align == "center"]
+    if cuts:
+        changed, a = False, 0
+        for k in cuts + [len(lines) - 1]:
+            changed = even_lines(lines[a:k + 1], slack) or changed
+            a = k + 1
+        return changed
     n_lines = len(lines)
-    if n_lines < 2 or any(l.align != "justify" for l in lines):
+    if n_lines < 2 or any(l.align != "justify" for l in lines[:-1]) or lines[-1].align not in ("justify", "center"):
         return False
     words = [w for l in lines for w in l.words]
     n = len(words)

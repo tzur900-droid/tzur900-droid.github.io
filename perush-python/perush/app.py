@@ -13,7 +13,7 @@ from PySide6.QtGui import (QAction, QColor, QIcon, QDesktopServices, QFont, QFon
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
+    QPlainTextEdit, QPushButton, QScrollArea, QSlider, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
     QMenu, QSizePolicy, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -113,6 +113,9 @@ class CommEditor(QWidget):
         self.dh = QCheckBox("מודגש רק הדיבור המתחיל")
         self.dh.setToolTip("מילים מודגשות נוספות באמצע הפירוש (כמו ציטוט של רש\"י או מילות הפסוק שחוזרות) בכתב רגיל")
         self.dh.setChecked(model.dh_only(comm))
+        self.para = QCheckBox("כל פסקה בשורה חדשה")
+        self.para.setToolTip("כל קטע של הפירוש נגמר בשורה ממורכזת, והקטע הבא מתחיל בשורה שמתחתיה (כמו הרמב\"ן בחומשים)")
+        self.para.setChecked(model.para_break(comm))
         self.font = font_box()
         self.font.setCurrentFont(QFont(comm["font"]))
         self.size = QDoubleSpinBox()
@@ -141,6 +144,7 @@ class CommEditor(QWidget):
         grid.addWidget(self.cols_lbl, 3, 0)
         grid.addWidget(self.cols, 3, 1)
         grid.addWidget(self.dh, 3, 2, 1, 2)
+        grid.addWidget(self.para, 4, 2, 1, 2)
         lay.addLayout(grid)
         self.text = hebrew_edit(comm["font"] if comm["font"] in QFontDatabase.families() else "Frank Ruhl Libre", 12)
         self.text.setPlainText(comm["text"])
@@ -157,6 +161,7 @@ class CommEditor(QWidget):
         self.width.valueChanged.connect(self.changed)
         self.autow.toggled.connect(self.changed)
         self.dh.toggled.connect(self.changed)
+        self.para.toggled.connect(self.changed)
         self.cols.valueChanged.connect(self.changed)
         self.font.currentFontChanged.connect(self.changed)
         self.size.valueChanged.connect(self.changed)
@@ -181,6 +186,8 @@ class CommEditor(QWidget):
         c["cols"] = self.cols.value()
         if self.dh.isChecked() != model.dh_only(c):
             c["dhOnly"] = self.dh.isChecked()
+        if self.para.isChecked() != model.para_break(c):
+            c["paraBreak"] = self.para.isChecked()
         c["font"] = self.font.currentFont().family()
         c["size"] = self.size.value()
         c["text"] = self.text.toPlainText()
@@ -453,8 +460,24 @@ class MainWindow(QMainWindow):
         pl = QVBoxLayout(pbox)
         self.preview_lbl = QLabel("…")
         self.preview_lbl.setAlignment(Qt.AlignCenter)
-        self.preview_lbl.setMinimumHeight(330)
-        pl.addWidget(self.preview_lbl)
+        # small, in a window of its own size: enlarged, it scrolls (to see the letters of a font)
+        self.preview_area = QScrollArea()
+        self.preview_area.setWidget(self.preview_lbl)
+        self.preview_area.setWidgetResizable(True)
+        self.preview_area.setFixedHeight(230)
+        pl.addWidget(self.preview_area)
+        zrow = QHBoxLayout()
+        zrow.addWidget(QLabel("הגדלה:"))
+        self.preview_zoom = QSlider(Qt.Horizontal)
+        self.preview_zoom.setRange(150, 900)          # the page's width in pixels
+        self.preview_zoom.setSingleStep(50)
+        self.preview_zoom.setPageStep(150)
+        self.preview_zoom.setValue(150)
+        self.preview_zoom.setToolTip("גוררים ימינה כדי להגדיל ולראות את האותיות מקרוב")
+        self.preview_zoom.valueChanged.connect(self.show_preview)
+        zrow.addWidget(self.preview_zoom, 1)
+        pl.addLayout(zrow)
+        self.preview_page = None
         lay.addWidget(pbox)
         self.preview_timer = QTimer(self)
         self.preview_timer.setSingleShot(True)
@@ -1129,15 +1152,26 @@ class MainWindow(QMainWindow):
                 self.preview_lbl.setText("אין טקסט")
                 return
             r, chapter, parasha = eng.pages[0]
-            page = eng.finalize(r, chapter, parasha, model.heb(int(p.get("firstPage") or 1)), 0)
-            ratio = self.devicePixelRatioF()
-            k = 230 / page.width
-            pm = QPixmap.fromImage(page_image(page, k * ratio))
-            pm.setDevicePixelRatio(ratio)
-            self.preview_lbl.setPixmap(pm)
+            self.preview_page = eng.finalize(r, chapter, parasha, model.heb(int(p.get("firstPage") or 1)), 0)
+            self.show_preview()
         except Exception as e:  # the preview must never stop the program
             _log(f"preview failed: {e}")
             self.preview_lbl.setText("—")
+
+    def show_preview(self, *_):
+        """The preview's page at the size the slider sets (enlarged, it opens at the top)."""
+        page = self.preview_page
+        if page is None:
+            return
+        ratio = self.devicePixelRatioF()
+        k = self.preview_zoom.value() / page.width
+        pm = QPixmap.fromImage(page_image(page, k * ratio))
+        pm.setDevicePixelRatio(ratio)
+        self.preview_lbl.setPixmap(pm)
+        self.preview_lbl.setAlignment(Qt.AlignHCenter | (Qt.AlignTop if pm.height() / ratio > 230 else Qt.AlignVCenter))
+        # a Hebrew page begins on the right
+        QTimer.singleShot(0, lambda: self.preview_area.horizontalScrollBar().setValue(
+            self.preview_area.horizontalScrollBar().maximum()))
 
     def update_layout_fields(self):
         """The settings of a Talmud page only when it is chosen."""

@@ -22,9 +22,9 @@ Everything is measured in points and laid out line by line, so heights are exact
 import math
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from .model import dh_only, entry_tokens, heb, page_mm, parse_comm, parse_main
+from .model import dh_only, entry_tokens, heb, page_mm, para_break, parse_comm, parse_main
 from .textlayout import (PT_PER_MM, Line, Style, Word, break_lines, even_lines, full_width, space, split_maqaf, width,
                          words_of)
 
@@ -144,6 +144,13 @@ def flush_end(lines, fold=False):
     lines (the last one justified too), as long as no space opens wider than it was or than
     3.5 normal spaces. fold: if that can't be done and the last line holds a word or two, they
     go up into the lines above (one line less). Returns True if the number of lines changed."""
+    cut = max((k for k, l in enumerate(lines[:-1]) if l.align == "center"), default=None)
+    if cut is not None:
+        # the paragraphs before end in a centered line (see Word.brk): only the last one ends flush
+        tail = lines[cut + 1:]
+        changed = flush_end(tail, fold)
+        lines[cut + 1:] = tail
+        return changed
     if len(lines) < 2 or not lines[-1].last or lines[-1].align != "justify":
         return False
     if sum(w.w for w in lines[-1].words) >= lines[-1].width * 0.9:
@@ -270,6 +277,7 @@ class Engine:
         self.bottoms = [i for i, c in enumerate(self.comms) if i not in self.sides + self.unders + self.gm]
         self.style = {i: Style(c["font"], float(c["size"])) for i, c in enumerate(self.comms)}
         self.dh_only = {i: dh_only(c) for i, c in enumerate(self.comms)}
+        self.para_break = {i: para_break(c) for i, c in enumerate(self.comms)}
         self.side_lh = {i: self.comms[i]["size"] * self.lh_k for i in self.sides}
         self.note_lh = {i: self.comms[i]["size"] * self.note_k for i in self.bottoms + self.gm}
 
@@ -428,6 +436,8 @@ class Engine:
                 for k, (t, b) in enumerate(e["tokens"]):
                     st = bold if b else base
                     ws.append(Word(t, st, width(st, t), (j, k)))
+                if self.para_break[c] and len(ws) > (1 if e["label"] else 0):
+                    ws[-1] = replace(ws[-1], brk=True)     # each passage a paragraph of its own
                 self.ew_cache[key] = ws
             skip = 1 if e["label"] else 0
             words.extend(ws[skip + e["start"]:] if e["cont"] else ws)
@@ -459,13 +469,13 @@ class Engine:
             lines = break_lines(words, base, lh, full_width(w), tight=tight)
             pos, hit = 0, []
             for l in lines:
-                hit.append((pos, pos + len(l.words), l.right, l.width, l.natural, l.last))
+                hit.append((pos, pos + len(l.words), l.right, l.width, l.natural, l.last, l.align))
                 pos += len(l.words)
             if len(self.br_cache) > 20000:
                 self.br_cache.clear()
             self.br_cache[k] = hit
-        return [Line(words[a:b], right, width_, nat, lh, base, "justify", last, n * lh)
-                for n, (a, b, right, width_, nat, last) in enumerate(hit)]
+        return [Line(words[a:b], right, width_, nat, lh, base, align, last, n * lh)
+                for n, (a, b, right, width_, nat, last, align) in enumerate(hit)]
 
     def take(self, words, base, lh, w, max_lines, tight=1.0, width_at=None, key=None):
         """The first max_lines lines of words at width w (or in the shape width_at; a new

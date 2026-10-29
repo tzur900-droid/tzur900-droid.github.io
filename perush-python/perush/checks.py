@@ -84,7 +84,7 @@ def check(eng, pages):
         ends = [(s["c"], s["lines"]) for s in r.get("sections", [])] + [(c, s["col"]) for c, s in r.get("side", {}).items()] \
             + list(r.get("gm", {}).items())
         for c, lines in ends:
-            if (len(lines) > 1 and lines[-1].last and sum(w.w for w in lines[-1].words) < lines[-1].width * 0.5
+            if (len(lines) > 1 and lines[-1].last and lines[-1].align != "center" and sum(w.w for w in lines[-1].words) < lines[-1].width * 0.5
                     and not (r.get("at_end") and eng.done(c, r["ptrs"][c]))):
                 add("short_end", n, eng.comms[c]["name"], "warning")
         text = [l for l in r.get("text", []) if l.kind == "p"]
