@@ -2,7 +2,7 @@
 from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt
 from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen, QPolygonF
 
-from .textlayout import PT_PER_MM, justify_spacing, metrics, qfont, space, spaced_font
+from .textlayout import PT_PER_MM, Style, justify_spacing, metrics, qfont, space, spaced_font
 
 
 def draw_line(p, line, x_right, top):
@@ -50,8 +50,18 @@ def draw_page(p, page):
             p.setFont(qfont(bold))
             p.drawText(QPointF(R - width(bold, right), base), right)
         if center:
-            p.setFont(qfont(st))
-            p.drawText(QPointF((m + R) / 2 - width(st, center) / 2, base), center)
+            # centred between the two sides; if it is too long for that, moved off the middle,
+            # and smaller still if need be, so that it never runs into them
+            gap = 2 * width(st, " ")
+            lo = m + (width(bold, left) + gap if left else 0.0)
+            hi = R - (width(bold, right) + gap if right else 0.0)
+            cst = st
+            while width(cst, center) > hi - lo and cst.size > 5:
+                cst = Style(cst.family, cst.size - 0.5, cst.bold)
+            cw = width(cst, center)
+            x = min(max((m + R) / 2 - cw / 2, lo), hi - cw)
+            p.setFont(qfont(cst))
+            p.drawText(QPointF(x, base), center)
         if left:
             p.setFont(qfont(bold))
             p.drawText(QPointF(m, base), left)

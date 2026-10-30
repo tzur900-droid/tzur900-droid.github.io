@@ -48,6 +48,7 @@ NAMES = {
     "loose": "מרווח שורות שנפתח הרבה מעבר לרגיל",
     "integrity": "מילים שחסרות, כפולות או לא בסדר הנכון",
     "early": "תרגום שמתחיל לפני הפסוק שלו",
+    "head": "כותרת עליונה שהחלקים שלה נוגעים זה בזה",
     "engine": "הודעה מהעימוד",
 }
 
@@ -64,11 +65,11 @@ def check(eng, pages):
 
     for w in eng.warnings:
         add("engine", -1, w)
-    for k, c in enumerate(eng.comms):
-        if "???" in c.get("text", ""):
-            out.append(Problem("text", -1, "", f"'???' ב{c['name']}"))
-    if "???" in eng.P.get("main", ""):
-        out.append(Problem("text", -1, "", "'???' בטקסט העיקרי"))
+    for name, t in [(c["name"], c.get("text", "")) for c in eng.comms] + [("הטקסט העיקרי", eng.P.get("main", ""))]:
+        for bad in ("???", "\ufffd"):
+            k = t.find(bad)
+            if k >= 0:
+                out.append(Problem("text", -1, "", f"ב{name}: …{t[max(0, k - 15):k + 15]}…"))
 
     starts = [n for n in range(off, len(pages)) if opens_section(pages[n], 80 + eng.gm_band())]
     for k, (r, chapter, parasha) in enumerate(eng.pages):
@@ -120,6 +121,7 @@ def check(eng, pages):
     check_integrity(eng, pages, off, add)
     for n in range(off, len(pages)):
         check_foot(pages[n], n, add, n + 1 < len(pages))
+        check_head(pages[n], n, add)
     if len(pages) - off > 1:
         rows = sum(len(fr.lines) for fr in pages[-1].frames)
         if rows <= 3:
@@ -218,6 +220,20 @@ def check_integrity(eng, pages, off, add):
         i = next((i for i, (a, b) in enumerate(zip(keys, exp)) if a != b), min(len(keys), len(exp)))
         n = got[min(i, len(got) - 1)][1] if got else -1
         add("integrity", n, f"{name}: {len(keys)} מילים במקום {len(exp)}, הראשונה שלא במקומה היא מספר {i + 1}")
+
+
+def check_head(pg, n, add):
+    """The parts of the running head (as render.draw_page places them) never touch."""
+    if not pg.head or not pg.head[1]:
+        return
+    from .textlayout import Style, width
+    right, center, left, st, _ = pg.head
+    m, R = (pg.rules[0][0], pg.rules[0][2]) if pg.rules else (0, pg.width)
+    bold = st.with_bold(True)
+    lo = m + (width(bold, left) if left else 0.0)
+    hi = R - (width(bold, right) if right else 0.0)
+    if hi - lo < width(Style(st.family, 5, st.bold), center):
+        add("head", n, center)
 
 
 def check_foot(pg, n, add, more):
