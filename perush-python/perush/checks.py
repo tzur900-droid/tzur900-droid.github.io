@@ -16,6 +16,8 @@ from .model import heb
 WIDE_SPACE = 5.0
 # a hole: room left at the bottom of a page (pt) where the page should be full
 HOLE = 2.0
+# lines spread more than this (times their normal spacing) to fill a page: it shows
+LOOSE = 1.3
 
 
 @dataclass
@@ -36,9 +38,14 @@ NAMES = {
     "thin": "שורת פסוק אחת לבד מעל הפירושים",
     "hole": "מקום ריק בתחתית העמוד",
     "spaces": "רווחים גדולים בין המילים",
+    "lone": "מילה אחת לבד בשורה באמצע פסקה",
     "text": "סימן משובש בטקסט",
     "number": "מספר פסוק לבד בסוף שורה",
     "short_end": "פירוש שנגמר בשורה קצרה באמצע העמוד",
+    "text_end": "פסוקים שממשיכים בעמוד הבא ונגמרים בשורה קצרה",
+    "heading_foot": "כותרת בתחתית העמוד עם פחות משתי שורות תחתיה",
+    "last_alone": "עמוד אחרון עם שורות בודדות",
+    "loose": "מרווח שורות שנפתח הרבה מעבר לרגיל",
     "engine": "הודעה מהעימוד",
 }
 
@@ -87,8 +94,20 @@ def check(eng, pages):
             if (len(lines) > 1 and lines[-1].last and lines[-1].align != "center" and sum(w.w for w in lines[-1].words) < lines[-1].width * 0.5
                     and not (r.get("at_end") and eng.done(c, r["ptrs"][c]))):
                 add("short_end", n, eng.comms[c]["name"], "warning")
+        # the room left on a page is spread over its lines, but never so much that it shows
+        loose = [eng.comms[s_["c"]]["name"] for s_ in r.get("sections", []) if s_["nlh"] > eng.note_lh[s_["c"]] * LOOSE]
+        if any(l.kind == "p" and l.h > eng.main_lh * LOOSE for l in r.get("text", [])):
+            loose.append("הפסוקים")
+        if loose:
+            add("loose", n, ", ".join(loose))
         text = [l for l in r.get("text", []) if l.kind == "p"]
         heads = any(l.kind == "h" for l in r.get("text", []))
+        # the verses go on on the next page: they end on a full line (rule 8)
+        b, items = r.get("b"), r.get("items") or []
+        if (text and r["text"][-1].kind == "p" and not r.get("at_end") and "gm" not in r and b
+                and b[0] < len(items) and (b[1] > 0 or (items[b[0]]["type"] == "v" and not eng.P.get("verseNewLine")))
+                and text[-1].natural < text[-1].width * 0.6):
+            add("text_end", n, " ".join(w.text for w in text[-1].words)[:30], "exception" if r.get("short_ok") else "error")
         if len(text) == 1 and r.get("sections") and not heads:
             add("thin", n, " ".join(w.text for w in text[0].words)[:40], "exception" if r.get("thin_ok") else "error")
         # a page that should be full: not the last one, nor the last before a new section
@@ -97,8 +116,18 @@ def check(eng, pages):
             if gap > HOLE:
                 add("hole", n, f"{gap:.0f} נקודות")
     for n in range(off, len(pages)):
+        check_foot(pages[n], n, add, n + 1 < len(pages))
+    if len(pages) - off > 1:
+        rows = sum(len(fr.lines) for fr in pages[-1].frames)
+        if rows <= 3:
+            add("last_alone", len(pages) - 1, f"{rows} שורות")
+    for n in range(off, len(pages)):
+        r = eng.pages[n - off][0]
+        pre = r.get("pre") or {}
+        # a parasha may begin under the short end of a haftara (see engine.HAFTARA_TAIL)
+        under_tail = bool(pre.get("tail"))
         for t, y in section_headings(pages[n]):
-            if y > eng.m + eng.head_h + eng.gm_band() + 10:
+            if y > eng.m + eng.head_h + eng.gm_band() + 10 and not (under_tail and t.startswith("פרשת")):
                 add("parasha", n, t)
     return out
 
@@ -127,6 +156,22 @@ def room_left(eng, pg):
     return pg.height - eng.m - bottom
 
 
+def check_foot(pg, n, add, more):
+    """A heading (a haftara's, a chapter's) at the foot of a page with fewer than two lines of
+    its text under it, when the text goes on on the next page."""
+    if not more or not pg.frames:
+        return
+    bottom = max(fr.top + max((l.y + l.h for l in fr.lines), default=0) for fr in pg.frames)
+    for fr in pg.frames:
+        if not fr.lines or fr.top + fr.lines[-1].y + fr.lines[-1].h < bottom - 1.0:
+            continue
+        heads = [i for i, l in enumerate(fr.lines) if getattr(l, "kind", "") == "h"]
+        if heads and len(fr.lines) - heads[-1] - 1 < 2:
+            t = " ".join(w.text for w in fr.lines[heads[-1]].words)
+            if not t.startswith("פרשת"):
+                add("heading_foot", n, t[:30])
+
+
 def check_bounds(eng, pg, n, add):
     if not pg.rules:
         return
@@ -147,6 +192,10 @@ def check_bounds(eng, pg, n, add):
 def check_spaces(pg, n, add):
     for fr in pg.frames:
         for l in fr.lines:
+            # a line in the middle of a paragraph that can't reach the end of the line: one word
+            if (l.align == "justify" and not l.last and len(l.words) == 1 and getattr(l, "kind", "p") != "h"
+                    and l.words[0].w < l.width * 0.8):
+                add("lone", n, l.words[0].text)
             r = space_ratio(l)
             if r > WIDE_SPACE:
                 add("spaces", n, f"פי {r:.1f}: " + " ".join(w.text for w in l.words)[:40], "warning")

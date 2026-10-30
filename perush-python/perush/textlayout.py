@@ -73,6 +73,54 @@ def qfont(st):
     return f
 
 
+# a justified line whose spaces would open wider than LETTER_START normal spaces gives some of the
+# room to the letters (at most LETTER_MAX of the letters' size between two letters), as narrow
+# columns are set in Hebrew printing
+LETTER_START, LETTER_MAX = 2.5, 0.05
+_spaced = {}
+
+
+def spaced_font(st, ls):
+    key = (st, round(ls, 2))
+    f = _spaced.get(key)
+    if f is None:
+        f = QFont(qfont(st))
+        f.setLetterSpacing(QFont.AbsoluteSpacing, key[1])
+        if len(_spaced) > 4000:
+            _spaced.clear()
+        _spaced[key] = f
+    return f
+
+
+_MARKS = re.compile(r"[\u0591-\u05c7]")
+
+
+def letter_count(text):
+    """The letters of a word that take room between them (not the points and the cantillation marks)."""
+    return len(_MARKS.sub("", text))
+
+
+def spaced_width(st, text, ls):
+    # (Qt measures a font's letter spacing only for the screen: the room is added letter by letter)
+    return width(st, text) + ls * letter_count(text)
+
+
+def justify_spacing(line, gaps, total):
+    """(the space between words, the room added between letters, each word's width) for a line
+    justified to its width."""
+    sp = space(line.base)
+    gap = (line.width - total) / gaps
+    if gap <= LETTER_START * sp:
+        return gap, 0.0, None
+    letters = sum(letter_count(w.text) for w in line.words)
+    ls = min(LETTER_MAX * line.base.size, (gap - LETTER_START * sp) * gaps / max(1, letters))
+    ls = round(ls, 2)
+    if ls <= 0:
+        return gap, 0.0, None
+    widths = [spaced_width(w.style, w.text, ls) for w in line.words]
+    return (line.width - sum(widths)) / gaps, ls, widths
+
+
 def metrics(st):
     m = _metrics.get(st)
     if m is None:
@@ -282,7 +330,8 @@ def even_lines(lines, slack=10):
         if line_no == n_lines - 1 and free_last:
             return 0.0 if total + gaps * s * 0.8 <= width_ + 0.01 else INF
         if gaps <= 0:
-            return 1e4 if total <= width_ + 0.01 else INF
+            # a lone word can't reach the end of the line: only if there is no other way
+            return 1e8 if total <= width_ + 0.01 else INF
         r = (width_ - total) / (gaps * s)
         if r < 0.8:
             return INF

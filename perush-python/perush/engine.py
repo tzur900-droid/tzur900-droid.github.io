@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass, field, replace
 
 from .model import dh_only, entry_tokens, heb, page_mm, para_break, parse_comm, parse_main
-from .textlayout import (PT_PER_MM, Line, Style, Word, break_lines, even_lines, full_width, space, split_maqaf, width,
+from .textlayout import (PT_PER_MM, Line, Style, Word, break_lines, even_lines, full_width, justify_spacing, space, split_maqaf, width,
                          words_of)
 
 EPS = 0.01
@@ -40,6 +40,13 @@ GOOD, MARGIN = 60.0, 25.0
 LOOK_AHEAD = 1      # how many pages ahead each page looks
 GM_STRETCH = 0.2    # a Talmud page: how much more room each line may take to fill the page
 MIN_START_ROWS = 3  # a commentary under another doesn't begin at the foot of a page with fewer rows
+# a haftara whose end takes no more than this share of its last page: the next parasha begins
+# under it on that page, instead of on a new one
+HAFTARA_TAIL = 0.4
+# the most the lines of a haftara's last page may come closer, to take its last few lines
+TAIL_SQUEEZE = 0.1
+# a haftara's last page holds at least this many lines (when its lines can't all come up)
+TAIL_LINES = 6
 # the letter (פ / ס) at the end of an open / a closed section
 SECTION_FONT = "David Libre"
 
@@ -209,7 +216,7 @@ def space_ratio(l):
     fill = 0.2 if getattr(l, "force", False) else 0.35       # (as render.draw_line)
     if total < l.width * fill:
         return 1.0
-    return (l.width - total) / gaps / space(l.base)
+    return justify_spacing(l, gaps, total)[0] / space(l.base)
 
 
 def restack(lines):
@@ -386,7 +393,8 @@ class Engine:
 
     def item_words(self, i, it):
         """The words of a verse of the text (made once: they are measured with the text's style)."""
-        key = id(it)        # (a haftara's verses are numbered in a list of their own)
+        key = (id(it), i)   # its words know its place in the list (a haftara's verses, and the
+                            # whole book when the translation column is measured, are other lists)
         ws = self.iw_cache.get(key)
         if ws is None:
             ws = words_of(it["words"], self.main, lambda k: (i, k))
@@ -1018,6 +1026,7 @@ class Engine:
         req_total = sum(p[4] for p in plans if p[2]) + 1.2 * PT_PER_MM * max(0, sum(1 for p in plans if p[2]) - 1)
         r["req_fit"] = r.get("req_fit", True) and top_fits and req_total <= room + EPS
         placed_any = False
+        placed = []            # (c, ptr, words, alll, room before it, gap) of each one placed
         deferred = set()       # commentaries that begin on the next page: one before them fills this one
         for n, (c, ptr, req, alll, req_h) in enumerate(plans):
             r["ptrs"][c] = ptr
@@ -1052,11 +1061,25 @@ class Engine:
                 continue
             if placed_any and ntake < len(words) and math.ceil(len(lines) / self.comms[c]["cols"]) < MIN_START_ROWS:
                 # a commentary that would begin with a line or two at the foot of the page and go
-                # on to the next: it begins on the next page instead (RULES.md, rule 5)
+                # on to the next: it begins on the next page instead (RULES.md, rule 5) — and the
+                # one before it, if it goes on too, takes the room that was kept for it
                 deferred.add(c)
+                prev = placed[-1]
+                if r["sections"][-1]["cut"]:
+                    pc, pptr, pwords, palll, proom, pgap = prev
+                    full = int((proom - pgap - self.note_pad() - self.note_title_h(pc) + EPS) // self.note_lh[pc])
+                    l2, n2 = self.take(pwords, self.style[pc], self.note_lh[pc], self.note_col_w(pc), full * self.comms[pc]["cols"],
+                                       tight, key=self.lst_key(pc, palll))
+                    if l2 and n2 > 0:
+                        old_h = r["sections"][-1]["h"]
+                        h2 = self.section_h(pc, len(l2))
+                        r["sections"][-1] = {"c": pc, "lines": l2, "nlh": self.note_lh[pc], "cut": n2 < len(pwords), "h": h2}
+                        room -= h2 - old_h
+                        r["ptrs"][pc] = self.advance(pptr, pwords, n2, len(palll))
                 continue
             h = self.section_h(c, len(lines))
             r["sections"].append({"c": c, "lines": lines, "nlh": nlh, "cut": ntake < len(words), "h": h})
+            placed.append((c, ptr, words, alll, room, gap_))
             room -= h + (1.2 * PT_PER_MM if placed_any else 0.0)
             placed_any = True
             r["ptrs"][c] = self.advance(ptr, words, ntake, len(alll))
@@ -1172,9 +1195,11 @@ class Engine:
                     s["nlh"] += spare / rows
                     s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
         else:
+            # the last one goes on on the next page: its rows take the room, a little each (the
+            # rest goes to all the lines of the page, below)
             rows = math.ceil(len(last["lines"]) / self.comms[last["c"]]["cols"])
             if rows:
-                last["nlh"] += spare / rows
+                last["nlh"] += min(spare / rows, 0.15 * last["nlh"])
                 last["h"] = self.section_h(last["c"], len(last["lines"]), last["nlh"])
         # still a little room: share it out between the lines of the text and of the commentaries
         spare = self.contentH - self.total_h(r)
@@ -1213,6 +1238,13 @@ class Engine:
             k += 1
         while k > 0 and lines[k - 1].kind == "h":
             k -= 1
+        # nor a heading with only a line of its text under it at the foot of the page: it goes
+        # to the next page with its text
+        hk = max((i for i in range(k) if lines[i].kind == "h"), default=None)
+        if hk is not None and k - hk - 1 < 2:
+            k = hk
+            while k > 0 and lines[k - 1].kind == "h":
+                k -= 1
         if k == 0:
             return [], 0.0, a, False
         nxt = lines[k].words[0].ref
@@ -1351,6 +1383,7 @@ class Engine:
                 self.plain_start = (0, 0)
             else:
                 after = sections[si + 2] if si + 2 < len(sections) else None
+                self.after_plain = after
                 self.comm_after_plain = bool(after and not after["noComm"] and not self.opens_page(after["items"][0]))
                 self.run_comm(sec["items"], nxt["items"] if nxt and nxt["noComm"] else None)
         pages = []
@@ -1448,11 +1481,19 @@ class Engine:
             self.tick()
             base = dict(self.col_w)
             best = self.choose(pos, pre, base)
+            if self.short_text_end(best):
+                # however the page was chosen, its text doesn't end on a short line when it goes
+                # on on the next page (rule 8)
+                best = self.fix_short_end(pos, pre, base, best)
             self.col_w = dict(best["state"][0])
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
             if last and next_plain:
                 budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM
                 lines, h, end, done = self.fill_plain(next_plain, self.plain_start, budget)
+                if lines and not done:
+                    # its last few lines would be left alone on the next page: they come here
+                    lines, h, end, done = self.absorb_tail(next_plain, self.plain_start, budget,
+                                                           getattr(self, "after_plain", None), (lines, h, end, done))
                 if lines:
                     best["post"] = {"lines": lines, "h": h, "mt": self.sgap + 3 * PT_PER_MM, "items": next_plain}
                     self.plain_start = end
@@ -1906,6 +1947,8 @@ class Engine:
             lines, h, end, done = self.fill_plain(lst, frm, budget)
             if not lines:
                 break
+            if not done:
+                lines, h, end, done = self.absorb_tail(lst, frm, budget, next_sec, (lines, h, end, done))
             self.plain_start = end
             for l in lines:
                 if getattr(l, "kind", "p") == "p":
@@ -1913,10 +1956,12 @@ class Engine:
             even_paragraphs(lines)
             it = lst[min(frm[0], len(lst) - 1)]
             spare = budget - h
-            if (done and next_sec and not next_sec["noComm"] and not self.opens_page(next_sec["items"][0])
-                    and spare > self.room_for_section()):
-                # the commented text continues under the end of the haftara on this page
-                self.pre = {"lines": lines, "h": h, "chapter": it["chapter"], "parasha": it["parasha"], "items": lst}
+            if (done and next_sec and not next_sec["noComm"] and spare > self.room_for_section()
+                    and (not self.opens_page(next_sec["items"][0]) or self.parasha_under_haftara(next_sec, lst, frm, h))):
+                # the commented text continues under the end of the haftara on this page (a new
+                # parasha too, when the end of the haftara takes only a little of the page)
+                self.pre = {"lines": lines, "h": h, "chapter": it["chapter"], "parasha": it["parasha"], "items": lst,
+                            "tail": self.opens_page(next_sec["items"][0])}
                 break
             if not done:
                 n_lines = len([l for l in lines if l.kind == "p"])
@@ -1924,6 +1969,93 @@ class Engine:
             r = {"a": frm, "b": end, "at_end": True, "pre": None, "ptrs": {}, "side": {}, "sections": [],
                  "post": {"lines": lines, "h": h, "mt": 0.0, "items": lst}, "text": [], "text_h": 0.0, "top_h": 0.0}
             self.pages.append((r, it["chapter"], it["parasha"]))
+
+    def fix_short_end(self, pos, pre, base, best):
+        """A page whose text goes on on the next page but ends here on a short line: finish the
+        line, or end at the end of the line before (or the one before it); failing that, the
+        same with the translation column a little narrower or wider. The page stays as it was
+        if nothing keeps the other rules."""
+        g0 = self.g_of(pos)
+        ok = lambda q: (q.get("start_ok") and not self.page_unstarted(q) and not self.short_text_end(q)
+                        and (q["col_full"] or q["at_end"] or not self.sides) and self.fills(q))
+
+        def mend(r):
+            g = self.g_of(r["b"])
+            alt, _ = self.end_on_full_line(pos, g0, g, r, pre)
+            if alt is not r and ok(alt):
+                return alt
+            x, cur = g, r
+            for _ in range(3):
+                x2 = self.full_line_end(cur, g0, x)
+                if not g0 < x2 < x:
+                    break
+                q = self.compose(pos, self.pos(x2), False, pre)
+                if ok(q):
+                    return q
+                cur, x = q, x2
+            return None
+
+        start = dict(best["state"][0])
+        self.col_w = dict(start)
+        found = mend(best)
+        if found is None and self.sides:
+            for step in (-1, 1, -2, 2, -3, 3, -4, 4):
+                for c in self.sides:
+                    top = AUTO_MAX if self.comms[c]["autoW"] else base[c] + 3
+                    low = AUTO_MIN if self.comms[c]["autoW"] else base[c] - 6
+                    self.col_w[c] = min(top, max(low, start.get(c, base[c]) + step))
+                cand = self.search_page(pos, pre)
+                found = cand if ok(cand) else mend(cand)
+                if found is not None:
+                    break
+        self.col_w = dict(base)
+        if found is None:
+            best["short_ok"] = True       # no other way keeps the stronger rules: a known exception
+            return best
+        found.setdefault("state", best["state"])
+        return found
+
+    def absorb_tail(self, lst, frm, budget, next_sec, page):
+        """A haftara whose last few lines would be left alone on the next page (at the end of
+        the book, or before a page that opens a section): up to three of them come to this page,
+        its lines a little closer (by up to TAIL_SQUEEZE); failing that, this page gives up a few
+        lines, so that the next one holds at least TAIL_LINES. Returns the page as fill_plain does."""
+        lines, h, end, done = page
+        rest, rh, _, rdone = self.fill_plain(lst, end, self.contentH - self.head_h)
+        alone = len([l for l in rest if l.kind == "p"])
+        if not rdone or alone >= TAIL_LINES:
+            return page
+        if (next_sec and not next_sec["noComm"] and self.contentH - self.head_h - rh > self.room_for_section()
+                and (not self.opens_page(next_sec["items"][0]) or self.parasha_under_haftara(next_sec, lst, end, rh))):
+            return page             # the next section begins under them on that page anyway
+        if alone <= 3:
+            all_lines, ah, aend, adone = self.fill_plain(lst, frm, budget / (1 - TAIL_SQUEEZE))
+            if adone and ah > 0 and budget / ah >= 1 - TAIL_SQUEEZE:
+                k = budget / ah
+                for l in all_lines:
+                    l.h *= k
+                return all_lines, restack(all_lines), aend, True
+        fewer = self.fill_plain(lst, frm, budget - (TAIL_LINES - alone) * self.main_lh)
+        if fewer[0] and len([l for l in fewer[0] if l.kind == "p"]) >= 2:
+            return fewer
+        return page
+
+    def short_text_end(self, r):
+        """Whether the page's text goes on on the next page and its last line here is short."""
+        text = [l for l in r.get("text", []) if l.kind == "p"]
+        b = r.get("b")
+        if not text or r["text"][-1].kind != "p" or r.get("at_end") or "gm" in r or not b or b[0] >= len(self.items):
+            return False
+        goes_on = b[1] > 0 or (self.items[b[0]]["type"] == "v" and not self.P["verseNewLine"])
+        return goes_on and text[-1].natural < text[-1].width * 0.6
+
+    def parasha_under_haftara(self, next_sec, lst, frm, h):
+        """Whether the next parasha begins on this page, under the end of the haftara: when the
+        haftara ran on to this page and its end takes no more than HAFTARA_TAIL of it, rather
+        than leaving the page almost empty (the festival haftarot always open a page)."""
+        it = next_sec["items"][0]
+        return (it["type"] == "h" and re.match(r"^פרש(ת|ה)\s", it["text"]) is not None
+                and frm != (0, 0) and h <= HAFTARA_TAIL * (self.contentH - self.head_h))
 
     # ------------------------------------------------------------ to absolute coordinates
 

@@ -2,7 +2,7 @@
 from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt
 from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen, QPolygonF
 
-from .textlayout import PT_PER_MM, metrics, qfont, space
+from .textlayout import PT_PER_MM, justify_spacing, metrics, qfont, space, spaced_font
 
 
 def draw_line(p, line, x_right, top):
@@ -16,6 +16,9 @@ def draw_line(p, line, x_right, top):
     fill = 0.2 if getattr(line, "force", False) else 0.35
     justify = (line.align == "justify" and not line.last and gaps > 0 and total >= line.width * fill)
     gap = (line.width - total) / gaps if justify else space(line.base)
+    ls, widths = 0.0, None
+    if justify:
+        gap, ls, widths = justify_spacing(line, gaps, total)
     if gaps > 0 and total + gap * gaps > line.width:
         gap = (line.width - total) / gaps     # a line set with tighter spaces
     x = x_right
@@ -26,9 +29,9 @@ def draw_line(p, line, x_right, top):
     baseline = top + (line.h - (m.ascent() + m.descent())) / 2 + m.ascent()
     if line.h > nominal * 3:  # never float a word in a very tall slot
         baseline = top + m.ascent()
-    for w in ws:
-        x -= w.w
-        p.setFont(qfont(w.style))
+    for k, w in enumerate(ws):
+        x -= widths[k] if widths else w.w
+        p.setFont(spaced_font(w.style, ls) if ls else qfont(w.style))
         p.drawText(QPointF(x, baseline), w.text)
         if not getattr(w, "join", False):
             x -= gap
