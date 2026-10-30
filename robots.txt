@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://etz-ivri.netlify.app/sitemap.xml
