@@ -42,7 +42,7 @@ GM_STRETCH = 0.2    # a Talmud page: how much more room each line may take to fi
 MIN_START_ROWS = 3  # a commentary under another doesn't begin at the foot of a page with fewer rows
 # a haftara whose end takes no more than this share of its last page: the next parasha begins
 # under it on that page, instead of on a new one
-HAFTARA_TAIL = 0.4
+HAFTARA_TAIL = 0.7
 # the most the lines of a haftara's last page may come closer, to take its last few lines
 TAIL_SQUEEZE = 0.1
 # a haftara's last page holds at least this many lines (when its lines can't all come up)
@@ -440,7 +440,8 @@ class Engine:
                 base = self.style[c]
                 bold = base.with_bold(True)
                 j = e["j"]
-                ws = [Word(e["label"], bold, width(bold, e["label"]), ("L", j))] if e["label"] else []
+                # (the verse's number never ends a line: it goes with the first word of its passage)
+                ws = [Word(e["label"], bold, width(bold, e["label"]), ("L", j), glue=True)] if e["label"] else []
                 for k, (t, b) in enumerate(e["tokens"]):
                     st = bold if b else base
                     ws.append(Word(t, st, width(st, t), (j, k)))
@@ -1190,7 +1191,7 @@ class Engine:
         last = secs[-1]
         if not last["cut"]:
             rows = sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in secs)
-            if rows and spare / rows < secs[0]["nlh"] * 0.25:
+            if rows and spare / rows < secs[0]["nlh"] * 0.12:
                 for s in secs:
                     s["nlh"] += spare / rows
                     s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
@@ -1208,16 +1209,18 @@ class Engine:
         pre = r["pre"] if r["pre"] and "lines" in r["pre"] else None
         if pre:
             text += [l for l in pre["lines"] if l.kind == "p"]
-        rows = sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in secs)
-        units = len(text) + rows
-        if spare > 0.5 and units and spare / units <= 0.35 * min([self.main_lh] + [s["nlh"] for s in secs]):
-            d = spare / units
+        # each line opens by the same share of its own height (a small commentary line as much
+        # as a line of the text, to the eye)
+        rows = {id(s): math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in secs}
+        total = sum(l.h for l in text) + sum(rows[id(s)] * s["nlh"] for s in secs)
+        if spare > 0.5 and total and spare / total <= 0.3:
+            k = spare / total
             for l in text:
-                l.h += d
+                l.h *= 1 + k
             if pre:
                 pre["h"] = restack(pre["lines"])
             for s in secs:
-                s["nlh"] += d
+                s["nlh"] *= 1 + k
                 s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
             self.recompute_top(r)
             self.align_columns(r)
@@ -1977,7 +1980,8 @@ class Engine:
         if nothing keeps the other rules."""
         g0 = self.g_of(pos)
         ok = lambda q: (q.get("start_ok") and not self.page_unstarted(q) and not self.short_text_end(q)
-                        and (q["col_full"] or q["at_end"] or not self.sides) and self.fills(q))
+                        and (q["col_full"] or q["at_end"] or not self.sides) and self.fills(q)
+                        and not (self.thin_text(q) and not self.thin_text(best)))
 
         def mend(r):
             g = self.g_of(r["b"])

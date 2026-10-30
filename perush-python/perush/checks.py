@@ -46,6 +46,8 @@ NAMES = {
     "heading_foot": "כותרת בתחתית העמוד עם פחות משתי שורות תחתיה",
     "last_alone": "עמוד אחרון עם שורות בודדות",
     "loose": "מרווח שורות שנפתח הרבה מעבר לרגיל",
+    "integrity": "מילים שחסרות, כפולות או לא בסדר הנכון",
+    "early": "תרגום שמתחיל לפני הפסוק שלו",
     "engine": "הודעה מהעימוד",
 }
 
@@ -115,6 +117,7 @@ def check(eng, pages):
             gap = room_left(eng, pg)
             if gap > HOLE:
                 add("hole", n, f"{gap:.0f} נקודות")
+    check_integrity(eng, pages, off, add)
     for n in range(off, len(pages)):
         check_foot(pages[n], n, add, n + 1 < len(pages))
     if len(pages) - off > 1:
@@ -154,6 +157,67 @@ def room_left(eng, pg):
         return 0.0
     bottom = max(fr.top + max((l.y + l.h for l in fr.lines), default=0) for fr in pg.frames)
     return pg.height - eng.m - bottom
+
+
+def check_integrity(eng, pages, off, add):
+    """Every word of the text and of each commentary is on the pages once, in its order: the
+    words as laid out, page by page, against the source (a word dropped, doubled or out of
+    order between pages would show here)."""
+    seen = {"main": []}
+    for n in range(off, len(pages)):
+        for fr in pages[n].frames:
+            if not fr.src:
+                continue
+            if fr.src[0] == "main":
+                items = fr.src[1] or []
+                for l in fr.lines:
+                    for w in l.words:
+                        if isinstance(w.ref, tuple) and len(w.ref) == 2 and isinstance(w.ref[0], int) and w.ref[0] < len(items):
+                            key = (id(items[w.ref[0]]), w.ref[1])
+                            if not seen["main"] or seen["main"][-1][0] != key:      # (a word split at a maqaf)
+                                seen["main"].append((key, n))
+            elif fr.src[0] == "comm":
+                lst = seen.setdefault(fr.src[1], [])
+                for l in fr.lines[:-1]:
+                    w = l.words[-1] if l.words else None
+                    if w is not None and isinstance(w.ref, tuple) and w.ref[0] == "L":
+                        add("number", n, f"{eng.comms[fr.src[1]]['name']}: {w.text}")
+                for l in fr.lines:
+                    for w in l.words:
+                        if isinstance(w.ref, tuple) and len(w.ref) == 2 and (not lst or lst[-1][0] != w.ref):
+                            lst.append((w.ref, n))
+    want = [(id(it), k) for it in eng.all_items if it["type"] == "v" for k in range(len(it["words"]))]
+    streams = {}
+    for c, st in eng.streams.items():
+        exp = streams[c] = []
+        for j, e in enumerate(st):
+            if e["label"]:
+                exp.append(("L", j))
+            exp.extend((j, k) for k in range(len(e["tokens"])))
+    # a translation or commentary never begins before its verse: the page where each verse
+    # begins, against the page where each passage on it begins
+    verse_page = {}
+    by_id = {id(it): it for it in eng.all_items if it["type"] == "v"}
+    for (iid, k), n in seen["main"]:
+        it = by_id.get(iid)
+        if it is not None and it["idx"] >= 0 and it["idx"] not in verse_page:
+            verse_page[it["idx"]] = n
+    for c, st in eng.streams.items():
+        first = {}
+        for ref, n in seen.get(c, []):
+            j = ref[1] if ref[0] == "L" else ref[0]
+            first.setdefault(j, n)
+        for j, n in sorted(first.items()):
+            v = st[j]["v"] if j < len(st) else None
+            if v is not None and v in verse_page and n < verse_page[v]:
+                add("early", n, f"{eng.comms[c]['name']} על {where(eng, v)}")
+    for name, got, exp in [("הטקסט", seen["main"], want)] + [(eng.comms[c]["name"], seen.get(c, []), streams[c]) for c in streams]:
+        keys = [k for k, _ in got]
+        if keys == exp:
+            continue
+        i = next((i for i, (a, b) in enumerate(zip(keys, exp)) if a != b), min(len(keys), len(exp)))
+        n = got[min(i, len(got) - 1)][1] if got else -1
+        add("integrity", n, f"{name}: {len(keys)} מילים במקום {len(exp)}, הראשונה שלא במקומה היא מספר {i + 1}")
 
 
 def check_foot(pg, n, add, more):
