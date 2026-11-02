@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"ספר מהרב · {VERSION}")
         self.resize(1150, 780)
         self.project = None
-        self.thread = None
+        self.job = None
         self.stop_flag = threading.Event()
         self._build()
         self.log_line.connect(self._append_log)
@@ -378,15 +378,15 @@ class MainWindow(QMainWindow):
 
     def run(self, fn, after=None):
         """fn in the background (the window stays alive); then after(result) in the window."""
-        if self.thread is not None:
+        if self.job is not None:
             return
         self.stop_flag.clear()
         for b in self.buttons:
             b.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self._after = after
-        self.thread = threading.Thread(target=self._work, args=(fn,), daemon=True)
-        self.thread.start()
+        self.job = threading.Thread(target=self._work, args=(fn,), daemon=True)
+        self.job.start()
 
     def _work(self, fn):
         try:
@@ -401,7 +401,7 @@ class MainWindow(QMainWindow):
 
     def _finished(self, res, err):
         after, self._after = self._after, None
-        self.thread = None
+        self.job = None
         for b in self.buttons:
             b.setEnabled(True)
         self.stop_btn.setEnabled(False)
