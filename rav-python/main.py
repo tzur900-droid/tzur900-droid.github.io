@@ -74,6 +74,17 @@ def main():
         md = "# בדיקה\n\n## פרק\n\nשלום **עולם** {מקור 1}\n"
         export.to_docx(md, os.path.join(sys.argv[2], "selftest.docx"))
         export.to_pdf(md, os.path.join(sys.argv[2], "selftest.pdf"))
+        # the window, and a step run in the background that comes back to the window
+        from PySide6.QtCore import QTimer
+        from rav.app import MainWindow
+        win = MainWindow()
+        win.show()
+        got = []
+        win.run(lambda: 42, lambda res: (got.append(res), app.quit()))
+        QTimer.singleShot(20000, app.quit)
+        app.exec()
+        if got != [42]:
+            raise RuntimeError("a step in the background did not come back to the window")
         open(os.path.join(sys.argv[2], "selftest.txt"), "w").write("ok whisper=%s" % transcribe.available())
         return 0
     if len(sys.argv) > 1 and sys.argv[1] in ("--new", "--step"):
@@ -89,9 +100,20 @@ def main():
     return app.exec()
 
 
+def finish(code):
+    """Leave without Python taking Qt's objects apart one by one, which can crash on the way out."""
+    import os
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(code or 0)
+
+
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        finish(main())
     except SystemExit:
         raise
     except BaseException:
