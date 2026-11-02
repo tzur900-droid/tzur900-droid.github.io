@@ -1,0 +1,61 @@
+# Builds "ספר מהרב" as a Windows app (Rav.exe, no Python needed) on every change to it,
+# and puts it on the release "rav-exe": .../releases/download/rav-exe/Rav-windows.zip
+name: build rav exe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "rav-python/**"
+      - ".github/workflows/build-rav-exe.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r rav-python/requirements.txt pyinstaller
+
+      - name: Build
+        working-directory: rav-python
+        run: >
+          pyinstaller --noconfirm --windowed --name Rav
+          --collect-all faster_whisper --collect-all ctranslate2 --collect-data yt_dlp
+          --hidden-import PySide6.QtPrintSupport
+          --exclude-module tkinter
+          main.py
+
+      - name: Smoke test (the exe starts, every part loads, a small book comes out)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force st | Out-Null
+          Start-Process -FilePath "rav-python/dist/Rav/Rav.exe" -ArgumentList "--selftest", "$PWD\st" -Wait
+          if (!(Test-Path st/selftest.pdf) -or !(Test-Path st/selftest.docx)) { throw "the exe did not make the test book" }
+          Get-Content st/selftest.txt
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          Copy-Item rav-python/README.md rav-python/dist/Rav/
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory("rav-python/dist/Rav", "Rav-windows.zip", [System.IO.Compression.CompressionLevel]::Optimal, $true, [System.Text.Encoding]::UTF8)
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view rav-exe >/dev/null 2>&1 || gh release create rav-exe --title "ספר מהרב לווינדוס" --notes "Rav-windows.zip: מחלצים ומפעילים את Rav.exe. צריך גם Claude Code מחובר לחשבון Claude (ראו README)."
+          gh release upload rav-exe Rav-windows.zip --clobber
