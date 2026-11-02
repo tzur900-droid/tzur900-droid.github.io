@@ -118,7 +118,10 @@ def finish(code):
     if sys.platform == "win32":
         # os._exit still unloads Qt's libraries one by one, which crashed there (access violation)
         import ctypes
-        k = ctypes.windll.kernel32
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32")
+        k.GetCurrentProcess.restype = wintypes.HANDLE      # a 64-bit handle, not a C int
+        k.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
         k.TerminateProcess(k.GetCurrentProcess(), code or 0)
     os._exit(code or 0)
 
