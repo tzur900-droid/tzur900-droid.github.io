@@ -17,12 +17,18 @@ def step_search(project, stop=lambda: False, youtube=True):
 
 
 def step_collect(project, stop=lambda: False, progress=log):
-    todo = [s for s in project.sources if s["use"] and s["state"] in ("new",)]
-    for n, s in enumerate(todo, 1):
-        if stop():
+    done = 0
+    while True:      # pages that list lessons add new sources: those are collected too
+        todo = [s for s in project.sources if s["use"] and s["state"] in ("new",)]
+        if not todo:
             return
-        progress(f"[{n}/{len(todo)}] אוסף: {s['title'][:70]}")
-        collect.collect_one(project, s, progress, stop)
+        for s in todo:
+            if stop():
+                return
+            done += 1
+            left = sum(1 for x in project.sources if x["use"] and x["state"] == "new")
+            progress(f"[{done}/{done + left - 1}] אוסף: {s['title'][:70]}")
+            collect.collect_one(project, s, progress, stop)
 
 
 def step_read(project, stop=lambda: False, progress=log):

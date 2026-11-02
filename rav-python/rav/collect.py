@@ -20,6 +20,97 @@ class Skip(Exception):
     """The source has nothing to use (the reason is the message)."""
 
 
+class Listed(Skip):
+    """A page that lists lessons: the lessons were added as sources of their own."""
+
+
+LIST_WORDS = ("רשימ", "ארכיון", "תגית", "כל השיעורים", "עמוד ", "קטגורי", "סדרת")
+
+
+def looks_like_list(s, url):
+    hay = (s.get("title") or "") + " " + (s.get("why") or "")
+    low = url.lower()
+    return any(w in hay for w in LIST_WORDS) or any(w in low for w in ("/tags/", "filter", "catid=", "/rabbis/", "/category/", "/series/"))
+
+
+def lesson_links(html, base):
+    """(url, title) of the links on a page that look like single lessons on the same site."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    for t in soup(["nav", "header", "footer", "script", "style"]):
+        t.decompose()
+    h = host(base)
+    out, seen = [], {base.rstrip("/")}
+    for a in soup.find_all("a", href=True):
+        u = urllib.parse.urljoin(base, a["href"]).split("#")[0]
+        title = re.sub(r"\s+", " ", a.get_text(" ")).strip()
+        if host(u) != h or len(title) < 8 or u.rstrip("/") in seen:
+            continue
+        if looks_like_list({"title": title}, u) or re.search(r"(login|register|share|print|mailto|javascript)", u, re.I):
+            continue
+        seen.add(u.rstrip("/"))
+        out.append((u, title[:150]))
+    return out
+
+
+class ShortPage(Exception):
+    """The program could not get the text of a page by itself (then Claude tries)."""
+
+
+# ---------- pages built in the browser (JavaScript): opened in Edge/Chrome without a window ----------
+def find_browser():
+    import shutil
+    cands = []
+    for base in (os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+                 os.environ.get("PROGRAMFILES", r"C:\Program Files"), os.environ.get("LOCALAPPDATA", "")):
+        if base:
+            cands += [os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"),
+                      os.path.join(base, "Google", "Chrome", "Application", "chrome.exe")]
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    for name in ("msedge", "google-chrome", "chromium", "chromium-browser", "chrome"):
+        p = shutil.which(name)
+        if p:
+            return p
+    import glob
+    found = glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome")
+    return found[0] if found else None
+
+
+def render(url, wait_ms=15000):
+    """The page's HTML after its scripts ran, or "" when there is no browser or it failed."""
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+    exe = find_browser()
+    if not exe:
+        return ""
+    base = [exe, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+            "--disable-extensions", "--mute-audio", "--disable-background-networking",
+            "--disable-component-update", "--disable-sync", f"--virtual-time-budget={wait_ms}",
+            f"--user-agent={UA}"]
+    if sys.platform != "win32" and hasattr(os, "geteuid") and os.geteuid() == 0:
+        base.insert(1, "--no-sandbox")
+    flags = 0x08000000 if sys.platform == "win32" else 0
+    # first with a profile of its own (an open Edge does not take the page over), then without
+    for own in (True, False):
+        profile = tempfile.mkdtemp(prefix="rav-browser-") if own else None
+        cmd = base + ([f"--user-data-dir={profile}"] if own else []) + ["--dump-dom", url]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=90, creationflags=flags)
+            html = r.stdout.decode("utf-8", "replace")
+            if len(html) > 200:
+                return html
+        except Exception as e:
+            log(f"הדפדפן לא פתח את הדף ({type(e).__name__})")
+        finally:
+            if profile:
+                shutil.rmtree(profile, ignore_errors=True)
+    return ""
+
+
 def is_local(url):
     return not re.match(r"^https?://", url)
 
@@ -233,6 +324,22 @@ def from_web(project, s, settings, progress, should_stop):
         r.encoding = r.apparent_encoding
     html = r.text
     text = text_of_html(html)
+    if len(text) < 2500:
+        # maybe the page is built by its scripts (like yeshiva.org.il): open it in a browser
+        progress("פותח את הדף בדפדפן (בלי חלון)…")
+        built = render(url)
+        if built and len(text_of_html(built)) > len(text):
+            html, text = built, text_of_html(built)
+            log(f"הדף נקרא דרך הדפדפן ({len(text):,} תווים)")
+    if looks_like_list(s, url):
+        links = lesson_links(html, url)
+        if len(links) >= 3:
+            n = 0
+            for u, title in links[:40]:
+                before = len(project.sources)
+                project.add_source(u, title, "", f"מתוך הרשימה: {s['title']}", "רשימה")
+                n += len(project.sources) - before
+            raise Listed(f"דף רשימה — נוספו ממנו {n} שיעורים לטבלה")
     media = media_links(html, url)
     wants_media = s.get("kind") in ("audio", "video") or len(text) < 2500
     if media and wants_media:
@@ -249,7 +356,7 @@ def from_web(project, s, settings, progress, should_stop):
         except Skip as e:
             log(f"ההקלטה בדף לא תומללה: {e}")
     if len(text) < 300:
-        raise Skip("אין בדף טקסט (אולי הוא נבנה בדפדפן)")
+        raise ShortPage("אין בדף טקסט")
     return text
 
 
@@ -302,9 +409,15 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
             except Exception as e:
                 if is_video_host(url) or url.lower().split("?")[0].endswith(MEDIA_EXT):
                     raise
-                log(f"לא הצלחתי לקרוא את הדף בעצמי ({e}) — מבקש מ־Claude")
-                text = via_claude(url, settings.get("model") or None)
-                s["note"] = "נקרא דרך Claude"
+                built = "" if isinstance(e, ShortPage) else render(url)   # (a short page was rendered already)
+                if built and len(text_of_html(built)) >= 300:
+                    log(f"הדף נקרא דרך הדפדפן ({e})")
+                    text = text_of_html(built)
+                    s["note"] = "נקרא דרך הדפדפן"
+                else:
+                    log(f"לא הצלחתי לקרוא את הדף בעצמי ({e}) — מבקש מ־Claude")
+                    text = via_claude(url, settings.get("model") or None)
+                    s["note"] = "נקרא דרך Claude"
         text = text.strip()
         if len(text) < 200:
             raise Skip("כמעט אין טקסט")
