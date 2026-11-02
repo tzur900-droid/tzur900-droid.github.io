@@ -86,7 +86,7 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         for text, fn in (("חדש", self.new_project), ("פתיחה…", self.open_project),
                          ("תיקיית הספר", self.open_folder), ("הגדרות", self.settings),
-                         ("בדיקת Claude", self.check_claude)):
+                         ("חיבור ל־Claude…", self.connect_claude), ("בדיקת Claude", self.check_claude)):
             a = QAction(text, self)
             a.triggered.connect(fn)
             tb.addAction(a)
@@ -500,9 +500,79 @@ class MainWindow(QMainWindow):
                 return
 
     def check_claude(self):
-        self.run(lambda: claude_cli.status(),
-                 lambda res: QMessageBox.information(self, "Claude", res[1]) if res[0]
-                 else QMessageBox.warning(self, "Claude", res[1]))
+        def done(res):
+            if res[0]:
+                QMessageBox.information(self, "Claude", res[1])
+            elif "לא מחובר" in res[1]:
+                if QMessageBox.question(self, "Claude", res[1] + "\n\nלהתחבר עכשיו?") == QMessageBox.Yes:
+                    self.connect_claude()
+            else:
+                QMessageBox.warning(self, "Claude", res[1])
+        self.run(lambda: claude_cli.status(), done)
+
+    def connect_claude(self):
+        ConnectDialog(self).exec()
+
+
+class ConnectDialog(QDialog):
+    """Connecting with a key from `claude setup-token`: the login is kept with the program."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle("חיבור ל־Claude")
+        self.resize(620, 330)
+        v = QVBoxLayout(self)
+        steps = QLabel(
+            "<b>1.</b> לוחצים <b>קבלת מפתח</b>. נפתח חלון שחור ואחריו דפדפן: מתחברים לחשבון Claude שלכם "
+            "ולוחצים Authorize (אם הדפדפן מראה קוד — מעתיקים אותו לחלון השחור ולוחצים Enter).<br>"
+            "<b>2.</b> בסוף מופיע בחלון השחור מפתח ארוך שמתחיל ב־<code>sk-ant-oat01-</code>. מסמנים אותו בעכבר "
+            "(את כולו) ולוחצים Ctrl+C.<br>"
+            "<b>3.</b> מדביקים כאן (Ctrl+V) ולוחצים <b>שמירה ובדיקה</b>.<br><br>"
+            "המפתח הוא כמו סיסמה: הוא נשמר רק במחשב הזה. לא שולחים אותו לאף אחד.")
+        steps.setWordWrap(True)
+        steps.setTextFormat(Qt.RichText)
+        v.addWidget(steps)
+        get = QPushButton("קבלת מפתח (פותח חלון)")
+        get.clicked.connect(self.get_key)
+        v.addWidget(get)
+        self.key = QLineEdit()
+        self.key.setEchoMode(QLineEdit.Password)
+        self.key.setPlaceholderText("sk-ant-oat01-…")
+        self.key.setLayoutDirection(Qt.LeftToRight)
+        if claude_cli.saved_key():
+            self.key.setPlaceholderText("כבר שמור מפתח. אפשר להדביק חדש במקומו")
+        v.addWidget(self.key)
+        row = QHBoxLayout()
+        save = QPushButton("שמירה ובדיקה")
+        save.clicked.connect(self.save)
+        forget = QPushButton("מחיקת המפתח השמור")
+        forget.clicked.connect(self.forget)
+        close = QPushButton("סגירה")
+        close.clicked.connect(self.reject)
+        for b in (save, forget, close):
+            row.addWidget(b)
+        v.addLayout(row)
+
+    def get_key(self):
+        try:
+            claude_cli.open_setup_token_window()
+        except Exception as e:
+            QMessageBox.warning(self, "Claude", str(e))
+
+    def save(self):
+        key = self.key.text().strip()
+        if not key.startswith("sk-ant-"):
+            QMessageBox.warning(self, "Claude", "זה לא נראה כמו מפתח: המפתח מתחיל ב־sk-ant-oat01- "
+                                "ויש להעתיק אותו בשלמותו.")
+            return
+        claude_cli.save_key(key)
+        self.accept()
+        self.win.check_claude()
+
+    def forget(self):
+        claude_cli.save_key("")
+        QMessageBox.information(self, "Claude", "המפתח נמחק.")
 
 
 def collect_is_local(u):
