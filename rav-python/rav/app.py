@@ -3,7 +3,7 @@ add), the plan of the book (to edit before writing), the book, and what the prog
 import os
 import threading
 
-from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
@@ -18,25 +18,6 @@ from .version import VERSION
 
 STATES = {"new": "ממתין", "text": "נאסף", "read": "נקרא ✓", "irrelevant": "לא שייך", "failed": "נכשל"}
 KIND_NAMES = {"text": "טקסט", "audio": "שמע", "video": "וידאו", "pdf": "PDF", "file": "קובץ"}
-
-
-class Worker(QObject):
-    line = Signal(str)
-    done = Signal(object, str)      # result, error
-
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    def run(self):
-        try:
-            self.done.emit(self.fn(), "")
-        except InterruptedError:
-            self.done.emit(None, "")
-        except Exception as e:
-            import traceback
-            log("ERROR " + traceback.format_exc())
-            self.done.emit(None, str(e))
 
 
 class Settings(QDialog):
@@ -84,6 +65,7 @@ class Settings(QDialog):
 
 class MainWindow(QMainWindow):
     log_line = Signal(str)
+    step_done = Signal(object, str)     # result, error — sent from the background, received in the window
 
     def __init__(self):
         super().__init__()
@@ -94,6 +76,7 @@ class MainWindow(QMainWindow):
         self.stop_flag = threading.Event()
         self._build()
         self.log_line.connect(self._append_log)
+        self.step_done.connect(self._finished)
         listeners.append(self.log_line.emit)
         self._open_last()
 
@@ -394,22 +377,30 @@ class MainWindow(QMainWindow):
         self.logbox.appendPlainText(line)
 
     def run(self, fn, after=None):
+        """fn in the background (the window stays alive); then after(result) in the window."""
         if self.thread is not None:
             return
         self.stop_flag.clear()
         for b in self.buttons:
             b.setEnabled(False)
         self.stop_btn.setEnabled(True)
-        self.thread = QThread()
-        self.worker = Worker(fn)
-        self.worker.moveToThread(self.thread)
-        self.thread.started.connect(self.worker.run)
-        self.worker.done.connect(lambda res, err: self._finished(res, err, after))
+        self._after = after
+        self.thread = threading.Thread(target=self._work, args=(fn,), daemon=True)
         self.thread.start()
 
-    def _finished(self, res, err, after):
-        self.thread.quit()
-        self.thread.wait()
+    def _work(self, fn):
+        try:
+            res, err = fn(), ""
+        except InterruptedError:
+            res, err = None, ""
+        except Exception as e:
+            import traceback
+            log("ERROR " + traceback.format_exc())
+            res, err = None, str(e) or type(e).__name__
+        self.step_done.emit(res, err)
+
+    def _finished(self, res, err):
+        after, self._after = self._after, None
         self.thread = None
         for b in self.buttons:
             b.setEnabled(True)

@@ -37,11 +37,12 @@ jobs:
           --exclude-module tkinter
           main.py
 
-      - name: Smoke test (the exe starts, every part loads, a small book comes out)
+      - name: Smoke test (the exe starts, the window opens, a step in the background comes back, a small book comes out)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force st | Out-Null
-          Start-Process -FilePath "rav-python/dist/Rav/Rav.exe" -ArgumentList "--selftest", "$PWD\st" -Wait
+          $p = Start-Process -FilePath "rav-python/dist/Rav/Rav.exe" -ArgumentList "--selftest", "$PWD\st" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content rav-python/dist/Rav/rav.log -ErrorAction SilentlyContinue; throw "the exe failed (exit $($p.ExitCode))" }
           if (!(Test-Path st/selftest.pdf) -or !(Test-Path st/selftest.docx)) { throw "the exe did not make the test book" }
           Get-Content st/selftest.txt
 
