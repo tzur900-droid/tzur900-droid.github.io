@@ -63,28 +63,35 @@ def main():
     log(f"התחלה · Python {sys.version.split()[0]} · {sys.platform}")
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
+    log("פותח את Qt")
     app = QApplication(sys.argv[:1])
+    log("Qt מוכן")
     app.setApplicationName("rav")
     app.setLayoutDirection(Qt.RightToLeft)
     if len(sys.argv) > 2 and sys.argv[1] == "--selftest":
         # the build checks that the parts load and a book comes out (Word and PDF)
         import os
+        log("בדיקה: טוען רכיבים")
         from rav import collect, compose, export, search, transcribe  # noqa: F401
         import yt_dlp  # noqa: F401
+        log("בדיקה: Word ו־PDF")
         md = "# בדיקה\n\n## פרק\n\nשלום **עולם** {מקור 1}\n"
         export.to_docx(md, os.path.join(sys.argv[2], "selftest.docx"))
         export.to_pdf(md, os.path.join(sys.argv[2], "selftest.pdf"))
         # the window, and a step run in the background that comes back to the window
         from PySide6.QtCore import QTimer
         from rav.app import MainWindow
+        log("בדיקה: החלון")
         win = MainWindow()
         win.show()
+        log("בדיקה: צעד ברקע")
         got = []
         win.run(lambda: 42, lambda res: (got.append(res), app.quit()))
         QTimer.singleShot(20000, app.quit)
         app.exec()
         if got != [42]:
             raise RuntimeError("a step in the background did not come back to the window")
+        log("בדיקה: הכל עבד")
         open(os.path.join(sys.argv[2], "selftest.txt"), "w").write("ok whisper=%s" % transcribe.available())
         return 0
     if len(sys.argv) > 1 and sys.argv[1] in ("--new", "--step"):

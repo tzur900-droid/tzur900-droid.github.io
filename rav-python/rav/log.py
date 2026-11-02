@@ -24,6 +24,9 @@ def log(msg):
             for folder in (program_dir(), os.environ.get("TEMP", ""), os.path.expanduser("~")):
                 try:
                     _FILE = open(os.path.join(folder, "rav.log"), "w", encoding="utf-8")
+                    # a crash inside Qt or another library: where it happened goes into rav.log too
+                    import faulthandler
+                    faulthandler.enable(_FILE, all_threads=True)
                     break
                 except OSError:
                     continue
