@@ -61,6 +61,11 @@ def main():
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
     from rav.version import VERSION
+    if len(sys.argv) > 3 and sys.argv[1] == "--install-update":
+        # the new version, opened from where it was unpacked: it puts itself in place and opens there
+        from rav import updater
+        log(f"התחלה (התקנת עדכון) · גרסה {VERSION}")
+        return 0 if updater.install_here(sys.argv[2], sys.argv[3]) else 1
     log(f"התחלה · גרסה {VERSION} · Python {sys.version.split()[0]} · {sys.platform}")
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication

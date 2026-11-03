@@ -520,6 +520,7 @@ class MainWindow(QMainWindow):
         from . import updater
         if not updater.frozen():
             return
+        threading.Thread(target=updater.clean_old, daemon=True).start()
         self.update_found.connect(self._tell_update)
 
         def work():
