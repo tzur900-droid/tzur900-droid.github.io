@@ -48,6 +48,8 @@ def lesson_links(html, base):
             continue
         if looks_like_list({"title": title}, u) or re.search(r"(login|register|share|print|mailto|javascript)", u, re.I):
             continue
+        if h.endswith("yeshiva.org.il") and not re.search(r"/midrash/\d+/?$", urllib.parse.urlparse(u).path):
+            continue        # on the yeshiva site a lesson is /midrash/<number>; the rest is the site's menus
         seen.add(u.rstrip("/"))
         out.append((u, title[:150]))
     return out
