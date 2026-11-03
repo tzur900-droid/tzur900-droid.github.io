@@ -48,16 +48,19 @@ jobs:
           Get-Content st/selftest.txt
           if ((Get-Content st/selftest.txt) -notmatch "audio=16000") { throw "the exe could not open a recording for transcribing" }
 
-      - name: Reading a page through Edge from inside Rav.exe (the yeshiva site builds its pages in the browser)
+      - name: The browser inside Rav.exe reads a page built by its scripts
+        # (the yeshiva site itself now asks servers to verify a human, so a page of our own is used)
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "rav-python/dist/Rav/Rav.exe" -ArgumentList "--render", "https://www.yeshiva.org.il/midrash/1120", "$PWD\st\render.txt" -Wait -PassThru
+          $html = '<html><body><div id=app>loading</div><script>setTimeout(function(){document.getElementById("app").innerHTML="<article>" + "שיעור לחנוכה, נר איש וביתו. ".repeat(60) + "</article>"},1500)</script></body></html>'
+          Set-Content -Path st/page.html -Value $html -Encoding utf8
+          $url = "file:///" + ((Resolve-Path st/page.html).Path -replace '\\','/')
+          $p = Start-Process -FilePath "rav-python/dist/Rav/Rav.exe" -ArgumentList "--render", $url, "$PWD\st\render.txt" -Wait -PassThru
           Get-Content st/render.txt
           Get-Content rav-python/dist/Rav/rav.log -ErrorAction SilentlyContinue
           $first = Get-Content st/render.txt -TotalCount 1
           if ($first -notmatch "builtin=True") { throw "the browser inside Rav.exe did not start" }
-          if ($first -notmatch "text=([0-9]{4,})") { throw "Rav.exe did not read the page through the browser" }
-          Select-String -Path rav-python/dist/Rav/rav.log -Pattern "דפדפן"
+          if ($first -notmatch "text=([0-9]{4,})") { throw "the browser inside Rav.exe did not read the page" }
 
       - name: Zip
         shell: pwsh

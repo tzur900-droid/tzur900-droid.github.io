@@ -67,6 +67,7 @@ def main():
     log("פותח את Qt")
     try:      # the browser inside the program must be loaded before the application is made
         import PySide6.QtWebEngineCore  # noqa: F401
+        import PySide6.QtWebEngineWidgets  # noqa: F401
         from PySide6.QtCore import QCoreApplication
         QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     except Exception as e:
@@ -125,6 +126,7 @@ def main():
             res["html"] = collect.render(sys.argv[2])
             app.quit()
         threading.Thread(target=work, daemon=True).start()
+        app.setQuitOnLastWindowClosed(False)    # the check window closing does not end the run
         app.exec()          # the browser inside the program works in this thread
         html = res.get("html", "")
         text = collect.text_of_html(html) if html else ""
