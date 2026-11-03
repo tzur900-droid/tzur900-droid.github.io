@@ -99,10 +99,15 @@ def render(url, wait_ms=15000):
         profile = tempfile.mkdtemp(prefix="rav-browser-") if own else None
         cmd = base + ([f"--user-data-dir={profile}"] if own else []) + ["--dump-dom", url]
         try:
-            r = subprocess.run(cmd, capture_output=True, timeout=90, creationflags=flags)
+            # stdin from nowhere: a program without a console has no stdin to hand on
+            r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=90,
+                               creationflags=flags)
             html = r.stdout.decode("utf-8", "replace")
             if len(html) > 200:
                 return html
+            err = r.stderr.decode("utf-8", "replace").strip().splitlines()[-3:]
+            log(f"הדפדפן ({os.path.basename(exe)}, {'פרופיל נפרד' if own else 'רגיל'}) החזיר {len(html)} תווים, "
+                f"קוד {r.returncode}: {' / '.join(err)[:300]}")
         except Exception as e:
             log(f"הדפדפן לא פתח את הדף ({type(e).__name__})")
         finally:
@@ -370,7 +375,7 @@ def via_claude(url, model=None):
               "הסבר, משל, סיפור, הלכה ומקור, לפי הסדר, ובלשון הכותב ככל האפשר, עם ציטוטים קצרים של המשפטים "
               "האופייניים. בלי תפריטים ופרסומות. אם בדף יש רק רשימה של שיעורים, כתוב את שמות השיעורים והקישורים "
               f"אליהם. אם הדף לא נפתח — ענה רק {FAILED_MARK}. החזר רק את התוכן.")
-    text = ask(prompt, tools=("WebFetch",), model=model, timeout=900)
+    text = ask(prompt, tools=("WebFetch",), model=model, timeout=300)
     if FAILED_MARK in text or len(text) < 300:
         raise Skip("הדף לא נפתח (גם לא דרך Claude)")
     return text

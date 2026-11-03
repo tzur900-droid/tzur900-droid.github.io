@@ -94,6 +94,14 @@ def main():
         log("בדיקה: הכל עבד")
         open(os.path.join(sys.argv[2], "selftest.txt"), "w").write("ok whisper=%s" % transcribe.available())
         return 0
+    if len(sys.argv) > 3 and sys.argv[1] == "--render":
+        # a check of reading a page through the browser, from inside the program itself
+        from rav import collect
+        html = collect.render(sys.argv[2])
+        text = collect.text_of_html(html) if html else ""
+        with open(sys.argv[3], "w", encoding="utf-8") as f:
+            f.write(f"browser={collect.find_browser()} html={len(html)} text={len(text)}\n{text[:400]}\n")
+        return 0
     if len(sys.argv) > 1 and sys.argv[1] in ("--new", "--step"):
         from rav import log as logmod
         logmod.listeners.append(lambda m: print(m, flush=True))
