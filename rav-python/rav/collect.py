@@ -33,6 +33,16 @@ def looks_like_list(s, url):
     return any(w in hay for w in LIST_WORDS) or any(w in low for w in ("/tags/", "filter", "catid=", "/rabbis/", "/category/", "/series/"))
 
 
+def is_list_page(s, url, text, links):
+    """A page that lists lessons (and is not a lesson itself): many lesson links, and most of
+    its text is their titles. A lesson with a few related lessons under it is not a list."""
+    if len(links) < 5:
+        return False
+    titles = sum(len(t) for _, t in links)
+    mostly_links = titles >= 0.4 * max(1, len(text))
+    return mostly_links or (looks_like_list({"title": s.get("title", "")}, url) and len(text) < 3000)
+
+
 def lesson_links(html, base):
     """(url, title) of the links on a page that look like single lessons on the same site."""
     from bs4 import BeautifulSoup
@@ -389,18 +399,21 @@ def from_web(project, s, settings, progress, should_stop):
         if built and len(text_of_html(built)) > len(text):
             html, text = built, text_of_html(built)
             log(f"הדף נקרא דרך הדפדפן ({len(text):,} תווים)")
-    if looks_like_list(s, url):
-        links = lesson_links(html, url)
-        if len(links) >= 3:
-            n = 0
-            for u, title in links[:40]:
-                before = len(project.sources)
-                project.add_source(u, title, "", f"מתוך הרשימה: {s['title']}", "רשימה")
-                n += len(project.sources) - before
+    links = lesson_links(html, url)
+    if is_list_page(s, url, text, links):
+        n = 0
+        for u, title in links[:40]:
+            before = len(project.sources)
+            project.add_source(u, title, "", f"מתוך הרשימה: {s['title']}", "רשימה")
+            n += len(project.sources) - before
+        if n:
             raise Listed(f"דף רשימה — נוספו ממנו {n} שיעורים לטבלה")
+        log("דף שנראה כמו רשימה, אבל כל השיעורים שבו כבר בטבלה — הטקסט שלו נשמר")
     media = media_links(html, url)
     # a page with the lesson written out (often a transcript under the video) is read, not heard
     wants_media = len(text) < 2500
+    if wants_media:
+        log(f"בדף {len(text):,} תווים; הקלטות שנמצאו בדף: {len(media)}" + (f" ({media[0]})" if media else ""))
     if media and wants_media:
         m = media[0]
         progress(f"בדף יש הקלטה — {m}")
