@@ -148,6 +148,7 @@ class MainWindow(QMainWindow):
         for text, fn in (("הוספת קישור…", self.add_url), ("הוספת קבצים מהמחשב…", self.add_files),
                          ("סימון הכל", lambda: self._mark(True)), ("ביטול הכל", lambda: self._mark(False)),
                          ("לנסות שוב את מה שנכשל", self.retry_failed), ("קריאה דרך הדפדפן שלי…", self.read_in_my_browser),
+                         ("איסוף מחדש לנבחרים", self.recollect_selected),
                          ("הצגת הטקסט שנאסף", self.show_text)):
             b = QPushButton(text)
             b.clicked.connect(fn)
@@ -357,6 +358,29 @@ class MainWindow(QMainWindow):
             self.project.save()
             self.fill_table()
 
+    def recollect_selected(self):
+        """The chosen rows back to waiting: what was collected from them (text, recording link,
+        what Claude took from them) is removed, and 'איסוף ותמלול' gets them again."""
+        if not self.project:
+            return
+        rows = sorted({i.row() for i in self.table.selectedItems()})
+        chosen = [x for x in (self._source_at(r) for r in rows) if x]
+        if not chosen:
+            QMessageBox.information(self, "ספר מהרב", "בחרו בטבלה את השורות (Ctrl+לחיצה לכמה שורות), ואז לחצו שוב.")
+            return
+        if QMessageBox.question(self, "ספר מהרב", f"להחזיר {len(chosen)} מקורות לממתין ולמחוק את מה שנאסף מהם?") \
+                != QMessageBox.Yes:
+            return
+        for x in chosen:
+            for path in (self.project.source_text_path(x), self.project.note_path(x)):
+                if os.path.isfile(path):
+                    os.remove(path)
+            x.pop("media_url", None)
+            x.update(state="new", chars=0, note="", use=True)
+        self.project.save()
+        self.fill_table()
+        log(f"{len(chosen)} מקורות חזרו לממתין — לחצו '2. איסוף ותמלול'")
+
     def read_in_my_browser(self):
         """The web pages that failed, one after the other, in the user's own browser."""
         if not self.project:
@@ -364,15 +388,15 @@ class MainWindow(QMainWindow):
         from .collect import MEDIA_EXT, is_local, is_video_host
         rows = sorted({i.row() for i in self.table.selectedItems()})
         chosen = [self._source_at(r) for r in rows]
-        todo = [s for s in (chosen if len(chosen) > 1 else self.project.sources)
-                if s and s["use"] and not is_local(s["url"]) and not is_video_host(s["url"])
-                and not s["url"].lower().split("?")[0].endswith(MEDIA_EXT)
-                and (s["state"] in ("failed", "new") or len(chosen) > 1)]
-        if len(chosen) == 1 and chosen[0] in todo:      # start from the selected one
-            todo = todo[todo.index(chosen[0]):] + todo[:todo.index(chosen[0])]
+        web = lambda s: s and not is_local(s["url"]) and not is_video_host(s["url"]) \
+            and not s["url"].lower().split("?")[0].endswith(MEDIA_EXT)
+        if chosen:      # the rows chosen in the table, whatever their state
+            todo = [s for s in chosen if web(s)]
+        else:           # otherwise every page that failed or still waits
+            todo = [s for s in self.project.sources if web(s) and s["use"] and s["state"] in ("failed", "new")]
         if not todo:
             QMessageBox.information(self, "ספר מהרב", "אין דפים שנכשלו או שממתינים. (אפשר גם לבחור בטבלה "
-                                    "כמה שורות ואז ללחוץ — הן ייפתחו לפי הסדר.)")
+                                    "שורות — אחת או כמה — ואז ללחוץ: הן ייפתחו לפי הסדר.)")
             return
         self._copy = CopyDialog(self, todo)
         self._copy.show()
@@ -607,7 +631,8 @@ class CopyDialog(QDialog):
         self.status = QLabel("")
         v.addWidget(self.status)
         row = QHBoxLayout()
-        for text, fn in (("פתיחה שוב", self.open_page), ("דילוג", self.next), ("סיום", self.close)):
+        for text, fn in (("הקודם", self.previous), ("פתיחה שוב", self.open_page), ("דילוג", self.next),
+                         ("סיום", self.close)):
             b = QPushButton(text)
             b.clicked.connect(fn)
             row.addWidget(b)
@@ -732,6 +757,12 @@ class CopyDialog(QDialog):
     def next(self):
         self.i += 1
         self.show_current()
+
+    def previous(self):
+        """Back to the page before (to copy the video's link after its text was taken)."""
+        if self.i > 0:
+            self.i -= 1
+            self.show_current()
 
     def closeEvent(self, e):
         try:
