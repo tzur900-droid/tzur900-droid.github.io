@@ -32,12 +32,21 @@ def step_collect(project, stop=lambda: False, progress=log):
 
 
 def step_read(project, stop=lambda: False, progress=log):
-    todo = [s for s in project.sources if s["use"] and s["state"] == "text"]
-    for n, s in enumerate(todo, 1):
-        if stop():
+    for _round in range(2):     # a poor transcript is transcribed again (accurately) and read again, once
+        todo = [s for s in project.sources if s["use"] and s["state"] == "text"]
+        for n, s in enumerate(todo, 1):
+            if stop():
+                return
+            progress(f"[{n}/{len(todo)}] Claude קורא: {s['title'][:70]}")
+            compose.extract_one(project, s, model_of(project))
+        again = [s for s in project.sources if s["use"] and s.get("accurate") and s["state"] == "new"]
+        if not again or stop():
             return
-        progress(f"[{n}/{len(todo)}] Claude קורא: {s['title'][:70]}")
-        compose.extract_one(project, s, model_of(project))
+        progress(f"מתמלל שוב במודל המדויק {len(again)} הקלטות שהתמלול שלהן לא היה ברור…")
+        for s in again:
+            if stop():
+                return
+            collect.collect_one(project, s, progress, stop)
 
 
 def step_outline(project, again=False):

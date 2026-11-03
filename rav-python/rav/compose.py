@@ -2,6 +2,7 @@
 (notes/), plans the book with a description of the rabbi's way of speaking (outline.md),
 and writes every chapter from the sources of that chapter (chapters/)."""
 import json
+import os
 import re
 
 from .claude_cli import ClaudeError, ask, json_from
@@ -27,7 +28,7 @@ EXTRACT = """לפניך מקור מס' {id} — {what}.
 (האם אלה דברים של {rav} עצמו — כתב שלו, שיעור שלו או סיכום של שיעור שלו)
 ### רלוונטי: כן / לא
 (האם יש כאן משהו לבקשה)
-### תמצית
+{quality}### תמצית
 שלוש־חמש שורות: מה יש במקור הזה לבקשה.
 ### הדברים לפרטיהם
 כל רעיון, הסבר, חידוש, משל, סיפור, הלכה ומקור (פסוק, גמרא, מדרש, ראשונים) שהרב מביא ושנוגע לבקשה — בפירוט מלא,
@@ -40,6 +41,9 @@ EXTRACT = """לפניך מקור מס' {id} — {what}.
 <<<
 {text}
 >>>"""
+
+QUALITY = ("### איכות התמלול: טובה / בינונית / גרועה\n"
+           "(גרועה = חלקים גדולים לא מובנים, משפטים משובשים, אי אפשר לדעת בבירור מה הרב אמר)\n")
 
 TRANSCRIPT_NOTE = ("(המקור הוא תמלול אוטומטי של הקלטה: יש בו שגיאות שמיעה, בעיקר בשמות, בציטוטים ובמקורות. "
                    "תקן לפי ההקשר את מה שברור, וכשאינך בטוח — כתוב [לא ברור].)\n")
@@ -112,7 +116,8 @@ def extract_one(project, s, model=None):
         prompt = EXTRACT.format(id=s["id"], what=what, title=s["title"], url=s["url"],
                                 part=f"(חלק {i + 1} מתוך {len(parts)})" if len(parts) > 1 else "",
                                 kind=project.kind_name, rav=d["rav"], request=d["request"],
-                                transcript_note=TRANSCRIPT_NOTE if heard else "", text=part)
+                                transcript_note=TRANSCRIPT_NOTE if heard else "", text=part,
+                                quality=QUALITY if heard else "")
         outs.append(ask(prompt, model=model, system=SYSTEM, timeout=1800))
     note = "\n\n".join(outs)
     project.write(note, "notes", f"{s['id']:03d}.md")
@@ -124,10 +129,39 @@ def extract_one(project, s, model=None):
         s["state"] = "irrelevant"
         s["note"] = "לא של הרב" if not_his else "לא קשור לבקשה"
         log(f"– {s['title'][:60]} — {s['note']}")
+    elif heard and poor_transcript(note) and redo_accurately(project, s):
+        return
     else:
         s["state"] = "read"
+        if heard and poor_transcript(note):
+            s["note"] = (s.get("note") or "") + " · ההקלטה לא ברורה גם בתמלול המדויק"
         log(f"✓ נקרא: {s['title'][:60]}")
     project.save()
+
+
+def poor_transcript(note):
+    q = re.findall(r"איכות התמלול:\s*\**\s*(טובה|בינונית|גרועה)", note)
+    return bool(q) and q.count("גרועה") * 2 >= len(q)      # most parts of the recording were poor
+
+
+def redo_accurately(project, s):
+    """A poor transcript that was not made with the accurate model: back to waiting, to be
+    transcribed again with it (the recording is kept, nothing is downloaded again)."""
+    how = s.get("how") or ""
+    if not how:      # sources from before "how" was kept
+        note = s.get("note") or ""
+        how = "auto_subs" if "אוטומטיות" in note else ("human_subs" if "כתוביות" in note else
+                                                          "whisper:" + project.data["settings"].get("whisper_model", "ivrit-ai"))
+    if s.get("accurate") or how == "whisper:ivrit-ai":
+        return False
+    for path in (project.source_text_path(s), project.note_path(s)):
+        if os.path.isfile(path):
+            os.remove(path)
+    s.update(accurate=True, state="new", chars=0,
+             note="התמלול לא היה ברור — יתומלל שוב במודל המדויק")
+    project.save()
+    log(f"↻ {s['title'][:60]} — התמלול לא ברור ({how}); יתומלל שוב במודל המדויק")
+    return True
 
 
 def _summary(note):
