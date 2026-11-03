@@ -688,6 +688,7 @@ class CopyDialog(QDialog):
         md = self.clip.mimeData()
         html = md.html() if md is not None and md.hasHtml() else ""
         links = [u for u in media_links(html, s["url"]) if is_recording_link(u, s["url"])] if html else []
+        log(f"בדף שהועתק: {len(html):,} תווי HTML, הקלטות: {len(links)}")
         if not links:
             return False
         p = self.win.project

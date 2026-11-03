@@ -412,6 +412,8 @@ def from_web(project, s, settings, progress, should_stop):
     media = media_links(html, url)
     # a page with the lesson written out (often a transcript under the video) is read, not heard
     wants_media = len(text) < 2500
+    if wants_media:
+        log(f"בדף {len(text):,} תווים; הקלטות שנמצאו בדף: {len(media)}" + (f" ({media[0]})" if media else ""))
     if media and wants_media:
         m = media[0]
         progress(f"בדף יש הקלטה — {m}")
