@@ -1,6 +1,7 @@
 """The window: the request at the top, the steps as buttons, the list of sources (to choose and
 add), the plan of the book (to edit before writing), the book, and what the program is doing."""
 import os
+import re
 import threading
 
 from PySide6.QtCore import Qt, QUrl, Signal
@@ -593,7 +594,7 @@ class CopyDialog(QDialog):
 
     def __init__(self, win, todo):
         super().__init__(win)
-        self.win, self.todo, self.i, self.saved = win, todo, 0, 0
+        self.win, self.todo, self.i, self.saved, self.links = win, todo, 0, 0, 0
         self.setWindowTitle("קריאה דרך הדפדפן שלי")
         self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
         self.setModal(False)
@@ -621,13 +622,17 @@ class CopyDialog(QDialog):
     def show_current(self):
         s = self.current()
         if s is None:
-            self.label.setText(f"<b>סיימתם.</b> נשמרו {self.saved} דפים. עכשיו אפשר ללחוץ '3. קריאה'.")
+            self.label.setText(f"<b>סיימתם.</b> נשמרו {self.saved} דפים ו־{self.links} קישורים להקלטות. "
+                               "עכשיו לוחצים '2. איסוף ותמלול' (להקלטות) ואחר כך '3. קריאה'.")
             self.status.setText("")
             return
         self.label.setText(
             f"<b>דף {self.i + 1} מתוך {len(self.todo)}:</b> {html_escape(s['title'])}<br><br>"
-            "הדף נפתח בדפדפן שלכם. כשהשיעור מופיע, לחצו שם <b>Ctrl+A</b> ואחר כך <b>Ctrl+C</b>.<br>"
-            "התוכנה תשמור את הטקסט ותפתח את הדף הבא לבד.")
+            "הדף נפתח בדפדפן שלכם.<br>"
+            "• <b>יש בדף טקסט של השיעור:</b> לוחצים שם <b>Ctrl+A</b> ואחר כך <b>Ctrl+C</b>.<br>"
+            "• <b>יש רק סרטון או הקלטה:</b> קליק ימני על הסרטון ← <b>העתקת כתובת הסרטון</b> "
+            "(Copy video URL).<br>"
+            "התוכנה שומרת ופותחת את הדף הבא לבד.")
         self.status.setText("")
         self.open_page()
 
@@ -641,10 +646,21 @@ class CopyDialog(QDialog):
         if s is None:
             return
         text = (self.clip.text() or "").strip()
-        if len(text) < 300:
-            self.status.setText("הועתק מעט מדי טקסט — חכו שהשיעור ייטען, ואז Ctrl+A ו־Ctrl+C שוב.")
-            return
         p = self.win.project
+        if re.fullmatch(r"https?://\S+", text):
+            # the link of the video or recording on the page: it is downloaded and transcribed
+            s["media_url"], s["state"], s["chars"] = text, "new", 0
+            s["note"] = "קישור להקלטה הועתק מהדפדפן — יתומלל ב'איסוף ותמלול'"
+            p.save()
+            self.links += 1
+            log(f"✓ {s['title'][:60]} — קישור להקלטה: {text}")
+            self.win.fill_table()
+            self.next()
+            return
+        if len(text) < 300:
+            self.status.setText("הועתק מעט מדי טקסט — חכו שהשיעור ייטען, ואז Ctrl+A ו־Ctrl+C שוב "
+                                "(או, אם יש רק סרטון: קליק ימני עליו ← העתקת כתובת הסרטון).")
+            return
         p.write(f"מקור: {s['title']}\n{s['url']}\n\n" + text, "sources", "%03d.txt" % s["id"])
         s["state"], s["chars"], s["note"] = "text", len(text), "הועתק מהדפדפן"
         p.save()
