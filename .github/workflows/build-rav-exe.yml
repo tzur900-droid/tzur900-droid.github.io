@@ -69,10 +69,14 @@ jobs:
           Copy-Item rav-python/dist/Rav upd-new -Recurse
           Set-Content upd-new/marker.txt "new"
           $old = Start-Process powershell -ArgumentList "-Command", "Start-Sleep -Seconds 5" -PassThru
-          $p = Start-Process -FilePath "upd-new/Rav.exe" -ArgumentList "--install-update", "$PWD\upd-app", $old.Id -Wait -PassThru
+          # (not -Wait: that waits also for the program the update opens at the end, which stays open)
+          $p = Start-Process -FilePath "upd-new/Rav.exe" -ArgumentList "--install-update", "$PWD\upd-app", $old.Id -PassThru
+          if (!$p.WaitForExit(180000)) { throw "the update did not finish in 3 minutes" }
           Get-Content upd-new/rav.log
           if ($p.ExitCode -ne 0) { throw "the update did not install (exit $($p.ExitCode))" }
           if (!(Test-Path upd-app/marker.txt)) { throw "the new files were not copied over the program" }
+          Start-Sleep -Seconds 3
+          if (!(Get-Process Rav -ErrorAction SilentlyContinue)) { throw "the program was not opened again after the update" }
           Get-Process Rav -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: Zip
