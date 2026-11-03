@@ -55,7 +55,9 @@ jobs:
           Get-Content st/render.txt
           Get-Content rav-python/dist/Rav/rav.log -ErrorAction SilentlyContinue
           $first = Get-Content st/render.txt -TotalCount 1
+          if ($first -notmatch "builtin=True") { throw "the browser inside Rav.exe did not start" }
           if ($first -notmatch "text=([0-9]{4,})") { throw "Rav.exe did not read the page through the browser" }
+          Select-String -Path rav-python/dist/Rav/rav.log -Pattern "דפדפן"
 
       - name: Zip
         shell: pwsh
