@@ -278,7 +278,7 @@ class MainWindow(QMainWindow):
             r = t.rowCount()
             t.insertRow(r)
             c = QTableWidgetItem()
-            c.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            c.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             c.setCheckState(Qt.Checked if s["use"] else Qt.Unchecked)
             c.setData(Qt.UserRole, s["id"])
             t.setItem(r, 0, c)
@@ -363,8 +363,7 @@ class MainWindow(QMainWindow):
         what Claude took from them) is removed, and 'איסוף ותמלול' gets them again."""
         if not self.project:
             return
-        rows = sorted({i.row() for i in self.table.selectedItems()})
-        chosen = [x for x in (self._source_at(r) for r in rows) if x]
+        chosen = [x for x in (self._source_at(r) for r in self._chosen_rows()) if x]
         if not chosen:
             QMessageBox.information(self, "ספר מהרב", "בחרו בטבלה את השורות (Ctrl+לחיצה לכמה שורות), ואז לחצו שוב.")
             return
@@ -386,8 +385,7 @@ class MainWindow(QMainWindow):
         if not self.project:
             return
         from .collect import MEDIA_EXT, is_local, is_video_host
-        rows = sorted({i.row() for i in self.table.selectedItems()})
-        chosen = [self._source_at(r) for r in rows]
+        chosen = [x for x in (self._source_at(r) for r in self._chosen_rows()) if x]
         web = lambda s: s and not is_local(s["url"]) and not is_video_host(s["url"]) \
             and not s["url"].lower().split("?")[0].endswith(MEDIA_EXT)
         if chosen:      # the rows chosen in the table, whatever their state
@@ -401,11 +399,22 @@ class MainWindow(QMainWindow):
         self._copy = CopyDialog(self, todo)
         self._copy.show()
 
-    def show_text(self):
+    def _chosen_rows(self):
+        """The rows chosen in the table (also the row of the cell that has the focus)."""
         rows = {i.row() for i in self.table.selectedItems()}
-        if not rows or not self.project:
+        rows |= {ix.row() for ix in self.table.selectionModel().selectedRows()}
+        if not rows and self.table.currentRow() >= 0:
+            rows = {self.table.currentRow()}
+        return sorted(rows)
+
+    def show_text(self):
+        if not self.project:
             return
-        s = self._source_at(min(rows))
+        rows = self._chosen_rows()
+        s = self._source_at(rows[0]) if rows else None
+        if s is None:
+            QMessageBox.information(self, "ספר מהרב", "לחצו קודם על שורה בטבלה (על שם המקור), ואז על 'הצגת הטקסט שנאסף'.")
+            return
         text = self.project.read("sources", "%03d.txt" % s["id"]) or "(עוד לא נאסף טקסט)"
         note = self.project.read("notes", "%03d.md" % s["id"])
         d = QDialog(self)
