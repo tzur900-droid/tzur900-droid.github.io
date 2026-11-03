@@ -2,7 +2,6 @@
 this one; the new zip is downloaded and unpacked aside, and a small PowerShell script waits until
 the program closed, copies the new files over its folder and opens it again. The books (in the
 Documents folder) and the connection key (in AppData) are not in the program's folder: they stay."""
-import base64
 import os
 import shutil
 import subprocess
@@ -75,27 +74,88 @@ def download(progress=log):
 
 
 def install_and_restart(new_dir):
-    """Start the script that puts the new files in place once this program has closed, and
-    opens it again. The caller closes the program right after."""
+    """Open the new Rav.exe (where it was unpacked) to put itself in place: it waits until this
+    program has closed, copies its folder over the program's folder and opens the program
+    there. No script is involved, nothing an antivirus would stop. The caller closes the
+    program right after."""
     app = program_dir()
-    work = new_dir
-    while work and not os.path.basename(work).startswith("rav-update-"):
-        parent = os.path.dirname(work)
-        work = "" if parent == work else parent
-    q = lambda p: "'" + p.replace("'", "''") + "'"
-    script = f"""
-$ErrorActionPreference = 'SilentlyContinue'
-Wait-Process -Id {os.getpid()} -Timeout 120
-Start-Sleep -Seconds 1
-$ok = $false
-for ($i = 0; $i -lt 30 -and -not $ok; $i++) {{
-  robocopy {q(new_dir)} {q(app)} /E /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
-  if ($LASTEXITCODE -lt 8) {{ $ok = $true }} else {{ Start-Sleep -Seconds 2 }}
-}}
-Start-Process -FilePath (Join-Path {q(app)} 'Rav.exe')
-{"Remove-Item -LiteralPath " + q(work) + " -Recurse -Force" if work else ""}
-"""
-    enc = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    exe = os.path.join(new_dir, "Rav.exe")
     log(f"מתקין את העדכון ב־{app} ומפעיל מחדש")
-    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                      "-EncodedCommand", enc], creationflags=0x08000000 | 0x00000008)  # no window, detached
+    subprocess.Popen([exe, "--install-update", app, str(os.getpid())], cwd=new_dir,
+                     creationflags=0x00000008 | 0x00000200)   # detached, a process group of its own
+
+
+def _wait_for(pid, seconds=120):
+    """Wait until the process pid has ended."""
+    import time
+    if sys.platform == "win32":
+        import ctypes
+        k = ctypes.WinDLL("kernel32")
+        k.OpenProcess.restype = ctypes.c_void_p
+        h = k.OpenProcess(0x00100000, False, int(pid))      # SYNCHRONIZE
+        if h:
+            k.WaitForSingleObject(ctypes.c_void_p(h), int(seconds * 1000))
+            k.CloseHandle(ctypes.c_void_p(h))
+        time.sleep(1)
+        return
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            os.kill(int(pid), 0)
+        except OSError:
+            break
+        time.sleep(0.5)
+    time.sleep(1)
+
+
+def copy_over(src, dst, tries=20):
+    """Copy every file of src over dst (a file still in use is tried again for a while).
+    Returns the files that could not be written."""
+    import time
+    failed = []
+    for root, _dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        target = os.path.join(dst, rel) if rel != "." else dst
+        os.makedirs(target, exist_ok=True)
+        for f in files:
+            if f.lower() == "rav.log":
+                continue
+            s, d = os.path.join(root, f), os.path.join(target, f)
+            for i in range(tries):
+                try:
+                    shutil.copy2(s, d)
+                    break
+                except OSError:
+                    time.sleep(1)
+            else:
+                failed.append(d)
+    return failed
+
+
+def install_here(app_dir, old_pid):
+    """Run by the new Rav.exe from where it was unpacked: put it in place of the old one."""
+    src = program_dir()
+    log(f"עדכון: מחכה שהגרסה הקודמת תיסגר ({old_pid})")
+    _wait_for(old_pid)
+    log(f"עדכון: מעתיק את {src} אל {app_dir}")
+    failed = copy_over(src, app_dir)
+    if failed:
+        log("עדכון: לא נכתבו " + ", ".join(failed[:10]))
+    exe = os.path.join(app_dir, "Rav.exe" if frozen() else "main.py")
+    log(f"עדכון: פותח את {exe}")
+    if frozen():
+        subprocess.Popen([exe], cwd=app_dir, creationflags=0x00000008 | 0x00000200)
+    return not failed
+
+
+def clean_old():
+    """Folders left by earlier updates (in the temp folder) are removed."""
+    tmp = tempfile.gettempdir()
+    mine = program_dir()
+    try:
+        for name in os.listdir(tmp):
+            p = os.path.join(tmp, name)
+            if name.startswith("rav-update-") and not mine.startswith(p):
+                shutil.rmtree(p, ignore_errors=True)
+    except OSError:
+        pass

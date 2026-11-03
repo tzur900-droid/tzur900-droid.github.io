@@ -62,6 +62,19 @@ jobs:
           if ($first -notmatch "builtin=True") { throw "the browser inside Rav.exe did not start" }
           if ($first -notmatch "text=([0-9]{4,})") { throw "the browser inside Rav.exe did not read the page" }
 
+      - name: The update installs itself (the new Rav.exe copies itself over the old folder)
+        shell: pwsh
+        run: |
+          Copy-Item rav-python/dist/Rav upd-app -Recurse
+          Copy-Item rav-python/dist/Rav upd-new -Recurse
+          Set-Content upd-new/marker.txt "new"
+          $old = Start-Process powershell -ArgumentList "-Command", "Start-Sleep -Seconds 5" -PassThru
+          $p = Start-Process -FilePath "upd-new/Rav.exe" -ArgumentList "--install-update", "$PWD\upd-app", $old.Id -Wait -PassThru
+          Get-Content upd-new/rav.log
+          if ($p.ExitCode -ne 0) { throw "the update did not install (exit $($p.ExitCode))" }
+          if (!(Test-Path upd-app/marker.txt)) { throw "the new files were not copied over the program" }
+          Get-Process Rav -ErrorAction SilentlyContinue | Stop-Process -Force
+
       - name: Zip
         shell: pwsh
         run: |
