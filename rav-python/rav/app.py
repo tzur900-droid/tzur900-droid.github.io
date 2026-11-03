@@ -495,7 +495,13 @@ class MainWindow(QMainWindow):
     def do_read(self):
         if self.ensure_project():
             p = self.project
-            self.run(lambda: pipeline.step_read(p, self.stopped))
+            self.run(lambda: pipeline.step_read(p, self.stopped), lambda _: self._nothing_to_read(p))
+
+    def _nothing_to_read(self, p):
+        if not any(s["use"] and s["state"] == "text" for s in p.sources) and \
+                not any(s["state"] == "new" and s["use"] for s in p.sources):
+            read = sum(1 for s in p.sources if s["state"] == "read")
+            self.status.setText(self.status.text() + f"   ·   כל המקורות נקראו ({read}) — אפשר '4. תכנון הספר'")
 
     def do_outline(self):
         if self.ensure_project():

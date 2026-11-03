@@ -32,6 +32,14 @@ def step_collect(project, stop=lambda: False, progress=log):
 
 
 def step_read(project, stop=lambda: False, progress=log):
+    first = [s for s in project.sources if s["use"] and s["state"] == "text"]
+    if not first:
+        read = sum(1 for s in project.sources if s["state"] == "read")
+        waiting = sum(1 for s in project.sources if s["use"] and s["state"] == "new")
+        log(f"אין מקורות חדשים לקריאה: {read} כבר נקראו" +
+            (f", ו־{waiting} עוד ממתינים לאיסוף (לחצו '2. איסוף ותמלול')" if waiting else
+             ". אפשר להמשיך ל־'4. תכנון הספר'."))
+        return
     for _round in range(2):     # a poor transcript is transcribed again (accurately) and read again, once
         todo = [s for s in project.sources if s["use"] and s["state"] == "text"]
         for n, s in enumerate(todo, 1):
