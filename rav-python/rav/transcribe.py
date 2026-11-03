@@ -21,6 +21,25 @@ def available():
         return False
 
 
+def _fix_av():
+    """faster-whisper opens recordings with av.open(..., metadata_errors=...), a parameter that
+    newer versions of PyAV no longer take: without it the recording opens all the same."""
+    import av
+    if getattr(av.open, "_rav_fixed", False):
+        return
+    orig = av.open
+
+    def open_(*a, **k):
+        try:
+            return orig(*a, **k)
+        except TypeError:
+            if k.pop("metadata_errors", None) is None:
+                raise
+            return orig(*a, **k)
+    open_._rav_fixed = True
+    av.open = open_
+
+
 def _model(key):
     if key in _loaded:
         return _loaded[key]
@@ -44,6 +63,7 @@ def _model(key):
 
 def transcribe(path, key="ivrit-ai", progress=None, should_stop=None):
     """The text of the recording at path, in paragraphs."""
+    _fix_av()
     model = _model(key)
     segments, info = model.transcribe(path, language="he", vad_filter=True, beam_size=5,
                                       condition_on_previous_text=False)
