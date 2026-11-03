@@ -703,13 +703,14 @@ class CopyDialog(QDialog):
     def list_page(self, s, text):
         """A copied page that lists lessons: the lessons on it are added to the table and to the
         pages still to open here. True when it was such a page."""
-        from .collect import lesson_links, looks_like_list
+        from .collect import lesson_links
         md = self.clip.mimeData()
         html = md.html() if md is not None and md.hasHtml() else ""
         if not html:
             return False
         links = lesson_links(html, s["url"])
-        if len(links) < 5 or not (looks_like_list(s, s["url"]) or len(text) < 250 * len(links)):
+        from .collect import is_list_page
+        if not is_list_page(s, s["url"], text, links):
             return False
         p = self.win.project
         added = []
