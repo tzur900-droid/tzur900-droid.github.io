@@ -211,7 +211,7 @@ class MainWindow(QMainWindow):
         self.fill_table()
         self.outline.setPlainText(project.read("outline.md"))
         self.book.setPlainText(project.read("book.md"))
-        self.setWindowTitle(f"ספר מהרב · {project.label()}")
+        self.setWindowTitle(f"ספר מהרב {VERSION} · {project.label()}")
         try:
             with open(self._last_file(), "w", encoding="utf-8") as f:
                 f.write(project.folder)
