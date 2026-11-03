@@ -78,17 +78,44 @@ def find_browser():
     return found[0] if found else None
 
 
+# ways of reading a page that failed again and again on this computer are not tried any more
+# (in this run of the program): each failed try costs a minute or two
+_failures = {"builtin": 0, "edge": 0, "claude": 0}
+GIVE_UP = 2
+
+
+def _gave_up(way):
+    return _failures[way] >= GIVE_UP
+
+
+def _result(way, ok):
+    if ok:
+        _failures[way] = 0
+        return
+    _failures[way] += 1
+    if _failures[way] == GIVE_UP:
+        names = {"builtin": "הדפדפן המובנה", "edge": "Edge", "claude": "Claude (קריאת דפים)"}
+        log(f"{names[way]} לא מצליח לפתוח דפים במחשב הזה — לא מנסה אותו יותר בהרצה הזו "
+            "(הסרטונים וההקלטות ממשיכים כרגיל)")
+
+
 def render(url, wait_ms=15000):
     """The page's HTML after its scripts ran, or "": first in the browser inside the program,
     then in Edge/Chrome without a window."""
     from . import webview
-    if webview.available():
+    if webview.available() and not _gave_up("builtin"):
         html = webview.render(url)
-        if len(text_of_html(html)) >= 300:
+        ok = len(text_of_html(html)) >= 300
+        _result("builtin", ok)
+        if ok:
             log("הדף נפתח בדפדפן המובנה")
             return html
         log(f"הדפדפן המובנה החזיר {len(html)} תווים")
-    return render_external(url, wait_ms)
+    if _gave_up("edge"):
+        return ""
+    html = render_external(url, wait_ms)
+    _result("edge", len(text_of_html(html)) >= 300 if html else False)
+    return html
 
 
 def render_external(url, wait_ms=15000):
@@ -434,8 +461,15 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
                     text = text_of_html(built)
                     s["note"] = "נקרא דרך הדפדפן"
                 else:
+                    if _gave_up("claude"):
+                        raise Skip("הדף לא נפתח במחשב הזה (אפשר להעתיק את הטקסט מהדפדפן לקובץ ולהוסיף אותו)")
                     log(f"לא הצלחתי לקרוא את הדף בעצמי ({e}) — מבקש מ־Claude")
-                    text = via_claude(url, settings.get("model") or None)
+                    try:
+                        text = via_claude(url, settings.get("model") or None)
+                    except (Skip, ClaudeError):
+                        _result("claude", False)
+                        raise
+                    _result("claude", True)
                     s["note"] = "נקרא דרך Claude"
         text = text.strip()
         if len(text) < 200:
