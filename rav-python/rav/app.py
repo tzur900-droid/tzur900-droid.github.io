@@ -630,8 +630,9 @@ class CopyDialog(QDialog):
             f"<b>דף {self.i + 1} מתוך {len(self.todo)}:</b> {html_escape(s['title'])}<br><br>"
             "הדף נפתח בדפדפן שלכם.<br>"
             "• <b>יש בדף טקסט של השיעור:</b> לוחצים שם <b>Ctrl+A</b> ואחר כך <b>Ctrl+C</b>.<br>"
-            "• <b>יש רק סרטון או הקלטה:</b> קליק ימני על הסרטון ← <b>העתקת כתובת הסרטון</b> "
-            "(Copy video URL).<br>"
+            "• <b>יש רק סרטון או הקלטה:</b> גם כאן <b>Ctrl+A</b> ואחר כך <b>Ctrl+C</b> — התוכנה מחפשת את "
+            "ההקלטה במה שהועתק. אם היא לא נמצאה: קליק ימני על כפתור ההורדה ⬇ של הנגן ← "
+            "<b>העתקת כתובת קישור</b> (או על סרטון יוטיוב ← Copy video URL).<br>"
             "• <b>זה דף של רשימת שיעורים:</b> גם כאן <b>Ctrl+A</b> ואחר כך <b>Ctrl+C</b> — השיעורים שבו "
             "יתווספו ויפתחו כאן אחד אחרי השני.<br>"
             "התוכנה שומרת ופותחת את הדף הבא לבד.")
@@ -666,6 +667,8 @@ class CopyDialog(QDialog):
             return
         if self.list_page(s, text):
             return
+        if len(text) < 2500 and self.recording_on_page(s):
+            return
         if len(text) < 300:
             self.status.setText("הועתק מעט מדי טקסט — חכו שהשיעור ייטען, ואז Ctrl+A ו־Ctrl+C שוב "
                                 "(או, אם יש רק סרטון: קליק ימני עליו ← העתקת כתובת הסרטון).")
@@ -677,6 +680,25 @@ class CopyDialog(QDialog):
         log(f"✓ {s['title'][:60]} — {len(text):,} תווים (הועתק מהדפדפן)")
         self.win.fill_table()
         self.next()
+
+    def recording_on_page(self, s):
+        """A copied lesson page without (much) text but with a recording: the recording's link
+        (a download button, the player, a YouTube frame) is taken from the copied HTML."""
+        from .collect import is_recording_link, media_links
+        md = self.clip.mimeData()
+        html = md.html() if md is not None and md.hasHtml() else ""
+        links = [u for u in media_links(html, s["url"]) if is_recording_link(u, s["url"])] if html else []
+        if not links:
+            return False
+        p = self.win.project
+        s["media_url"], s["state"], s["chars"] = links[0], "new", 0
+        s["note"] = "הקלטה נמצאה בדף שהועתק — תתומלל ב'איסוף ותמלול'"
+        p.save()
+        self.links += 1
+        log(f"✓ {s['title'][:60]} — נמצאה הקלטה בדף: {links[0]}")
+        self.win.fill_table()
+        self.next()
+        return True
 
     def list_page(self, s, text):
         """A copied page that lists lessons: the lessons on it are added to the table and to the
