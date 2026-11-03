@@ -312,19 +312,26 @@ def from_media_site(project, s, settings, progress, should_stop):
     header = f"{info.get('title', '')}\n{info.get('channel') or info.get('uploader') or ''} · {info.get('upload_date', '')}\n\n"
     desc = (info.get("description") or "").strip()
     url = _sub_url(info.get("subtitles") or {})
-    how = "כתוביות שנכתבו בידי אדם"
+    how, kind = "כתוביות שנכתבו בידי אדם", "human_subs"
     if not url and settings.get("auto_subs"):
         url = _sub_url(info.get("automatic_captions") or {})
-        how = "כתוביות אוטומטיות של יוטיוב"
+        how, kind = "כתוביות אוטומטיות של יוטיוב", "auto_subs"
+    if s.get("accurate"):       # the subtitles were not clear: transcribed here with the accurate model
+        url = None
     if url:
         r = requests.get(url, headers={"User-Agent": UA}, timeout=60)
         r.encoding = "utf-8"
         text = vtt_to_text(r.text)
         if len(text) > 300:
-            s["note"] = how
+            s["note"], s["how"] = how, kind
             return header + text + ("\n\n[תיאור הסרטון]\n" + desc if desc else "")
     return header + transcribe_download(project, s, s["url"], settings, progress, should_stop, info) + \
         ("\n\n[תיאור הסרטון]\n" + desc if desc else "")
+
+
+def whisper_model(s, settings):
+    """The transcription model for s: the accurate one when the first transcription was unclear."""
+    return "ivrit-ai" if s.get("accurate") else settings.get("whisper_model", "ivrit-ai")
 
 
 def transcribe_download(project, s, url, settings, progress, should_stop, info=None):
@@ -332,8 +339,9 @@ def transcribe_download(project, s, url, settings, progress, should_stop, info=N
         raise Skip("רכיב התמלול (faster-whisper) לא מותקן")
     path = download_audio(project, s, url)
     progress("מתמלל במחשב…")
-    text = tr.transcribe(path, settings.get("whisper_model", "ivrit-ai"), progress, should_stop)
-    s["note"] = "תומלל במחשב"
+    model = whisper_model(s, settings)
+    text = tr.transcribe(path, model, progress, should_stop)
+    s["note"], s["how"] = "תומלל במחשב" + (" (במודל המדויק)" if s.get("accurate") else ""), "whisper:" + model
     return text
 
 
@@ -526,8 +534,9 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
                 if not tr.available():
                     raise Skip("רכיב התמלול (faster-whisper) לא מותקן")
                 progress("מתמלל במחשב…")
-                text = tr.transcribe(url, settings.get("whisper_model", "ivrit-ai"), progress, should_stop)
-                s["note"] = "תומלל במחשב"
+                model = whisper_model(s, settings)
+                text = tr.transcribe(url, model, progress, should_stop)
+                s["note"], s["how"] = "תומלל במחשב", "whisper:" + model
             elif low.endswith((".html", ".htm")):
                 with open(url, encoding="utf-8", errors="replace") as f:
                     text = text_of_html(f.read())
