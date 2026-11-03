@@ -632,6 +632,8 @@ class CopyDialog(QDialog):
             "• <b>יש בדף טקסט של השיעור:</b> לוחצים שם <b>Ctrl+A</b> ואחר כך <b>Ctrl+C</b>.<br>"
             "• <b>יש רק סרטון או הקלטה:</b> קליק ימני על הסרטון ← <b>העתקת כתובת הסרטון</b> "
             "(Copy video URL).<br>"
+            "• <b>זה דף של רשימת שיעורים:</b> גם כאן <b>Ctrl+A</b> ואחר כך <b>Ctrl+C</b> — השיעורים שבו "
+            "יתווספו ויפתחו כאן אחד אחרי השני.<br>"
             "התוכנה שומרת ופותחת את הדף הבא לבד.")
         self.status.setText("")
         self.open_page()
@@ -662,6 +664,8 @@ class CopyDialog(QDialog):
             self.win.fill_table()
             self.next()
             return
+        if self.list_page(s, text):
+            return
         if len(text) < 300:
             self.status.setText("הועתק מעט מדי טקסט — חכו שהשיעור ייטען, ואז Ctrl+A ו־Ctrl+C שוב "
                                 "(או, אם יש רק סרטון: קליק ימני עליו ← העתקת כתובת הסרטון).")
@@ -673,6 +677,33 @@ class CopyDialog(QDialog):
         log(f"✓ {s['title'][:60]} — {len(text):,} תווים (הועתק מהדפדפן)")
         self.win.fill_table()
         self.next()
+
+    def list_page(self, s, text):
+        """A copied page that lists lessons: the lessons on it are added to the table and to the
+        pages still to open here. True when it was such a page."""
+        from .collect import lesson_links, looks_like_list
+        md = self.clip.mimeData()
+        html = md.html() if md is not None and md.hasHtml() else ""
+        if not html:
+            return False
+        links = lesson_links(html, s["url"])
+        if len(links) < 5 or not (looks_like_list(s, s["url"]) or len(text) < 250 * len(links)):
+            return False
+        p = self.win.project
+        added = []
+        for u, title in links[:80]:
+            before = len(p.sources)
+            src = p.add_source(u, title, "", f"מתוך הרשימה: {s['title']}", "רשימה")
+            if len(p.sources) > before:
+                added.append(src)
+        s["state"], s["note"] = "irrelevant", f"דף רשימה — נוספו ממנו {len(added)} שיעורים לטבלה"
+        p.save()
+        self.todo[self.i + 1:self.i + 1] = added      # they open here right after this page
+        log(f"✓ {s['title'][:60]} — דף רשימה: נוספו {len(added)} שיעורים")
+        self.win.fill_table()
+        self.status.setText(f"דף רשימה: נוספו {len(added)} שיעורים, והם ייפתחו כאן אחד אחרי השני.")
+        self.next()
+        return True
 
     def next(self):
         self.i += 1
