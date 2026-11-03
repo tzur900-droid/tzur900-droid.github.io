@@ -508,6 +508,15 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
             else:
                 with open(url, encoding="utf-8", errors="replace") as f:
                     text = f.read()
+        elif s.get("media_url"):
+            # the link of the recording, copied by the user from the page in the browser
+            m = s["media_url"]
+            if is_video_host(m):
+                sub = dict(s, url=m)
+                text = from_media_site(project, sub, settings, progress, should_stop)
+                s["note"] = "הקלטה מהדף — " + (sub.get("note") or "")
+            else:
+                text = transcribe_download(project, s, m, settings, progress, should_stop)
         else:
             try:
                 text = from_web(project, s, settings, progress, should_stop)
