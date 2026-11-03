@@ -359,7 +359,8 @@ def from_web(project, s, settings, progress, should_stop):
                 n += len(project.sources) - before
             raise Listed(f"דף רשימה — נוספו ממנו {n} שיעורים לטבלה")
     media = media_links(html, url)
-    wants_media = s.get("kind") in ("audio", "video") or len(text) < 2500
+    # a page with the lesson written out (often a transcript under the video) is read, not heard
+    wants_media = len(text) < 2500
     if media and wants_media:
         m = media[0]
         progress(f"בדף יש הקלטה — {m}")
