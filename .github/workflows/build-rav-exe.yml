@@ -73,4 +73,7 @@ jobs:
         shell: bash
         run: |
           gh release view rav-exe >/dev/null 2>&1 || gh release create rav-exe --title "ספר מהרב לווינדוס" --notes "Rav-windows.zip: מחלצים ומפעילים את Rav.exe. צריך גם Claude Code מחובר לחשבון Claude (ראו README)."
-          gh release upload rav-exe Rav-windows.zip --clobber
+          # the version goes up with the zip, so that "עדכון תוכנה" in the program sees it only when the zip is there
+          python -c "import re;print(re.search(r'VERSION = \"([^\"]+)\"', open('rav-python/rav/version.py', encoding='utf-8').read()).group(1))" > rav-version.txt
+          cat rav-version.txt
+          gh release upload rav-exe Rav-windows.zip rav-version.txt --clobber

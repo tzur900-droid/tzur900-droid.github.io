@@ -5,7 +5,7 @@ import threading
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
                                QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
                                QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
         self.step_done.connect(self._finished)
         listeners.append(self.log_line.emit)
         self._open_last()
+        self._check_update_quietly()
 
     # ---------- building ----------
     def _build(self):
@@ -86,7 +87,8 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         for text, fn in (("חדש", self.new_project), ("פתיחה…", self.open_project),
                          ("תיקיית הספר", self.open_folder), ("הגדרות", self.settings),
-                         ("חיבור ל־Claude…", self.connect_claude), ("בדיקת Claude", self.check_claude)):
+                         ("חיבור ל־Claude…", self.connect_claude), ("בדיקת Claude", self.check_claude),
+                         ("עדכון תוכנה", self.update_program)):
             a = QAction(text, self)
             a.triggered.connect(fn)
             tb.addAction(a)
@@ -509,6 +511,54 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "Claude", res[1])
         self.run(lambda: claude_cli.status(), done)
+
+    # ---------- updating the program ----------
+    update_found = Signal(str)
+
+    def _check_update_quietly(self):
+        """At start, in the background: only a line in the log and the title when there is one."""
+        from . import updater
+        if not updater.frozen():
+            return
+        self.update_found.connect(self._tell_update)
+
+        def work():
+            v = updater.latest()
+            if updater.newer(v):
+                self.update_found.emit(v)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _tell_update(self, v):
+        log(f"יש גרסה חדשה של התוכנה ({v}). לחצו 'עדכון תוכנה' בסרגל העליון.")
+        self.setWindowTitle(self.windowTitle() + f"   ← יש גרסה חדשה ({v}): לחצו 'עדכון תוכנה'")
+
+    def update_program(self):
+        from . import updater
+        if not updater.frozen():
+            QMessageBox.information(self, "עדכון תוכנה", "העדכון האוטומטי עובד בגרסת ה־exe (Rav.exe). "
+                                    "בגרסה עם Python מורידים את rav-python.zip מהאתר.")
+            return
+        if self.job is not None:
+            QMessageBox.information(self, "עדכון תוכנה", "התוכנה באמצע עבודה. לחצו קודם 'עצירה', "
+                                    "חכו שהכפתורים יחזרו, ואז עדכנו. העבודה נשמרת וממשיכה אחרי העדכון.")
+            return
+
+        def checked(v):
+            if not v:
+                QMessageBox.warning(self, "עדכון תוכנה", "לא הצלחתי לבדוק אם יש עדכון (אין חיבור לאינטרנט?).")
+            elif not updater.newer(v):
+                QMessageBox.information(self, "עדכון תוכנה", f"יש לכם את הגרסה האחרונה ({VERSION}).")
+            elif QMessageBox.question(self, "עדכון תוכנה",
+                                      f"יש גרסה חדשה: {v} (אצלכם {VERSION}).\n\nלהוריד ולהתקין? "
+                                      "ההורדה כמה מאות MB; בסוף התוכנה תיסגר ותיפתח מחדש בגרסה החדשה. "
+                                      "הספרים והחיבור ל־Claude נשמרים.") == QMessageBox.Yes:
+                self.run(lambda: updater.download(), installed)
+
+        def installed(new_dir):
+            if new_dir:
+                updater.install_and_restart(new_dir)
+                QApplication.instance().quit()
+        self.run(lambda: updater.latest(), checked)
 
     def connect_claude(self):
         ConnectDialog(self).exec()
