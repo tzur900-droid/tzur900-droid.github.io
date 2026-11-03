@@ -65,8 +65,16 @@ def main():
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
     log("פותח את Qt")
+    try:      # the browser inside the program must be loaded before the application is made
+        import PySide6.QtWebEngineCore  # noqa: F401
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+    except Exception as e:
+        log(f"אין דפדפן מובנה: {e}")
     app = QApplication(sys.argv[:1])
     log("Qt מוכן")
+    from rav import webview
+    webview.start()
     app.setApplicationName("rav")
     app.setLayoutDirection(Qt.RightToLeft)
     if len(sys.argv) > 2 and sys.argv[1] == "--selftest":
@@ -109,11 +117,20 @@ def main():
         return 0
     if len(sys.argv) > 3 and sys.argv[1] == "--render":
         # a check of reading a page through the browser, from inside the program itself
+        import threading
         from rav import collect
-        html = collect.render(sys.argv[2])
+        res = {}
+
+        def work():
+            res["html"] = collect.render(sys.argv[2])
+            app.quit()
+        threading.Thread(target=work, daemon=True).start()
+        app.exec()          # the browser inside the program works in this thread
+        html = res.get("html", "")
         text = collect.text_of_html(html) if html else ""
         with open(sys.argv[3], "w", encoding="utf-8") as f:
-            f.write(f"browser={collect.find_browser()} html={len(html)} text={len(text)}\n{text[:400]}\n")
+            f.write(f"builtin={webview.available()} browser={collect.find_browser()} html={len(html)} "
+                    f"text={len(text)}\n{text[:400]}\n")
         return 0
     if len(sys.argv) > 1 and sys.argv[1] in ("--new", "--step"):
         from rav import log as logmod

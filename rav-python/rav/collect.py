@@ -79,7 +79,20 @@ def find_browser():
 
 
 def render(url, wait_ms=15000):
-    """The page's HTML after its scripts ran, or "" when there is no browser or it failed."""
+    """The page's HTML after its scripts ran, or "": first in the browser inside the program,
+    then in Edge/Chrome without a window."""
+    from . import webview
+    if webview.available():
+        html = webview.render(url)
+        if len(text_of_html(html)) >= 300:
+            log("הדף נפתח בדפדפן המובנה")
+            return html
+        log(f"הדפדפן המובנה החזיר {len(html)} תווים")
+    return render_external(url, wait_ms)
+
+
+def render_external(url, wait_ms=15000):
+    """The page through Edge/Chrome without a window."""
     import shutil
     import subprocess
     import sys
