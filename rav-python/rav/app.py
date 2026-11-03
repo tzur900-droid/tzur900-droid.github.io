@@ -146,7 +146,8 @@ class MainWindow(QMainWindow):
         srow = QHBoxLayout()
         for text, fn in (("הוספת קישור…", self.add_url), ("הוספת קבצים מהמחשב…", self.add_files),
                          ("סימון הכל", lambda: self._mark(True)), ("ביטול הכל", lambda: self._mark(False)),
-                         ("לנסות שוב את מה שנכשל", self.retry_failed), ("הצגת הטקסט שנאסף", self.show_text)):
+                         ("לנסות שוב את מה שנכשל", self.retry_failed), ("קריאה דרך הדפדפן שלי…", self.read_in_my_browser),
+                         ("הצגת הטקסט שנאסף", self.show_text)):
             b = QPushButton(text)
             b.clicked.connect(fn)
             srow.addWidget(b)
@@ -354,6 +355,26 @@ class MainWindow(QMainWindow):
                     s["state"], s["note"] = "new", ""
             self.project.save()
             self.fill_table()
+
+    def read_in_my_browser(self):
+        """The web pages that failed, one after the other, in the user's own browser."""
+        if not self.project:
+            return
+        from .collect import MEDIA_EXT, is_local, is_video_host
+        rows = sorted({i.row() for i in self.table.selectedItems()})
+        chosen = [self._source_at(r) for r in rows]
+        todo = [s for s in (chosen if len(chosen) > 1 else self.project.sources)
+                if s and s["use"] and not is_local(s["url"]) and not is_video_host(s["url"])
+                and not s["url"].lower().split("?")[0].endswith(MEDIA_EXT)
+                and (s["state"] in ("failed", "new") or len(chosen) > 1)]
+        if len(chosen) == 1 and chosen[0] in todo:      # start from the selected one
+            todo = todo[todo.index(chosen[0]):] + todo[:todo.index(chosen[0])]
+        if not todo:
+            QMessageBox.information(self, "ספר מהרב", "אין דפים שנכשלו או שממתינים. (אפשר גם לבחור בטבלה "
+                                    "כמה שורות ואז ללחוץ — הן ייפתחו לפי הסדר.)")
+            return
+        self._copy = CopyDialog(self, todo)
+        self._copy.show()
 
     def show_text(self):
         rows = {i.row() for i in self.table.selectedItems()}
@@ -563,6 +584,91 @@ class MainWindow(QMainWindow):
 
     def connect_claude(self):
         ConnectDialog(self).exec()
+
+
+class CopyDialog(QDialog):
+    """Pages the program cannot open by itself, read in the user's own browser: the page opens
+    there, the user copies it (Ctrl+A, Ctrl+C), and the copied text becomes the source; then the
+    next page opens."""
+
+    def __init__(self, win, todo):
+        super().__init__(win)
+        self.win, self.todo, self.i, self.saved = win, todo, 0, 0
+        self.setWindowTitle("קריאה דרך הדפדפן שלי")
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        self.setModal(False)
+        self.resize(560, 230)
+        v = QVBoxLayout(self)
+        self.label = QLabel()
+        self.label.setWordWrap(True)
+        self.label.setTextFormat(Qt.RichText)
+        v.addWidget(self.label)
+        self.status = QLabel("")
+        v.addWidget(self.status)
+        row = QHBoxLayout()
+        for text, fn in (("פתיחה שוב", self.open_page), ("דילוג", self.next), ("סיום", self.close)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        v.addLayout(row)
+        self.clip = QApplication.clipboard()
+        self.clip.dataChanged.connect(self.copied)
+        self.show_current()
+
+    def current(self):
+        return self.todo[self.i] if self.i < len(self.todo) else None
+
+    def show_current(self):
+        s = self.current()
+        if s is None:
+            self.label.setText(f"<b>סיימתם.</b> נשמרו {self.saved} דפים. עכשיו אפשר ללחוץ '3. קריאה'.")
+            self.status.setText("")
+            return
+        self.label.setText(
+            f"<b>דף {self.i + 1} מתוך {len(self.todo)}:</b> {html_escape(s['title'])}<br><br>"
+            "הדף נפתח בדפדפן שלכם. כשהשיעור מופיע, לחצו שם <b>Ctrl+A</b> ואחר כך <b>Ctrl+C</b>.<br>"
+            "התוכנה תשמור את הטקסט ותפתח את הדף הבא לבד.")
+        self.status.setText("")
+        self.open_page()
+
+    def open_page(self):
+        s = self.current()
+        if s:
+            QDesktopServices.openUrl(QUrl(s["url"]))
+
+    def copied(self):
+        s = self.current()
+        if s is None:
+            return
+        text = (self.clip.text() or "").strip()
+        if len(text) < 300:
+            self.status.setText("הועתק מעט מדי טקסט — חכו שהשיעור ייטען, ואז Ctrl+A ו־Ctrl+C שוב.")
+            return
+        p = self.win.project
+        p.write(f"מקור: {s['title']}\n{s['url']}\n\n" + text, "sources", "%03d.txt" % s["id"])
+        s["state"], s["chars"], s["note"] = "text", len(text), "הועתק מהדפדפן"
+        p.save()
+        self.saved += 1
+        log(f"✓ {s['title'][:60]} — {len(text):,} תווים (הועתק מהדפדפן)")
+        self.win.fill_table()
+        self.next()
+
+    def next(self):
+        self.i += 1
+        self.show_current()
+
+    def closeEvent(self, e):
+        try:
+            self.clip.dataChanged.disconnect(self.copied)
+        except Exception:
+            pass
+        self.win.fill_table()
+        super().closeEvent(e)
+
+
+def html_escape(t):
+    import html
+    return html.escape(t or "")
 
 
 class ConnectDialog(QDialog):
