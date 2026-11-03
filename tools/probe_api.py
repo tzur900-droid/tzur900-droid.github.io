@@ -21,7 +21,7 @@ with sync_playwright() as p:
             except Exception as e:
                 seen.append(("?", r.url, 0, str(e), 0, 0, ""))
         pg.on("response", on_resp)
-        pg.goto(u, wait_until="networkidle", timeout=60000)
+        pg.goto(u, wait_until="load", timeout=60000); pg.wait_for_timeout(10000)
         for m, url, st, ct, n, h, head in sorted(seen, key=lambda x: -x[5])[:8]:
             print(m, st, n, "heb", h, ct, url)
             if h > 50:
