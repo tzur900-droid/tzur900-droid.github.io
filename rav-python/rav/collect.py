@@ -409,6 +409,69 @@ def from_web(project, s, settings, progress, should_stop):
 FAILED_MARK = "@@לא-נפתח@@"
 
 
+STOP_WORDS = {"של", "על", "את", "עם", "הרב", "הרה\"ג", "שליט\"א", "זצ\"ל", "שיעור", "שיחה", "חלק", "מאת", "לפי", "גם",
+              "או", "כי", "זה", "זו", "the", "and", "of"}
+
+
+def _words(t):
+    t = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", t or "")        # (the category in brackets is not the title)
+    return {w.strip("'\"׳״-") for w in re.findall(r"[\w'\"׳״-]+", t)
+            if len(w.strip("'\"׳״-")) > 1 and w.strip("'\"׳״-") not in STOP_WORDS}
+
+
+TITLES = {"הרב", "רבי", "הגאון", "ר'", "רב", "הרה\"ג", "שליט\"א", "זצ\"ל", "זצל", "הגר\"א"}
+
+
+def rav_words(rav):
+    """The words of the rabbi's name without titles ("הרב זלמן מלמד" → זלמן, מלמד)."""
+    return [w for w in rav.replace("״", '"').split() if w not in TITLES and len(w) > 1]
+
+
+def title_match(lesson, video, rav):
+    """How well the video's title is the lesson's title (0..1); 0 when the rabbi's whole name
+    (first name and family name) is not in the video."""
+    name = rav_words(rav)
+    if not name or not all(w in video for w in name):
+        return 0.0
+    a, b = _words(lesson) - set(name), _words(video) - set(name)
+
+    def covered(x, y):
+        return sum(1 for w in x if w in y or any(len(v) > 2 and (w in v or v in w) for v in y)) / len(x)
+    score = covered(a, b) if len(a) >= 2 else 0.0
+    if len(b) >= 3:                       # a shorter video title, all of it in the lesson's title
+        score = max(score, covered(b, a))
+    return score
+
+
+def find_on_youtube(s, rav, need=0.7):
+    """A YouTube video of the same lesson (same title, same rabbi), or None."""
+    title = s.get("title") or ""
+    if not title or title == s.get("url"):
+        return None
+    try:
+        import yt_dlp
+        q = re.sub(r"\([^)]*\)", " ", title).strip() + " " + " ".join(rav_words(rav))
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True, "extract_flat": True}) as ydl:
+            res = ydl.extract_info(f"ytsearch8:{q}", download=False)
+    except Exception as e:
+        log(f"חיפוש השיעור ביוטיוב נכשל: {type(e).__name__}")
+        return None
+    best, score = None, 0.0
+    for e in res.get("entries") or []:
+        v = (e.get("title") or "") + " " + (e.get("channel") or "")
+        sc = title_match(title, v, rav)
+        if sc > score:
+            best, score = e, sc
+    if best is None or score < need:
+        log(f"השיעור לא נמצא ביוטיוב ({title[:50]})")
+        return None
+    url = best.get("url") or ""
+    if not url.startswith("http"):
+        url = f"https://www.youtube.com/watch?v={best.get('id')}"
+    log(f"השיעור נמצא ביוטיוב: {best.get('title')} ({score:.0%} מהשם)")
+    return url
+
+
 def via_claude(url, model=None):
     """When the program cannot read a page (blocked, built in the browser), Claude reads it and
     writes out everything in it in detail."""
@@ -460,9 +523,15 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
                     log(f"הדף נקרא דרך הדפדפן ({e})")
                     text = text_of_html(built)
                     s["note"] = "נקרא דרך הדפדפן"
+                elif (yt := find_on_youtube(s, project.data["rav"])):
+                    # the page did not open: the same lesson on YouTube is heard instead
+                    sub = dict(s, url=yt)
+                    text = from_media_site(project, sub, settings, progress, should_stop)
+                    s["note"] = f"הדף לא נפתח; השיעור נמצא ביוטיוב ({yt}) — {sub.get('note', '')}".strip(" —")
                 else:
                     if _gave_up("claude"):
-                        raise Skip("הדף לא נפתח במחשב הזה (אפשר להעתיק את הטקסט מהדפדפן לקובץ ולהוסיף אותו)")
+                        raise Skip("הדף לא נפתח במחשב הזה, והשיעור לא נמצא ביוטיוב "
+                                   "(אפשר להעתיק את הטקסט מהדפדפן לקובץ ולהוסיף אותו)")
                     log(f"לא הצלחתי לקרוא את הדף בעצמי ({e}) — מבקש מ־Claude")
                     try:
                         text = via_claude(url, settings.get("model") or None)
