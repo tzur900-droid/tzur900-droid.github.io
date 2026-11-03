@@ -60,7 +60,8 @@ def main():
         import os
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
-    log(f"התחלה · Python {sys.version.split()[0]} · {sys.platform}")
+    from rav.version import VERSION
+    log(f"התחלה · גרסה {VERSION} · Python {sys.version.split()[0]} · {sys.platform}")
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
     log("פותח את Qt")
@@ -92,7 +93,19 @@ def main():
         if got != [42]:
             raise RuntimeError("a step in the background did not come back to the window")
         log("בדיקה: הכל עבד")
-        open(os.path.join(sys.argv[2], "selftest.txt"), "w").write("ok whisper=%s" % transcribe.available())
+        # a recording is opened the way faster-whisper opens it (new PyAV versions broke that once)
+        import wave
+        wav = os.path.join(sys.argv[2], "selftest.wav")
+        with wave.open(wav, "w") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(b"\0\0" * 16000)
+        transcribe._fix_av()
+        from faster_whisper.audio import decode_audio
+        n = len(decode_audio(wav))
+        log(f"בדיקה: הקלטה נפתחה ({n} דגימות)")
+        open(os.path.join(sys.argv[2], "selftest.txt"), "w").write("ok whisper=%s audio=%d" % (transcribe.available(), n))
         return 0
     if len(sys.argv) > 3 and sys.argv[1] == "--render":
         # a check of reading a page through the browser, from inside the program itself
