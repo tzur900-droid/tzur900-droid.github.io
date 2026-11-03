@@ -164,6 +164,17 @@ def host(url):
     return urllib.parse.urlparse(url).netloc.lower()
 
 
+def is_recording_link(url, page_url=""):
+    """Whether a copied link is a recording (a video site, or a media file), and not a web page
+    (like the address of the lesson page itself, which is blocked like the page)."""
+    low = url.lower().split("?")[0]
+    if is_video_host(url) or low.endswith(MEDIA_EXT) or ".m3u8" in url.lower():
+        return True
+    if page_url and host(url) == host(page_url):
+        return False
+    return bool(re.search(r"(media|video|audio|stream|cdn|vod)", host(url)))
+
+
 def is_video_host(url):
     h = host(url)
     return any(h == v or h.endswith("." + v) for v in VIDEO_HOSTS)
@@ -508,6 +519,10 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
             else:
                 with open(url, encoding="utf-8", errors="replace") as f:
                     text = f.read()
+        elif s.get("media_url") and not is_recording_link(s["media_url"], url):
+            m = s.pop("media_url")
+            raise Skip(f"הועתק הקישור של הדף ({m}) ולא של הסרטון: בדף, קליק ימני על הסרטון עצמו ← "
+                       "העתקת כתובת הסרטון")
         elif s.get("media_url"):
             # the link of the recording, copied by the user from the page in the browser
             m = s["media_url"]
