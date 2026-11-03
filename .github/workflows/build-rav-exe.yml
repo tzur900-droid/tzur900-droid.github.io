@@ -47,6 +47,15 @@ jobs:
           if (!(Test-Path st/selftest.pdf) -or !(Test-Path st/selftest.docx)) { throw "the exe did not make the test book" }
           Get-Content st/selftest.txt
 
+      - name: Reading a page through Edge from inside Rav.exe (the yeshiva site builds its pages in the browser)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "rav-python/dist/Rav/Rav.exe" -ArgumentList "--render", "https://www.yeshiva.org.il/midrash/1120", "$PWD\st\render.txt" -Wait -PassThru
+          Get-Content st/render.txt
+          Get-Content rav-python/dist/Rav/rav.log -ErrorAction SilentlyContinue
+          $first = Get-Content st/render.txt -TotalCount 1
+          if ($first -notmatch "text=([0-9]{4,})") { throw "Rav.exe did not read the page through the browser" }
+
       - name: Zip
         shell: pwsh
         run: |
