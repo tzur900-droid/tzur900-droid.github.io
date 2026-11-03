@@ -648,6 +648,11 @@ class CopyDialog(QDialog):
         text = (self.clip.text() or "").strip()
         p = self.win.project
         if re.fullmatch(r"https?://\S+", text):
+            from .collect import is_recording_link
+            if not is_recording_link(text, s["url"]):
+                self.status.setText("זה הקישור של הדף, לא של הסרטון. קליק ימני על הסרטון עצמו ← "
+                                    "'העתקת כתובת הסרטון'. אם אין אפשרות כזו — 'דילוג'.")
+                return
             # the link of the video or recording on the page: it is downloaded and transcribed
             s["media_url"], s["state"], s["chars"] = text, "new", 0
             s["note"] = "קישור להקלטה הועתק מהדפדפן — יתומלל ב'איסוף ותמלול'"
