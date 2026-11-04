@@ -4,6 +4,8 @@
     python main.py --new "הרב זלמן מלמד" "חנוכה" [book|series|article|summary]
                                                      a new book, all the steps, without a window
     python main.py --selftest FOLDER                 check that everything loads (writes a small book there)
+    python main.py --parasha "הרב זלמן ברוך מלמד" בראשית 6 3 ["הנחיות"]
+                                                     a book of talks on a chumash, all of it, without a window
     python main.py --step STEP FOLDER                one step on an existing book's folder
         STEP: search | collect | read | outline | write | export | all
 """
@@ -38,7 +40,23 @@ QTabWidget::pane { border: 1px solid #e2d9c6; border-radius: 8px; }
 def cli(argv):
     from rav import pipeline
     from rav.project import Project
-    if argv[0] == "--new":
+    if argv[0] == "--parasha":
+        # a book of talks on a chumash, all of it without a window:
+        #   --parasha "הרב זלמן ברוך מלמד" בראשית [שיחות מיוטיוב לפרשה] [שיחות בספר לפרשה] [הנחיות]
+        from rav.search import PARASHOT
+        rav, book = argv[1], argv[2]
+        if book not in PARASHOT:
+            print("חומש לא מוכר:", book, "— אחד מ:", ", ".join(PARASHOT))
+            return 2
+        videos = int(argv[3]) if len(argv) > 3 else 6
+        talks = int(argv[4]) if len(argv) > 4 else 3
+        p = Project.new(rav, f"שיחות על ספר {book}", "parasha")
+        p.data["parasha_mode"] = {"book": book, "videos": videos, "talks": talks}
+        p.data["settings"]["auto_subs"] = True
+        p.data["instructions"] = argv[5] if len(argv) > 5 else ""
+        p.save()
+        step = "all"
+    elif argv[0] == "--new":
         p = Project.new(argv[1], argv[2], argv[3] if len(argv) > 3 else "book")
         step = "all"
     else:
@@ -139,7 +157,7 @@ def main():
             f.write(f"builtin={webview.available()} browser={collect.find_browser()} html={len(html)} "
                     f"text={len(text)}\n{text[:400]}\n")
         return 0
-    if len(sys.argv) > 1 and sys.argv[1] in ("--new", "--step"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("--new", "--step", "--parasha"):
         from rav import log as logmod
         logmod.listeners.append(lambda m: print(m, flush=True))
         return cli(sys.argv[1:])
