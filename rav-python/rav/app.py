@@ -6,7 +6,7 @@ import threading
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QMenu, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
                                QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
                                QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
@@ -90,15 +90,18 @@ class MainWindow(QMainWindow):
     def _build(self):
         tb = self.addToolBar("main")
         tb.setMovable(False)
-        for text, fn in (("חדש", self.new_project), ("שיחות על חומש…", self.new_parasha_book),
-                         ("פתיחה…", self.open_project),
-                         ("תיקיית הספר", self.open_folder), ("מה אני רוצה בספר…", self.edit_instructions),
-                         ("הגדרות", self.settings),
-                         ("חיבור ל־Claude…", self.connect_claude), ("בדיקת Claude", self.check_claude),
-                         ("עדכון תוכנה", self.update_program)):
+        tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        # a few groups, each a menu: every name is readable
+        self._menu_button(tb, "ספר ▾", (("ספר חדש", self.new_project), ("שיחות על חומש…", self.new_parasha_book),
+                                        ("פתיחת ספר…", self.open_project), ("תיקיית הספר", self.open_folder)))
+        for text, fn in (("שיחות על חומש…", self.new_parasha_book), ("מה אני רוצה בספר…", self.edit_instructions),
+                         ("הגדרות", self.settings)):
             a = QAction(text, self)
             a.triggered.connect(fn)
             tb.addAction(a)
+        self._menu_button(tb, "חיבור ועדכון ▾", (("חיבור ל־Claude…", self.connect_claude),
+                                                ("בדיקת Claude", self.check_claude),
+                                                ("עדכון תוכנה", self.update_program)))
 
         w = QWidget()
         v = QVBoxLayout(w)
@@ -151,15 +154,27 @@ class MainWindow(QMainWindow):
         self.table.cellDoubleClicked.connect(self._open_source)
         sv.addWidget(self.table)
         srow = QHBoxLayout()
-        for text, fn in (("חיפוש ביוטיוב…", self.search_youtube_more), ("הוספת קישור…", self.add_url), ("הוספת קבצים מהמחשב…", self.add_files),
-                         ("סימון הכל", lambda: self._mark(True)), ("ביטול הכל", lambda: self._mark(False)),
-                         ("לנסות שוב את מה שנכשל", self.retry_failed), ("קריאה דרך הדפדפן שלי…", self.read_in_my_browser),
-                         ("איסוף מחדש לנבחרים", self.recollect_selected),
-                         ("ייבוא תמלול לשורה…", self.import_transcript), ("תיקיית ההקלטות", self.open_media),
-                         ("הצגת הטקסט שנאסף", self.show_text)):
-            b = QPushButton(text)
-            b.clicked.connect(fn)
+        groups = (
+            ("➕ הוספת מקורות ▾", (("חיפוש ביוטיוב…", self.search_youtube_more), ("הוספת קישור…", self.add_url),
+                                 ("הוספת קבצים מהמחשב…", self.add_files))),
+            ("✓ סימון ▾", (("סימון הכל", lambda: self._mark(True)), ("ביטול הכל", lambda: self._mark(False)))),
+            ("↻ מה שנכשל ▾", (("לנסות שוב את מה שנכשל", self.retry_failed),
+                             ("קריאה דרך הדפדפן שלי…", self.read_in_my_browser),
+                             ("איסוף מחדש לנבחרים", self.recollect_selected))),
+            ("🎙 תמלול ▾", (("ייבוא תמלול לשורה… (למשל מאלף בוט)", self.import_transcript),
+                           ("תיקיית ההקלטות", self.open_media))),
+        )
+        for title, items in groups:
+            b = QPushButton(title)
+            m = QMenu(b)
+            for text, fn in items:
+                m.addAction(text).triggered.connect(fn)
+            b.setMenu(m)
             srow.addWidget(b)
+        b = QPushButton("הצגת הטקסט שנאסף")
+        b.clicked.connect(self.show_text)
+        srow.addWidget(b)
+        srow.addStretch()
         sv.addLayout(srow)
         self.tabs.addTab(sw, "מקורות")
         # outline
@@ -205,6 +220,17 @@ class MainWindow(QMainWindow):
         split.setSizes([560, 180])
         v.addWidget(split, 1)
         self.setCentralWidget(w)
+
+    def _menu_button(self, tb, title, items):
+        from PySide6.QtWidgets import QToolButton
+        btn = QToolButton()
+        btn.setText(title)
+        btn.setPopupMode(QToolButton.InstantPopup)
+        m = QMenu(btn)
+        for text, fn in items:
+            m.addAction(text).triggered.connect(fn)
+        btn.setMenu(m)
+        tb.addWidget(btn)
 
     # ---------- the project ----------
     def _last_file(self):
