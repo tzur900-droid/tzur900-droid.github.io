@@ -11,6 +11,9 @@ def model_of(project):
 
 
 def step_search(project, stop=lambda: False, youtube=True):
+    if project.data["kind"] == "parasha":
+        from . import parasha
+        return parasha.step_search(project, stop)
     search.search_web(project, model_of(project))
     if youtube and not stop():
         search.search_youtube(project)
@@ -58,6 +61,11 @@ def step_read(project, stop=lambda: False, progress=log):
 
 
 def step_outline(project, again=False):
+    if project.data["kind"] == "parasha":
+        from . import parasha
+        if again or not project.read("outline.md"):
+            parasha.step_outline(project, model_of(project))
+        return compose.load_plan(project)
     if again or not project.read("outline.md"):
         compose.make_outline(project, model_of(project))
     return compose.load_plan(project)
@@ -94,6 +102,9 @@ def step_export(project, plan=None):
 
 
 def run_all(project, stop=lambda: False):
+    if project.data["kind"] == "parasha":
+        from . import parasha
+        return parasha.run(project, stop)
     if not project.sources:
         step_search(project, stop)
     for step in (step_collect, step_read):

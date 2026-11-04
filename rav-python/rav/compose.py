@@ -87,6 +87,7 @@ CHAPTER = """אתה כותב את {which} של {kind} על פי דברי {rav} (
 - מבנה: כותרות משנה (### כותרת) כשצריך, פסקאות מלאות, ציטוט מפסוק או ממאמר חז"ל בתוך הטקסט כפי שהרב מביא.
   {series_rule}
 - אל תחזור על מה ששייך לפרקים אחרים.
+{length_rule}
 - החזר רק את הפרק עצמו: שורה ראשונה "## {title}" ואחריה הטקסט, בלי הקדמות והסברים שלך ובלי רשימת מקורות
   (הרשימה נוספת אחר כך).
 
@@ -119,7 +120,7 @@ def extract_one(project, s, model=None):
     for i, part in enumerate(parts):
         prompt = EXTRACT.format(id=s["id"], what=what, title=s["title"], url=s["url"],
                                 part=f"(חלק {i + 1} מתוך {len(parts)})" if len(parts) > 1 else "",
-                                kind=project.kind_name, rav=d["rav"], request=d["request"],
+                                kind=project.kind_name, rav=d["rav"], request=source_request(project, s),
                                 transcript_note=TRANSCRIPT_NOTE if heard else "", text=part,
                                 quality=QUALITY if heard else "")
         outs.append(ask(prompt, model=model, system=SYSTEM, timeout=1800))
@@ -166,6 +167,13 @@ def redo_accurately(project, s):
     project.save()
     log(f"↻ {s['title'][:60]} — התמלול לא ברור ({how}); יתומלל שוב במודל המדויק")
     return True
+
+
+def source_request(project, s):
+    """What a source is read for: the book's request, or its parasha in a book of talks on a chumash."""
+    if s.get("parasha"):
+        return f"שיחות על פרשת {s['parasha']} (ספר {project.data.get('parasha_mode', {}).get('book', '')})"
+    return project.data["request"]
 
 
 def instructions_block(project):
@@ -249,9 +257,10 @@ def bare_title(t):
 def outline_to_md(plan):
     out = [f"# {plan.get('title', '')}", plan.get("subtitle", ""), "", "## סגנון הרב", plan.get("style", ""), ""]
     for i, c in enumerate(plan.get("chapters", []), 1):
-        out += [f"## פרק {i}: {bare_title(c.get('title', ''))}",
-                "מקורות: " + ", ".join(str(x) for x in c.get("sources", [])),
-                c.get("plan", ""), ""]
+        out += [f"## פרק {i}: {bare_title(c.get('title', ''))}"]
+        if c.get("part"):
+            out.append(f"פרשה: {c['part']}")
+        out += ["מקורות: " + ", ".join(str(x) for x in c.get("sources", [])), c.get("plan", ""), ""]
     return "\n".join(out).strip() + "\n"
 
 
@@ -277,8 +286,11 @@ def md_to_outline(md):
         elif mode == "style":
             plan["style"] += line + "\n"
         elif mode == "chap":
+            mp = re.match(r"^פרשה:\s*(.*)", line)
             mm = re.match(r"^מקורות:\s*(.*)", line)
-            if mm:
+            if mp:
+                cur["part"] = mp.group(1).strip()
+            elif mm:
                 cur["sources"] = [int(x) for x in re.findall(r"\d+", mm.group(1))]
             else:
                 cur["plan"] += line + "\n"
@@ -286,6 +298,10 @@ def md_to_outline(md):
     for c in plan["chapters"]:
         c["plan"] = c["plan"].strip()
     return plan
+
+
+LENGTH_RULE = ("- אורך: כמה שיותר מהחומר של השיחה, אבל לא יותר מכ־10 עמודי ספר (עד כ־3,500 מילים). "
+               "אל תמתח ואל תחזור כדי להאריך.")
 
 
 def write_chapter(project, plan, i, model=None):
@@ -305,9 +321,11 @@ def write_chapter(project, plan, i, model=None):
                     for n, ch in enumerate(plan["chapters"], 1))
     series = d["kind"] == "series"
     prompt = CHAPTER.format(
-        which=f"שיעור {i + 1}" if series else f"פרק {i + 1}", kind=project.kind_name, rav=d["rav"],
+        which=(f"שיחה לפרשת {c['part']}" if c.get("part") else f"שיעור {i + 1}" if series else f"פרק {i + 1}"),
+        kind=project.kind_name, rav=d["rav"],
         full=d.get("rav_full_name") or d["rav"], request=d["request"], toc=toc, title=c["title"],
         plan=c["plan"], style=plan.get("style", ""), material=material, instructions=instructions_block(project),
+        length_rule=LENGTH_RULE if d["kind"] == "parasha" else "",
         series_rule=("- זה שיעור בסדרה: פתיחה שמחברת לשיעור הקודם (אם יש), גוף השיעור, וסיכום קצר בסוף."
                      if series else ""))
     log(f"כותב פרק {i + 1}/{len(plan['chapters'])}: {c['title']}")
@@ -389,7 +407,10 @@ def assemble(project, plan):
         text = project.read("chapters", f"{i + 1:02d}.md")
         if not text:
             continue
-        title = plan["chapters"][i]["title"]
+        c = plan["chapters"][i]
+        title = c["title"] + (f" (פרשת {c['part']})" if c.get("part") else "")
+        if c.get("part") and (i == 0 or plan["chapters"][i - 1].get("part") != c["part"]):
+            parts.append(f"# פרשת {c['part']}")
         chapters.append((title, text))
         parts.append(chapter_with_sources(project, text))
     parts.append(sources_list(project, chapters))
