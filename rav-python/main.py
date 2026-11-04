@@ -34,6 +34,7 @@ QPushButton:hover { background: #efe6d3; } QPushButton:disabled { color: #b0a690
 QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QTableWidget {
   background: #fbf8f0; border: 1px solid #e2d9c6; border-radius: 8px; padding: 4px; }
 QTabWidget::pane { border: 1px solid #e2d9c6; border-radius: 8px; }
+QToolButton::menu-indicator, QPushButton::menu-indicator { image: none; width: 0; }
 """
 
 
