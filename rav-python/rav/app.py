@@ -90,7 +90,8 @@ class MainWindow(QMainWindow):
     def _build(self):
         tb = self.addToolBar("main")
         tb.setMovable(False)
-        for text, fn in (("חדש", self.new_project), ("פתיחה…", self.open_project),
+        for text, fn in (("חדש", self.new_project), ("שיחות על חומש…", self.new_parasha_book),
+                         ("פתיחה…", self.open_project),
                          ("תיקיית הספר", self.open_folder), ("מה אני רוצה בספר…", self.edit_instructions),
                          ("הגדרות", self.settings),
                          ("חיבור ל־Claude…", self.connect_claude), ("בדיקת Claude", self.check_claude),
@@ -255,6 +256,22 @@ class MainWindow(QMainWindow):
         p.data["kind"] = kind
         p.save()
         return True
+
+    def new_parasha_book(self):
+        """A book of talks on a chumash, in one go: the rabbi, the book, how many videos and talks."""
+        d = ParashaDialog(self)
+        if d.exec() != QDialog.Accepted:
+            return
+        rav, book, videos, talks, fast = d.values()
+        p = Project.new(rav, f"שיחות על ספר {book}", "parasha")
+        p.data["parasha_mode"] = {"book": book, "videos": videos, "talks": talks}
+        p.data["settings"]["auto_subs"] = fast
+        p.save()
+        self.load(p)
+        if not self.ask_instructions(first=True):
+            return
+        log(f"מתחיל: {videos} שיחות ביוטיוב לכל פרשה בספר {book}, ועד {talks} שיחות לכל פרשה בספר")
+        self.run(lambda: pipeline.run_all(p, self.stopped), self._book_ready)
 
     def new_project(self):
         self.project = None
@@ -747,6 +764,47 @@ class MainWindow(QMainWindow):
 
     def connect_claude(self):
         ConnectDialog(self).exec()
+
+
+class ParashaDialog(QDialog):
+    """The choices of a book of talks on a chumash."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        from .search import PARASHOT
+        self.setWindowTitle("שיחות על חומש")
+        f = QFormLayout(self)
+        self.rav = QLineEdit(win.rav.text().strip() or "הרב זלמן ברוך מלמד")
+        f.addRow("הרב:", self.rav)
+        self.book = QComboBox()
+        for b in PARASHOT:
+            self.book.addItem(f"{b} ({len(PARASHOT[b])} פרשות)", b)
+        f.addRow("חומש:", self.book)
+        self.videos = QSpinBox()
+        self.videos.setRange(1, 15)
+        self.videos.setValue(6)
+        f.addRow("כמה שיחות מיוטיוב לכל פרשה:", self.videos)
+        self.talks = QSpinBox()
+        self.talks.setRange(1, 6)
+        self.talks.setValue(3)
+        f.addRow("עד כמה שיחות בספר לכל פרשה:", self.talks)
+        self.fast = QCheckBox("מהיר: קודם כתוביות של יוטיוב (Claude מתקן; תמלול גרוע מתומלל שוב במודל המדויק)")
+        self.fast.setChecked(True)
+        f.addRow(self.fast)
+        note = QLabel("הכל ירוץ לבד: חיפוש לפי פרשות, תמלול, קריאה, תכנון וכתיבה. אפשר לעצור בכל רגע ולהמשיך "
+                      "אחר כך ב'▶ הכל ברצף'.")
+        note.setWordWrap(True)
+        f.addRow(note)
+        b = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        b.button(QDialogButtonBox.Ok).setText("התחל")
+        b.button(QDialogButtonBox.Cancel).setText("ביטול")
+        b.accepted.connect(self.accept)
+        b.rejected.connect(self.reject)
+        f.addRow(b)
+
+    def values(self):
+        return (self.rav.text().strip() or "הרב זלמן ברוך מלמד", self.book.currentData(), self.videos.value(),
+                self.talks.value(), self.fast.isChecked())
 
 
 class InstructionsDialog(QDialog):
