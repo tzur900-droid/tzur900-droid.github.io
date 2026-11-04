@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
         self.table.cellDoubleClicked.connect(self._open_source)
         sv.addWidget(self.table)
         srow = QHBoxLayout()
-        for text, fn in (("הוספת קישור…", self.add_url), ("הוספת קבצים מהמחשב…", self.add_files),
+        for text, fn in (("חיפוש ביוטיוב…", self.search_youtube_more), ("הוספת קישור…", self.add_url), ("הוספת קבצים מהמחשב…", self.add_files),
                          ("סימון הכל", lambda: self._mark(True)), ("ביטול הכל", lambda: self._mark(False)),
                          ("לנסות שוב את מה שנכשל", self.retry_failed), ("קריאה דרך הדפדפן שלי…", self.read_in_my_browser),
                          ("איסוף מחדש לנבחרים", self.recollect_selected),
@@ -337,6 +337,24 @@ class MainWindow(QMainWindow):
         if s:
             u = s["url"]
             QDesktopServices.openUrl(QUrl.fromLocalFile(u) if collect_is_local(u) else QUrl(u))
+
+    def search_youtube_more(self):
+        """More searches on YouTube, written by the user (one per line); the rabbi's name is added."""
+        if not (self.project or self.ensure_project()):
+            return
+        from . import search
+        p = self.project
+        start = "\n".join(q[len(p.data["rav"]):].strip() for q in search.youtube_queries(p))
+        text, ok = QInputDialog.getMultiLineText(
+            self, "חיפוש ביוטיוב",
+            f"חיפוש בכל שורה (שם הרב, {p.data['rav']}, נוסף לבד). למשל: שיחת מוצאי שבת וישב", start)
+        if not ok:
+            return
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        if lines:
+            qs = [f"{p.data['rav']} {ln}" for ln in lines]
+            self.run(lambda: search.search_youtube(p, queries=qs),
+                     lambda n: log(f"נוספו {n} סרטונים. עברו על הטבלה ואז '2. איסוף ותמלול'."))
 
     def add_url(self):
         if not (self.project or self.ensure_project()):
