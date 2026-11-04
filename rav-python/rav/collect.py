@@ -394,14 +394,21 @@ def correct_transcript(project, s, text):
         cur += (("\n\n" if cur else "") + para)
     if cur:
         parts.append(cur)
-    log(f"Claude מתקן את התמלול ({len(text):,} תווים, {len(parts)} חלקים)…")
+    log(f"Claude מתקן את התמלול ({len(text):,} תווים, {len(parts)} חלקים, במקביל)…")
+    # the parts at the same time, with the quicker model (fixing words does not need the strongest)
+    model = d["settings"].get("correct_model", "sonnet") or None
+
+    def fix(i_part):
+        i, part = i_part
+        label = f"חלק {i + 1} מתוך {len(parts)} של" if len(parts) > 1 else ""
+        fixed = ask(CORRECT.format(part=label, rav=d.get("rav_full_name") or d["rav"], topic=d["request"],
+                                   text=part), model=model, timeout=1200).strip()
+        # a "correction" much shorter than the part is not a correction: the part stays as it was
+        return fixed if len(fixed) > 0.7 * len(part) else part
+    from concurrent.futures import ThreadPoolExecutor
     try:
-        for i, part in enumerate(parts):
-            label = f"חלק {i + 1} מתוך {len(parts)} של" if len(parts) > 1 else ""
-            fixed = ask(CORRECT.format(part=label, rav=d.get("rav_full_name") or d["rav"], topic=d["request"],
-                                       text=part), model=d["settings"].get("model") or None, timeout=1200).strip()
-            # a "correction" much shorter than the part is not a correction: the part stays as it was
-            out.append(fixed if len(fixed) > 0.7 * len(part) else part)
+        with ThreadPoolExecutor(max_workers=min(4, len(parts))) as pool:
+            out = list(pool.map(fix, enumerate(parts)))
     except ClaudeError as e:
         log(f"התיקון לא הושלם ({str(e).splitlines()[0]}) — נשאר התמלול כמו שיצא")
         return text
