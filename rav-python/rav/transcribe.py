@@ -61,12 +61,34 @@ def _model(key):
     return m
 
 
-def transcribe(path, key="ivrit-ai", progress=None, should_stop=None):
-    """The text of the recording at path, in paragraphs."""
+TORAH_WORDS = ("גמרא, משנה, רש\"י, תוספות, רמב\"ם, שולחן ערוך, משנה ברורה, הלכה, מדרש, זוהר, פסוק, "
+               "חז\"ל, הקב\"ה, ברוך הוא, השם יתברך, מצווה, תורה, תפילה, ברכה, קדושה, אמונה, גאולה, "
+               "כנסת ישראל, ארץ ישראל, הראי\"ה, הרב קוק, אורות, עולת ראיה, מהדרין, דאורייתא, דרבנן, "
+               "קל וחומר, תא שמע, אמר רבי, תנו רבנן, מאי טעמא, היינו, דהיינו, בשלמא, איבעיא להו")
+
+
+def torah_prompt(rav="", topic=""):
+    """Words the model is given before it starts: the rabbi, the subject and Torah terms, so that
+    names, sources and Aramaic come out right more often."""
+    head = f"שיעור של {rav}" + (f" על {topic}" if topic else "") + ". " if rav else ""
+    return (head + "מונחים: " + TORAH_WORDS + ".")[:600]
+
+
+def transcribe(path, key="ivrit-ai", progress=None, should_stop=None, prompt=""):
+    """The text of the recording at path, in paragraphs. prompt: words the model is given first
+    (see torah_prompt)."""
     _fix_av()
     model = _model(key)
-    segments, info = model.transcribe(path, language="he", vad_filter=True, beam_size=5,
-                                      condition_on_previous_text=False)
+    extra = {}
+    if prompt:
+        extra = {"initial_prompt": prompt, "hotwords": prompt}
+    try:
+        segments, info = model.transcribe(path, language="he", vad_filter=True, beam_size=5,
+                                          condition_on_previous_text=False, **extra)
+    except TypeError:       # an older faster-whisper without hotwords
+        extra.pop("hotwords", None)
+        segments, info = model.transcribe(path, language="he", vad_filter=True, beam_size=5,
+                                          condition_on_previous_text=False, **extra)
     total = info.duration or 0
     log(f"מתמלל {total / 60:.0f} דקות הקלטה…")
     paras, cur, last_end, t0, shown = [], [], 0.0, time.time(), 0

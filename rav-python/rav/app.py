@@ -38,6 +38,9 @@ class Settings(QDialog):
         self.auto = QCheckBox("כשאין כתוביות של אדם — להשתמש בכתוביות האוטומטיות של יוטיוב (מהיר, פחות מדויק)")
         self.auto.setChecked(s["auto_subs"])
         f.addRow(self.auto)
+        self.correct = QCheckBox("Claude מתקן כל תמלול (שמות, מקורות, ארמית) — מדויק יותר, משתמש יותר במגבלת החשבון")
+        self.correct.setChecked(s.get("correct_transcripts", True))
+        f.addRow(self.correct)
         self.whisper = QComboBox()
         for k, (_, desc) in transcribe.MODELS.items():
             self.whisper.addItem(desc, k)
@@ -59,6 +62,7 @@ class Settings(QDialog):
         s = self.project.data["settings"]
         s.update(max_sources=self.max_sources.value(), max_video_minutes=self.minutes.value(),
                  auto_subs=self.auto.isChecked(), whisper_model=self.whisper.currentData(),
+                 correct_transcripts=self.correct.isChecked(),
                  model=self.model.currentData())
         self.project.save()
         super().accept()
@@ -87,7 +91,8 @@ class MainWindow(QMainWindow):
         tb = self.addToolBar("main")
         tb.setMovable(False)
         for text, fn in (("חדש", self.new_project), ("פתיחה…", self.open_project),
-                         ("תיקיית הספר", self.open_folder), ("הגדרות", self.settings),
+                         ("תיקיית הספר", self.open_folder), ("מה אני רוצה בספר…", self.edit_instructions),
+                         ("הגדרות", self.settings),
                          ("חיבור ל־Claude…", self.connect_claude), ("בדיקת Claude", self.check_claude),
                          ("עדכון תוכנה", self.update_program)):
             a = QAction(text, self)
@@ -149,6 +154,7 @@ class MainWindow(QMainWindow):
                          ("סימון הכל", lambda: self._mark(True)), ("ביטול הכל", lambda: self._mark(False)),
                          ("לנסות שוב את מה שנכשל", self.retry_failed), ("קריאה דרך הדפדפן שלי…", self.read_in_my_browser),
                          ("איסוף מחדש לנבחרים", self.recollect_selected),
+                         ("ייבוא תמלול לשורה…", self.import_transcript), ("תיקיית ההקלטות", self.open_media),
                          ("הצגת הטקסט שנאסף", self.show_text)):
             b = QPushButton(text)
             b.clicked.connect(fn)
@@ -162,9 +168,13 @@ class MainWindow(QMainWindow):
                             "לפני הכתיבה — השינויים נשמרים כשלוחצים 'שמירת התכנית' או 'כתיבה'."))
         self.outline = QPlainTextEdit()
         ov.addWidget(self.outline)
+        ov.addWidget(QLabel("הערות לתכנית (למשל: לאחד את פרקים 3 ו־4, להוסיף פרק על המהדרין, להקדים את ההלכות):"))
+        self.comments = QPlainTextEdit()
+        self.comments.setMaximumHeight(90)
+        ov.addWidget(self.comments)
         orow = QHBoxLayout()
-        for text, fn in (("שמירת התכנית", self.save_outline), ("תכנון מחדש", self.redo_outline),
-                         ("כתיבת פרק אחד מחדש…", self.rewrite_chapter)):
+        for text, fn in (("תיקון התכנית לפי ההערות", self.revise_outline), ("שמירת התכנית", self.save_outline),
+                         ("תכנון מחדש", self.redo_outline), ("כתיבת פרק אחד מחדש…", self.rewrite_chapter)):
             b = QPushButton(text)
             b.clicked.connect(fn)
             orow.addWidget(b)
@@ -239,6 +249,7 @@ class MainWindow(QMainWindow):
                     p = None
             if p is None:
                 self.load(Project.new(rav, req, kind))
+                self.ask_instructions(first=True)
                 return True
             p.data.update(rav=rav, request=req)
         p.data["kind"] = kind
@@ -357,6 +368,55 @@ class MainWindow(QMainWindow):
                     s["state"], s["note"] = "new", ""
             self.project.save()
             self.fill_table()
+
+    def open_media(self):
+        """The folder of the downloaded recordings (to transcribe them elsewhere, like אלף בוט)."""
+        if self.project:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(self.project.path("media")))
+            log("בתיקייה ההקלטות שהורדו, לפי מספר המקור (למשל 012.m4a = מקור 12)")
+
+    def import_transcript(self):
+        """A transcript made elsewhere (אלף בוט, Word or text) becomes the text of the chosen row."""
+        if not self.project:
+            return
+        rows = self._chosen_rows()
+        s = self._source_at(rows[0]) if rows else None
+        if s is None:
+            QMessageBox.information(self, "ספר מהרב", "בחרו קודם בטבלה את השורה של השיעור.")
+            return
+        f, _ = QFileDialog.getOpenFileName(self, f"התמלול של: {s['title']}", "",
+                                           "תמלול (*.docx *.txt *.srt *.vtt *.pdf);;הכל (*)")
+        if not f:
+            return
+        from . import collect
+        low = f.lower()
+        try:
+            if low.endswith(".docx"):
+                text = collect.text_of_docx(f)
+            elif low.endswith(".pdf"):
+                text = collect.text_of_pdf(f)
+            else:
+                with open(f, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+                if low.endswith((".srt", ".vtt")):
+                    text = collect.vtt_to_text(text)
+        except Exception as e:
+            QMessageBox.warning(self, "ספר מהרב", f"לא הצלחתי לקרוא את הקובץ: {e}")
+            return
+        text = text.strip()
+        if len(text) < 100:
+            QMessageBox.warning(self, "ספר מהרב", "בקובץ כמעט אין טקסט.")
+            return
+        p = self.project
+        if os.path.isfile(p.note_path(s)):
+            os.remove(p.note_path(s))
+        p.write(f"מקור: {s['title']}\n{s['url']}\n\n" + text, "sources", "%03d.txt" % s["id"])
+        s.update(state="text", chars=len(text), note="תומלל מחוץ לתוכנה (קובץ שיובא)", how="imported",
+                 accurate=True, use=True)
+        s.pop("media_url", None)
+        p.save()
+        self.fill_table()
+        log(f"✓ {s['title'][:60]} — יובא תמלול ({len(text):,} תווים). לחצו '3. קריאה'.")
 
     def recollect_selected(self):
         """The chosen rows back to waiting: what was collected from them (text, recording link,
@@ -503,22 +563,67 @@ class MainWindow(QMainWindow):
             read = sum(1 for s in p.sources if s["state"] == "read")
             self.status.setText(self.status.text() + f"   ·   כל המקורות נקראו ({read}) — אפשר '4. תכנון הספר'")
 
+    def ask_instructions(self, first=False):
+        """The window 'what I want in the book'. False when it was cancelled."""
+        d = InstructionsDialog(self, self.project.data.get("instructions", ""), first)
+        if d.exec() != QDialog.Accepted:
+            return False
+        self.project.data["instructions"] = d.text()
+        self.project.save()
+        return True
+
+    def edit_instructions(self):
+        if self.project or self.ensure_project():
+            if self.ask_instructions():
+                log("ההנחיות לספר נשמרו")
+
+    def _chapters_written(self):
+        d = self.project.path("chapters")
+        return [f for f in os.listdir(d) if f.endswith(".md")] if os.path.isdir(d) else []
+
+    def _plan_changed(self):
+        """The plan changed: chapters written by the old plan are written again (asking first)."""
+        old = self._chapters_written()
+        if old and QMessageBox.question(
+                self, "ספר מהרב", f"התכנית השתנתה, וכבר נכתבו {len(old)} פרקים לפי התכנית הקודמת.\n"
+                "למחוק אותם, כדי שייכתבו מחדש לפי התכנית החדשה? (מומלץ)") == QMessageBox.Yes:
+            for f in old:
+                os.remove(self.project.path("chapters", f))
+            log(f"{len(old)} פרקים נמחקו — ייכתבו מחדש ב'5. כתיבה'")
+
     def do_outline(self):
-        if self.ensure_project():
+        if self.ensure_project() and self.ask_instructions():
             p = self.project
-            self.run(lambda: pipeline.step_outline(p, again=True), lambda _: self.tabs.setCurrentIndex(1))
+            self.run(lambda: pipeline.step_outline(p, again=True),
+                     lambda _: (self.tabs.setCurrentIndex(1), self._plan_changed()))
 
     def redo_outline(self):
         self.do_outline()
 
-    def save_outline(self):
+    def revise_outline(self):
+        if not self.project or not self.project.read("outline.md"):
+            QMessageBox.information(self, "ספר מהרב", "עוד אין תכנית. לחצו קודם '4. תכנון הספר'.")
+            return
+        comments = self.comments.toPlainText().strip()
+        if not comments:
+            QMessageBox.information(self, "ספר מהרב", "כתבו קודם הערות בתיבה שמתחת לתכנית.")
+            return
+        self.save_outline(quiet=True)
+        p = self.project
+        self.run(lambda: compose.revise_outline(p, comments, pipeline.model_of(p)),
+                 lambda _: (self.comments.clear(), self._plan_changed()))
+
+    def save_outline(self, quiet=False):
         if self.project and self.outline.toPlainText().strip():
+            changed = self.outline.toPlainText().strip() != self.project.read("outline.md").strip()
             self.project.write(self.outline.toPlainText(), "outline.md")
             plan = compose.md_to_outline(self.outline.toPlainText())
             log(f"התכנית נשמרה: {len(plan['chapters'])} פרקים")
+            if changed and not quiet:
+                self._plan_changed()
 
     def do_write(self):
-        if self.ensure_project():
+        if self.ensure_project() and self.ask_instructions():
             self.save_outline()
             p = self.project
             self.run(lambda: pipeline.step_write(p, self.stopped), self._book_ready)
@@ -544,7 +649,7 @@ class MainWindow(QMainWindow):
             self.run(lambda: pipeline.step_export(p), self._book_ready)
 
     def do_all(self):
-        if self.ensure_project():
+        if self.ensure_project() and self.ask_instructions():
             p = self.project
             self.save_outline() if self.outline.toPlainText().strip() else None
             self.run(lambda: pipeline.run_all(p, self.stopped), self._book_ready)
@@ -624,6 +729,35 @@ class MainWindow(QMainWindow):
 
     def connect_claude(self):
         ConnectDialog(self).exec()
+
+
+class InstructionsDialog(QDialog):
+    """What the user wants in the book, in their own words: Claude follows it when it searches,
+    plans and writes."""
+
+    def __init__(self, win, text, first=False):
+        super().__init__(win)
+        self.setWindowTitle("מה אני רוצה בספר")
+        self.resize(640, 420)
+        v = QVBoxLayout(self)
+        lab = QLabel("כתבו בחופשיות מה אתם רוצים בספר: סדר הפרקים, למי הוא מיועד, על מה להרחיב ועל מה לא, "
+                     "מה להשמיט, אורך, כל דבר. Claude יקפיד על זה בחיפוש, בתכנון ובכתיבה."
+                     + ("" if first else "\nאפשר לשנות כאן כל פעם; מה שכתוב נשמר עם הספר."))
+        lab.setWordWrap(True)
+        v.addWidget(lab)
+        self.edit = QPlainTextEdit(text or "")
+        self.edit.setPlaceholderText("לדוגמה:\n• קודם הפרקים ההלכתיים והעיוניים, ובסוף הפרקים האמוניים.\n"
+                                     "• הספר לציבור הרחב — להסביר מושגים.\n• לא להכניס את השיחות על פרשת השבוע.")
+        v.addWidget(self.edit)
+        b = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        b.button(QDialogButtonBox.Ok).setText("שמירה והמשך")
+        b.button(QDialogButtonBox.Cancel).setText("ביטול")
+        b.accepted.connect(self.accept)
+        b.rejected.connect(self.reject)
+        v.addWidget(b)
+
+    def text(self):
+        return self.edit.toPlainText().strip()
 
 
 class CopyDialog(QDialog):

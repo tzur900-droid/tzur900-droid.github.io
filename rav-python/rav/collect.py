@@ -329,6 +329,53 @@ def from_media_site(project, s, settings, progress, should_stop):
         ("\n\n[תיאור הסרטון]\n" + desc if desc else "")
 
 
+def _prompt(project):
+    d = project.data
+    return tr.torah_prompt(d.get("rav_full_name") or d.get("rav", ""), d.get("request", ""))
+
+
+CORRECT = """לפניך {part} תמלול אוטומטי של שיעור של {rav} בנושא "{topic}".
+בתמלול יש שגיאות שמיעה: שמות של חכמים וספרים, ציטוטים מפסוקים, מגמרא וממדרש, ביטויים בארמית, ומילים שנשמעו לא נכון.
+תקן רק שגיאות כאלה, לפי ההקשר ולפי הידיעה שלך במקורות. **אל תשנה את הניסוח של הרב, אל תקצר, אל תסכם ואל תוסיף.**
+שמור על החלוקה לפסקאות. מילה שאינך בטוח בה — השאר כמו שהיא.
+החזר רק את הטקסט המתוקן, בלי שום הערה.
+
+<<<
+{text}
+>>>"""
+
+
+def correct_transcript(project, s, text):
+    """Claude goes over a transcript and fixes what was misheard (names, sources, Aramaic).
+    The transcript as it came out is kept in sources/NNN.raw.txt."""
+    d = project.data
+    if not d["settings"].get("correct_transcripts", True) or len(text) < 300:
+        return text
+    project.write(text, "sources", f"{s['id']:03d}.raw.txt")
+    parts, out = [], []
+    cur = ""
+    for para in text.split("\n\n"):          # parts of about 12,000 characters, at paragraph ends
+        if cur and len(cur) + len(para) > 12000:
+            parts.append(cur)
+            cur = ""
+        cur += (("\n\n" if cur else "") + para)
+    if cur:
+        parts.append(cur)
+    log(f"Claude מתקן את התמלול ({len(text):,} תווים, {len(parts)} חלקים)…")
+    try:
+        for i, part in enumerate(parts):
+            label = f"חלק {i + 1} מתוך {len(parts)} של" if len(parts) > 1 else ""
+            fixed = ask(CORRECT.format(part=label, rav=d.get("rav_full_name") or d["rav"], topic=d["request"],
+                                       text=part), model=d["settings"].get("model") or None, timeout=1200).strip()
+            # a "correction" much shorter than the part is not a correction: the part stays as it was
+            out.append(fixed if len(fixed) > 0.7 * len(part) else part)
+    except ClaudeError as e:
+        log(f"התיקון לא הושלם ({str(e).splitlines()[0]}) — נשאר התמלול כמו שיצא")
+        return text
+    s["note"] = (s.get("note") or "") + " · תוקן ע\"י Claude"
+    return "\n\n".join(out)
+
+
 def whisper_model(s, settings):
     """The transcription model for s: the accurate one when the first transcription was unclear."""
     return "ivrit-ai" if s.get("accurate") else settings.get("whisper_model", "ivrit-ai")
@@ -340,7 +387,7 @@ def transcribe_download(project, s, url, settings, progress, should_stop, info=N
     path = download_audio(project, s, url)
     progress("מתמלל במחשב…")
     model = whisper_model(s, settings)
-    text = tr.transcribe(path, model, progress, should_stop)
+    text = tr.transcribe(path, model, progress, should_stop, prompt=_prompt(project))
     s["note"], s["how"] = "תומלל במחשב" + (" (במודל המדויק)" if s.get("accurate") else ""), "whisper:" + model
     return text
 
@@ -429,7 +476,7 @@ def from_web(project, s, settings, progress, should_stop):
             if is_video_host(m):
                 sub = dict(s, url=m)
                 heard = from_media_site(project, sub, settings, progress, should_stop)
-                s["note"] = sub.get("note", "")
+                s["note"], s["how"] = sub.get("note", ""), sub.get("how", "")
             else:
                 heard = transcribe_download(project, s, m, settings, progress, should_stop)
             return text + "\n\n[השיעור המוקלט]\n" + heard
@@ -535,7 +582,7 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
                     raise Skip("רכיב התמלול (faster-whisper) לא מותקן")
                 progress("מתמלל במחשב…")
                 model = whisper_model(s, settings)
-                text = tr.transcribe(url, model, progress, should_stop)
+                text = tr.transcribe(url, model, progress, should_stop, prompt=_prompt(project))
                 s["note"], s["how"] = "תומלל במחשב", "whisper:" + model
             elif low.endswith((".html", ".htm")):
                 with open(url, encoding="utf-8", errors="replace") as f:
@@ -553,7 +600,7 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
             if is_video_host(m):
                 sub = dict(s, url=m)
                 text = from_media_site(project, sub, settings, progress, should_stop)
-                s["note"] = "הקלטה מהדף — " + (sub.get("note") or "")
+                s["note"], s["how"] = "הקלטה מהדף — " + (sub.get("note") or ""), sub.get("how", "")
             else:
                 text = transcribe_download(project, s, m, settings, progress, should_stop)
         else:
@@ -576,6 +623,7 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
                     sub = dict(s, url=yt)
                     text = from_media_site(project, sub, settings, progress, should_stop)
                     s["note"] = f"הדף לא נפתח; השיעור נמצא ביוטיוב ({yt}) — {sub.get('note', '')}".strip(" —")
+                    s["how"] = sub.get("how", "")
                 else:
                     if _gave_up("claude"):
                         raise Skip("הדף לא נפתח במחשב הזה, והשיעור לא נמצא ביוטיוב "
@@ -591,6 +639,8 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
         text = text.strip()
         if len(text) < 200:
             raise Skip("כמעט אין טקסט")
+        if (s.get("how") or "").startswith("whisper") or s.get("how") == "auto_subs":
+            text = correct_transcript(project, s, text)
         project.write(f"מקור: {s['title']}\n{url}\n\n" + text, "sources", f"{s['id']:03d}.txt")
         s["state"], s["chars"] = "text", len(text)
         log(f"✓ {s['title'][:60]} — {len(text):,} תווים")
