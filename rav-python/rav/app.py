@@ -38,6 +38,9 @@ class Settings(QDialog):
         self.auto = QCheckBox("כשאין כתוביות של אדם — להשתמש בכתוביות האוטומטיות של יוטיוב (מהיר, פחות מדויק)")
         self.auto.setChecked(s["auto_subs"])
         f.addRow(self.auto)
+        self.correct = QCheckBox("Claude מתקן כל תמלול (שמות, מקורות, ארמית) — מדויק יותר, משתמש יותר במגבלת החשבון")
+        self.correct.setChecked(s.get("correct_transcripts", True))
+        f.addRow(self.correct)
         self.whisper = QComboBox()
         for k, (_, desc) in transcribe.MODELS.items():
             self.whisper.addItem(desc, k)
@@ -59,6 +62,7 @@ class Settings(QDialog):
         s = self.project.data["settings"]
         s.update(max_sources=self.max_sources.value(), max_video_minutes=self.minutes.value(),
                  auto_subs=self.auto.isChecked(), whisper_model=self.whisper.currentData(),
+                 correct_transcripts=self.correct.isChecked(),
                  model=self.model.currentData())
         self.project.save()
         super().accept()
