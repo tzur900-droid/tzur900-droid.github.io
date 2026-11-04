@@ -294,13 +294,46 @@ def _sub_url(tracks):
     return None
 
 
+BOT_CHECK = ("confirm you", "not a bot", "Sign in to confirm")
+
+
+def ytdl(opts, url, download=False):
+    """yt-dlp, and when YouTube asks to confirm a person: wait a little and try again, then with
+    the sign-in of the user's own browser (its cookies), as yt-dlp itself advises."""
+    import time
+    import yt_dlp
+    tries = [None, None] + [(b,) for b in ("edge", "firefox", "chrome")]
+    last = None
+    for i, browser in enumerate(tries):
+        o = dict(opts)
+        if browser:
+            o["cookiesfrombrowser"] = browser
+        try:
+            with yt_dlp.YoutubeDL(o) as ydl:
+                info = ydl.extract_info(url, download=download)
+                return info, (ydl.prepare_filename(info) if download and info else None)
+        except Exception as e:
+            last = e
+            if not any(m in str(e) for m in BOT_CHECK):
+                if browser:          # this browser's cookies could not be read: the next one
+                    continue
+                raise
+            if i == 0:
+                log("יוטיוב ביקש לוודא שמדובר באדם — מחכה דקה ומנסה שוב")
+                time.sleep(60)
+            elif browser is None:
+                log("יוטיוב עדיין מבקש אימות — מנסה עם ההתחברות של הדפדפן שלכם")
+            else:
+                log(f"גם עם {browser[0]} יוטיוב ביקש אימות")
+    raise last
+
+
 def from_media_site(project, s, settings, progress, should_stop):
     """YouTube and the like: subtitles written by people if there are; otherwise the recording,
     transcribed here (or YouTube's automatic subtitles, if chosen in the settings)."""
     import yt_dlp
     import requests
-    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True, "noprogress": True}) as ydl:
-        info = ydl.extract_info(s["url"], download=False)
+    info, _ = ytdl({"quiet": True, "no_warnings": True, "skip_download": True, "noprogress": True}, s["url"])
     if info.get("_type") == "playlist":
         entries = [e for e in info.get("entries") or [] if e]
         raise Skip(f"זו רשימת השמעה של {len(entries)} סרטונים — הוסיפו את הסרטונים עצמם")
@@ -415,9 +448,8 @@ def download_audio(project, s, url):
     opts = {"quiet": True, "no_warnings": True, "noprogress": True, "format": "bestaudio[ext=m4a]/bestaudio/best[height<=360]/best",
             "outtmpl": os.path.join(media, f"{s['id']:03d}.%(ext)s"), "postprocessors": []}
     log(f"מוריד הקלטה: {url}")
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        return ydl.prepare_filename(info)
+    _info, path = ytdl(opts, url, download=True)
+    return path
 
 
 # ---------- web pages ----------

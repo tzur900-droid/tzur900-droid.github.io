@@ -19,7 +19,17 @@ def step_search(project, stop=lambda: False, youtube=True):
         search.search_youtube(project)
 
 
+RETRY = ("position encodings", "not a bot", "confirm you", "Sign in to confirm")
+
+
 def step_collect(project, stop=lambda: False, progress=log):
+    # sources that failed for a reason fixed since (or that passes) are tried again by themselves
+    again = [s for s in project.sources if s["state"] == "failed" and any(m in (s.get("note") or "") for m in RETRY)]
+    for s in again:
+        s["state"], s["note"] = "new", ""
+    if again:
+        log(f"{len(again)} מקורות שנכשלו בגלל תקלה בתמלול או אימות של יוטיוב — מנסה אותם שוב")
+        project.save()
     done = 0
     while True:      # pages that list lessons add new sources: those are collected too
         todo = [s for s in project.sources if s["use"] and s["state"] in ("new",)]
