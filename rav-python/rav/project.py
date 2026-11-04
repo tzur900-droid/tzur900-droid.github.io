@@ -50,7 +50,7 @@ class Project:
             "rav": "", "request": "", "kind": "book", "created": time.strftime("%Y-%m-%d %H:%M"),
             "rav_full_name": "", "about": "", "keywords": [], "sources": [], "title": "",
             "settings": {"max_sources": 60, "auto_subs": False, "whisper_model": "ivrit-ai",
-                         "model": "", "max_video_minutes": 120, "correct_transcripts": True},
+                         "model": "", "max_video_minutes": 120, "correct_transcripts": True, "transcribe_speed": "fast"},
         }
         p = os.path.join(folder, "project.json")
         if os.path.isfile(p):

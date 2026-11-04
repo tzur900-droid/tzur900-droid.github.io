@@ -409,6 +409,11 @@ def correct_transcript(project, s, text):
     return "\n\n".join(out)
 
 
+def fast_transcription(s, settings):
+    """The fast way, unless the settings ask for the careful one or this is a second, accurate try."""
+    return settings.get("transcribe_speed", "fast") == "fast" and not s.get("accurate")
+
+
 def whisper_model(s, settings):
     """The transcription model for s: the accurate one when the first transcription was unclear."""
     return "ivrit-ai" if s.get("accurate") else settings.get("whisper_model", "ivrit-ai")
@@ -420,8 +425,10 @@ def transcribe_download(project, s, url, settings, progress, should_stop, info=N
     path = download_audio(project, s, url)
     progress("מתמלל במחשב…")
     model = whisper_model(s, settings)
-    text = tr.transcribe(path, model, progress, should_stop, prompt=_prompt(project))
-    s["note"], s["how"] = "תומלל במחשב" + (" (במודל המדויק)" if s.get("accurate") else ""), "whisper:" + model
+    fast = fast_transcription(s, settings)
+    text = tr.transcribe(path, model, progress, should_stop, prompt=_prompt(project), fast=fast)
+    s["note"] = "תומלל במחשב" + (" (במודל המדויק, בזהירות)" if s.get("accurate") else "")
+    s["how"] = "whisper:" + model + (":fast" if fast else "")
     return text
 
 
@@ -614,8 +621,9 @@ def collect_one(project, s, progress=lambda m: None, should_stop=None):
                     raise Skip("רכיב התמלול (faster-whisper) לא מותקן")
                 progress("מתמלל במחשב…")
                 model = whisper_model(s, settings)
-                text = tr.transcribe(url, model, progress, should_stop, prompt=_prompt(project))
-                s["note"], s["how"] = "תומלל במחשב", "whisper:" + model
+                fast = fast_transcription(s, settings)
+                text = tr.transcribe(url, model, progress, should_stop, prompt=_prompt(project), fast=fast)
+                s["note"], s["how"] = "תומלל במחשב", "whisper:" + model + (":fast" if fast else "")
             elif low.endswith((".html", ".htm")):
                 with open(url, encoding="utf-8", errors="replace") as f:
                     text = text_of_html(f.read())
