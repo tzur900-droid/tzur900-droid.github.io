@@ -58,6 +58,7 @@ OUTLINE = """הבקשה: {kind} על פי דברי {rav} ({full}) בנושא: "{
 
 החזר רק JSON:
 ```json
+(כותרת של פרק — רק השם שלו, בלי "פרק" ובלי מספר.)
 {{"title": "שם ה{kind}", "subtitle": "שורת משנה", "style": "תיאור הסגנון (פסקאות, עם דוגמאות)",
  "chapters": [{{"title": "...", "plan": "...", "sources": [1, 4]}}]}}
 ```
@@ -237,10 +238,18 @@ def make_outline(project, model=None):
     return plan
 
 
+NUMBERED = re.compile(r"^\s*(?:פרק|שיחה|שיעור|חלק)\s+[\u05d0-\u05ea\d]{1,4}['׳\"]?\s*[:.\-–—]\s*")
+
+
+def bare_title(t):
+    """A chapter's name without "פרק א:" before it (the book's chapters have names only)."""
+    return NUMBERED.sub("", t or "").strip() or (t or "").strip()
+
+
 def outline_to_md(plan):
     out = [f"# {plan.get('title', '')}", plan.get("subtitle", ""), "", "## סגנון הרב", plan.get("style", ""), ""]
     for i, c in enumerate(plan.get("chapters", []), 1):
-        out += [f"## פרק {i}: {c.get('title', '')}",
+        out += [f"## פרק {i}: {bare_title(c.get('title', ''))}",
                 "מקורות: " + ", ".join(str(x) for x in c.get("sources", [])),
                 c.get("plan", ""), ""]
     return "\n".join(out).strip() + "\n"
@@ -256,7 +265,7 @@ def md_to_outline(md):
             continue
         m = re.match(r"^##\s*פרק\s*[^:]*:\s*(.*)", line)
         if m:
-            cur = {"title": m.group(1).strip(), "plan": "", "sources": []}
+            cur = {"title": bare_title(m.group(1)), "plan": "", "sources": []}
             plan["chapters"].append(cur)
             mode = "chap"
             continue
