@@ -46,6 +46,11 @@ class Settings(QDialog):
             self.whisper.addItem(desc, k)
         self.whisper.setCurrentIndex(max(0, self.whisper.findData(s["whisper_model"])))
         f.addRow("מודל התמלול במחשב:", self.whisper)
+        self.speed = QComboBox()
+        self.speed.addItem("מהיר — פי 2–3 (תמלול לא ברור מתומלל שוב בזהירות)", "fast")
+        self.speed.addItem("זהיר — מדויק מעט יותר, איטי", "careful")
+        self.speed.setCurrentIndex(max(0, self.speed.findData(s.get("transcribe_speed", "fast"))))
+        f.addRow("מהירות התמלול:", self.speed)
         self.model = QComboBox()
         for label, val in (("ברירת המחדל של החשבון", ""), ("Opus — הכי טוב", "opus"),
                            ("Sonnet — מהיר וחסכוני יותר", "sonnet")):
@@ -62,7 +67,7 @@ class Settings(QDialog):
         s = self.project.data["settings"]
         s.update(max_sources=self.max_sources.value(), max_video_minutes=self.minutes.value(),
                  auto_subs=self.auto.isChecked(), whisper_model=self.whisper.currentData(),
-                 correct_transcripts=self.correct.isChecked(),
+                 correct_transcripts=self.correct.isChecked(), transcribe_speed=self.speed.currentData(),
                  model=self.model.currentData())
         self.project.save()
         super().accept()

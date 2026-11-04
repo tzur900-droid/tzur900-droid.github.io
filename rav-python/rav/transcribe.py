@@ -1,5 +1,6 @@
 """Transcribing a recording on this computer with Whisper (faster-whisper), free and private.
 The Hebrew model of ivrit.ai is downloaded once (about 1.6 GB) and kept on the computer."""
+import os
 import time
 
 from .log import log
@@ -56,7 +57,9 @@ def _model(key):
         log(f"כרטיס המסך לא זמין לתמלול ({e}), ממשיך במעבד")
         m = None
     if m is None:
-        m = WhisperModel(name, device="cpu", compute_type="int8")
+        # all the processor's cores (the model takes only 4 unless told)
+        m = WhisperModel(name, device="cpu", compute_type="int8", cpu_threads=max(4, os.cpu_count() or 4))
+        log(f"התמלול ירוץ במעבד, על {max(4, os.cpu_count() or 4)} ליבות")
     _loaded[key] = m
     return m
 
@@ -68,26 +71,44 @@ def torah_prompt(rav="", topic=""):
     return (head + "גמרא, רש\"י, תוספות, רמב\"ם, הלכה, מדרש, הקב\"ה, מצווה, חז\"ל.")[:160]
 
 
-def transcribe(path, key="ivrit-ai", progress=None, should_stop=None, prompt=""):
+def transcribe(path, key="ivrit-ai", progress=None, should_stop=None, prompt="", fast=True):
     """The text of the recording at path, in paragraphs. prompt: words the model is given first
     (see torah_prompt)."""
     _fix_av()
     model = _model(key)
     try:
-        return _transcribe(model, path, prompt, progress, should_stop)
+        return _transcribe(model, path, prompt, progress, should_stop, fast)
     except InterruptedError:
         raise
     except Exception as e:
+        if fast:
+            log(f"התמלול המהיר נכשל ({str(e)[:80]}) — מתמלל בדרך הרגילה")
+            try:
+                return _transcribe(model, path, prompt, progress, should_stop, False)
+            except InterruptedError:
+                raise
+            except Exception as e2:
+                e = e2
         if not prompt:
-            raise
+            raise e
         log(f"התמלול עם רשימת המונחים נכשל ({str(e)[:80]}) — מתמלל בלעדיה")
-        return _transcribe(model, path, "", progress, should_stop)
+        return _transcribe(model, path, "", progress, should_stop, False)
 
 
-def _transcribe(model, path, prompt, progress, should_stop):
+_batched = {}
+
+
+def _transcribe(model, path, prompt, progress, should_stop, fast=True):
+    """fast: the recording cut into pieces that are transcribed together, taking the first guess for
+    every word (about 2–3 times faster). Otherwise: one piece after the other, weighing 5 guesses."""
     extra = {"initial_prompt": prompt} if prompt else {}
-    segments, info = model.transcribe(path, language="he", vad_filter=True, beam_size=5,
-                                      condition_on_previous_text=False, **extra)
+    if fast:
+        from faster_whisper import BatchedInferencePipeline
+        pipe = _batched.setdefault(id(model), BatchedInferencePipeline(model))
+        segments, info = pipe.transcribe(path, language="he", vad_filter=True, beam_size=1, batch_size=8, **extra)
+    else:
+        segments, info = model.transcribe(path, language="he", vad_filter=True, beam_size=5,
+                                          condition_on_previous_text=False, **extra)
     total = info.duration or 0
     log(f"מתמלל {total / 60:.0f} דקות הקלטה…")
     paras, cur, last_end, t0, shown = [], [], 0.0, time.time(), 0
