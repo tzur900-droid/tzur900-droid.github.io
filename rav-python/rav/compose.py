@@ -31,9 +31,9 @@ EXTRACT = """לפניך מקור מס' {id} — {what}.
 {quality}### תמצית
 שלוש־חמש שורות: מה יש במקור הזה לבקשה.
 ### הדברים לפרטיהם
-כל רעיון, הסבר, חידוש, משל, סיפור, הלכה ומקור (פסוק, גמרא, מדרש, ראשונים) שהרב מביא ושנוגע לבקשה — בפירוט מלא,
-בלשון הרב ככל האפשר. משפטים חזקים ואופייניים — ציטוט מדויק במרכאות. שמור על סדר הדברים ועל הקשר ביניהם.
-אל תשמיט דברים חשובים ואל תוסיף משלך.
+כל רעיון, הסבר, חידוש, משל, סיפור, הלכה ומקור (פסוק, גמרא, מדרש, ראשונים) שהרב מביא ושנוגע לבקשה — בפירוט מלא.
+**העתק את משפטי הרב עצמם, שלמים ומילה במילה** (בלי לסכם ובלי לנסח מחדש); מותר רק להשמיט חזרות ומילות מילוי
+ולתקן שגיאות תמלול ברורות. שמור על סדר הדברים ועל הקשר ביניהם. אל תשמיט דברים חשובים ואל תוסיף משלך.
 ### סגנון
 איך הרב מדבר/כותב כאן: ביטויים חוזרים, איך הוא פותח ומסיים, משלים ודוגמאות, פנייה לשומעים, אורך המשפטים.
 {transcript_note}
@@ -50,7 +50,7 @@ TRANSCRIPT_NOTE = ("(המקור הוא תמלול אוטומטי של הקלטה
 
 OUTLINE = """הבקשה: {kind} על פי דברי {rav} ({full}) בנושא: "{request}".
 
-לפניך מה שנאסף מ־{n} מקורות של הרב (כל מקור עם מספר). על פי כל זה:
+{instructions}לפניך מה שנאסף מ־{n} מקורות של הרב (כל מקור עם מספר). על פי כל זה:
 1. תכנן את ה{kind}: כותרת, ומבנה של פרקים{series} — כך שכל רעיון חשוב מהמקורות ייכנס, בלי חזרות, בסדר הגיוני
    שמתאים לנושא ולדרך של הרב. לכל פרק: כותרת, תכנית של כמה שורות (מה ייכתב בו ובאיזה סדר), ומספרי המקורות שלו.
 2. תאר את סגנון הרב לפי המקורות, כדי שאפשר יהיה לכתוב בלשונו: אוצר מילים, ביטויים אופייניים (עם דוגמאות
@@ -76,15 +76,18 @@ CHAPTER = """אתה כותב את {which} של {kind} על פי דברי {rav} (
 סגנון הרב (לכתוב בלשונו):
 {style}
 
-כללים:
-- כתוב את הפרק במלואו, בלשון הרב ובקולו — כאילו הרב עצמו כותב או מדבר (כמו ספר שנערך מתוך שיעוריו),
-  עם הביטויים והדרך שלו. דברים מתומללים — ערוך ללשון כתובה נקייה, אבל השאר את החיות ואת האופי של הרב.
+{instructions}כללים:
+- **בנה את הפרק כמעט כולו ממשפטים שלמים של הרב, מילה במילה מתוך המקורות שלמטה.** אל תנסח מחדש בלשונך.
+  מותר רק: לבחור ולסדר את המשפטים, להשמיט חזרות ומילות מילוי של דיבור, לתקן שגיאות תמלול ודקדוק ברורות,
+  ולהוסיף מילות קישור קצרות בין קטע לקטע (כמה מילים, לא משפטים משלך). כשהרב אמר רעיון בכמה מקומות —
+  קח את הנוסח המלא והברור שלו.
 - רק מה שנמצא במקורות שלמטה. אל תוסיף רעיונות, סיפורים או מקורות משלך. אם יש סתירה בין מקורות — הבא את שני הצדדים.
 - בסוף כל פסקה ציין מאיזה מקור היא, כך: {{מקור 12}} או {{מקור 3, 7}}.
 - מבנה: כותרות משנה (### כותרת) כשצריך, פסקאות מלאות, ציטוט מפסוק או ממאמר חז"ל בתוך הטקסט כפי שהרב מביא.
   {series_rule}
 - אל תחזור על מה ששייך לפרקים אחרים.
-- החזר רק את הפרק עצמו: שורה ראשונה "## {title}" ואחריה הטקסט, בלי הקדמות והסברים שלך.
+- החזר רק את הפרק עצמו: שורה ראשונה "## {title}" ואחריה הטקסט, בלי הקדמות והסברים שלך ובלי רשימת מקורות
+  (הרשימה נוספת אחר כך).
 
 המקורות של הפרק:
 {material}"""
@@ -164,6 +167,48 @@ def redo_accurately(project, s):
     return True
 
 
+def instructions_block(project):
+    t = (project.data.get("instructions") or "").strip()
+    return f"הנחיות המבקש לספר (חובה לקיים אותן):\n{t}\n\n" if t else ""
+
+
+REVISE = """לפניך תכנית של {kind} על פי דברי {rav} בנושא: "{request}", והערות של המבקש עליה.
+{instructions}תקן את התכנית לפי ההערות. מה שההערות לא מבקשות לשנות — השאר כמו שהוא (כולל תיאור הסגנון).
+כל פרק צריך מקורות מתוך רשימת המקורות שלמטה (לפי המספר).
+
+התכנית:
+{outline}
+
+ההערות:
+{comments}
+
+המקורות (מספר, כותרת ותמצית):
+{summaries}
+
+החזר רק JSON כמו קודם:
+```json
+{{"title": "...", "subtitle": "...", "style": "...", "chapters": [{{"title": "...", "plan": "...", "sources": [1, 4]}}]}}
+```"""
+
+
+def revise_outline(project, comments, model=None):
+    """The plan corrected by the user's comments."""
+    d = project.data
+    used = [s for s in project.sources if s["state"] == "read"]
+    summaries = "\n".join(f"{s['id']}. {s['title']}: {_summary(project.read('notes', '%03d.md' % s['id']))[:600]}"
+                          for s in used)
+    prompt = REVISE.format(kind=project.kind_name, rav=d["rav"], request=d["request"],
+                           instructions=instructions_block(project), outline=project.read("outline.md"),
+                           comments=comments, summaries=summaries)
+    log("מתקן את התכנית לפי ההערות…")
+    plan = json_from(ask(prompt, model=model, system=SYSTEM, timeout=1800))
+    project.write(outline_to_md(plan), "outline.md")
+    d["title"] = plan.get("title") or d.get("title") or ""
+    project.save()
+    log(f"התכנית תוקנה: {len(plan.get('chapters', []))} פרקים")
+    return plan
+
+
 def _summary(note):
     m = re.search(r"### תמצית\s*(.*?)(?=###|\Z)", note, re.S)
     return (m.group(1) if m else note[:1200]).strip()
@@ -181,7 +226,8 @@ def make_outline(project, model=None):
         full = "\n\n".join(f"=== מקור {s['id']}: {s['title']} ===\n{_summary(notes[s['id']])}" for s in used)
     series = " (כל פרק = שיעור אחד בסדרה)" if d["kind"] == "series" else ""
     prompt = OUTLINE.format(kind=project.kind_name, rav=d["rav"], full=d.get("rav_full_name") or d["rav"],
-                            request=d["request"], n=len(used), series=series, notes=full)
+                            request=d["request"], n=len(used), series=series, notes=full,
+                            instructions=instructions_block(project))
     log("מתכנן את הספר ומנתח את סגנון הרב…")
     plan = json_from(ask(prompt, model=model, system=SYSTEM, timeout=2400))
     project.write(outline_to_md(plan), "outline.md")
@@ -252,7 +298,7 @@ def write_chapter(project, plan, i, model=None):
     prompt = CHAPTER.format(
         which=f"שיעור {i + 1}" if series else f"פרק {i + 1}", kind=project.kind_name, rav=d["rav"],
         full=d.get("rav_full_name") or d["rav"], request=d["request"], toc=toc, title=c["title"],
-        plan=c["plan"], style=plan.get("style", ""), material=material,
+        plan=c["plan"], style=plan.get("style", ""), material=material, instructions=instructions_block(project),
         series_rule=("- זה שיעור בסדרה: פתיחה שמחברת לשיעור הקודם (אם יש), גוף השיעור, וסיכום קצר בסוף."
                      if series else ""))
     log(f"כותב פרק {i + 1}/{len(plan['chapters'])}: {c['title']}")
@@ -273,16 +319,53 @@ def editor_note(project):
     return ("## פתח דבר\n\n"
             f"{THIS.get(d['kind'], 'החיבור הזה')} נערך מתוך {len(used)} מקורות של {d.get('rav_full_name') or d['rav']} — "
             f"שיעורים, מאמרים וכתבים שפורסמו ברשת{f', מהם {heard} שיעורים מוקלטים שתומללו' if heard else ''}. "
-            "העריכה נעשתה בעזרת בינה מלאכותית (Claude), על פי לשונו ודרכו של הרב, ובסוף כל פסקה מצוין "
-            "המקור שלה (הרשימה בסוף). ייתכנו בו טעויות של תמלול ושל עריכה, והאחריות עליהן על העורך ולא על הרב; "
+            "העריכה נעשתה בעזרת בינה מלאכותית (Claude), ככל האפשר במשפטיו של הרב עצמו; בסוף כל פסקה מצוין "
+            "המקור שלה, בסוף כל פרק — המקורות שמהם נערך, ובסוף הספר — רשימת כל המקורות. ייתכנו בו טעויות של תמלול ושל עריכה, והאחריות עליהן על העורך ולא על הרב; "
             "כל דבר הלכה יש לברר במקור. לפני הפצה או הדפסה ראוי לבקש את הסכמת הרב או מוסדותיו.\n")
 
 
-def sources_list(project):
-    used = [s for s in project.sources if s["state"] == "read"]
-    lines = ["## רשימת המקורות", ""]
-    for s in used:
-        lines.append(f"- {s['id']}. {s['title']} — {s['url']}" + (f" ({s['note']})" if s.get("note") else ""))
+SRC_MARK = re.compile(r"\{מקור(?:ות)?\s*([\d,\s]+)\}")
+
+
+def chapter_sources(text):
+    """The numbers of the sources a chapter's paragraphs are marked with, in order."""
+    seen = []
+    for m in SRC_MARK.finditer(text):
+        for x in re.findall(r"\d+", m.group(1)):
+            if int(x) not in seen:
+                seen.append(int(x))
+    return seen
+
+
+def _src_line(s):
+    return f"{s['title']} — {s['url']}"
+
+
+def chapter_with_sources(project, text):
+    """The chapter, with the list of the lessons it was edited from at its end."""
+    by_id = {s["id"]: s for s in project.sources}
+    ids = [x for x in chapter_sources(text) if x in by_id]
+    if not ids:
+        return text
+    lines = ["", "### מקורות", ""] + [f"- ({x}) {_src_line(by_id[x])}" for x in ids]
+    return text.rstrip() + "\n" + "\n".join(lines) + "\n"
+
+
+def sources_list(project, chapters=()):
+    """All the sources of the book, and in which chapters each one was used."""
+    by_id = {s["id"]: s for s in project.sources}
+    used_in = {}
+    for title, text in chapters:
+        for x in chapter_sources(text):
+            used_in.setdefault(x, []).append(title)
+    ids = [s["id"] for s in project.sources if s["id"] in used_in] or \
+        [s["id"] for s in project.sources if s["state"] == "read"]
+    lines = ["## רשימת המקורות", "", "המקורות שמהם נערך הספר, ובאילו פרקים נעשה שימוש בכל אחד:", ""]
+    for x in ids:
+        s = by_id[x]
+        where = "; ".join(used_in.get(x, []))
+        lines.append(f"- ({x}) {_src_line(s)}" + (f" ({s['note']})" if s.get("note") else "") +
+                     (f"  ← בפרקים: {where}" if where else ""))
     return "\n".join(lines) + "\n"
 
 
@@ -292,9 +375,15 @@ def assemble(project, plan):
     sub = plan.get("subtitle", "")
     parts = [f"# {plan.get('title') or project.label()}", sub, "", "" if project.data["rav"] in sub else by, "",
              editor_note(project)]
+    chapters = []
     for i in range(n):
-        parts.append(project.read("chapters", f"{i + 1:02d}.md"))
-    parts.append(sources_list(project))
+        text = project.read("chapters", f"{i + 1:02d}.md")
+        if not text:
+            continue
+        title = plan["chapters"][i]["title"]
+        chapters.append((title, text))
+        parts.append(chapter_with_sources(project, text))
+    parts.append(sources_list(project, chapters))
     md = "\n\n".join(p.strip("\n") for p in parts) + "\n"
     project.write(md, "book.md")
     return md

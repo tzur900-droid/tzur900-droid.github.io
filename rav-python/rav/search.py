@@ -9,6 +9,7 @@ SEARCH_PROMPT = """אתה עוזר מחקר תורני. המשימה: למצוא
 "{request}"
 
 (המטרה הסופית: {kind} על פי דברי הרב.)
+{instructions}
 
 חפש ביסודיות: עשה הרבה חיפושים שונים (לפחות 15), בעברית ובאנגלית, עם ניסוחים שונים של הנושא ושל שם הרב,
 ושל תתי־נושאים (למשל לחנוכה: נרות, הלל, על הניסים, מהדרין, יוון, מתתיהו, שמן, חינוך...).
@@ -36,7 +37,9 @@ SEARCH_PROMPT = """אתה עוזר מחקר תורני. המשימה: למצוא
 
 def search_web(project, model=None):
     d = project.data
+    from .compose import instructions_block
     prompt = SEARCH_PROMPT.format(rav=d["rav"], request=d["request"], kind=project.kind_name,
+                                  instructions=instructions_block(project),
                                   max_sources=d["settings"]["max_sources"])
     log("מחפש באינטרנט (Claude) — זה יכול לקחת כמה דקות…")
     ans = ask(prompt, tools=("WebSearch", "WebFetch"), model=model, timeout=3600)
