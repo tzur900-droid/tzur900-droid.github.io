@@ -187,8 +187,12 @@ def source_request(project, s):
 
 
 def plan_model(project, model):
-    """Planning (and the search) with the thrifty model unless the settings say otherwise; the
-    writing keeps the model chosen in the settings."""
+    """The planning runs with the model chosen in the settings (a few calls a book: not worth
+    saving on); only the web search runs with the thrifty one."""
+    return model
+
+
+def search_model(project, model):
     st = project.data["settings"]
     return (st.get("plan_model", "sonnet") if st.get("light_reading", True) else model) or model
 
