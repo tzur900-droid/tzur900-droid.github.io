@@ -30,10 +30,7 @@ EXTRACT = """לפניך מקור מס' {id} — {what}.
 (האם יש כאן משהו לבקשה)
 {quality}### תמצית
 שלוש־חמש שורות: מה יש במקור הזה לבקשה.
-### הדברים לפרטיהם
-כל רעיון, הסבר, חידוש, משל, סיפור, הלכה ומקור (פסוק, גמרא, מדרש, ראשונים) שהרב מביא ושנוגע לבקשה — בפירוט מלא.
-**העתק את משפטי הרב עצמם, שלמים ומילה במילה** (בלי לסכם ובלי לנסח מחדש); מותר רק להשמיט חזרות ומילות מילוי
-ולתקן שגיאות תמלול ברורות. שמור על סדר הדברים ועל הקשר ביניהם. אל תשמיט דברים חשובים ואל תוסיף משלך.
+{details}
 ### סגנון
 איך הרב מדבר/כותב כאן: ביטויים חוזרים, איך הוא פותח ומסיים, משלים ודוגמאות, פנייה לשומעים, אורך המשפטים.
 {transcript_note}
@@ -44,6 +41,16 @@ EXTRACT = """לפניך מקור מס' {id} — {what}.
 
 QUALITY = ("### איכות התמלול: טובה / בינונית / גרועה\n"
            "(גרועה = חלקים גדולים לא מובנים, משפטים משובשים, אי אפשר לדעת בבירור מה הרב אמר)\n")
+
+DETAILS_FULL = """### הדברים לפרטיהם
+כל רעיון, הסבר, חידוש, משל, סיפור, הלכה ומקור (פסוק, גמרא, מדרש, ראשונים) שהרב מביא ושנוגע לבקשה — בפירוט מלא.
+**העתק את משפטי הרב עצמם, שלמים ומילה במילה** (בלי לסכם ובלי לנסח מחדש); מותר רק להשמיט חזרות ומילות מילוי
+ולתקן שגיאות תמלול ברורות. שמור על סדר הדברים ועל הקשר ביניהם. אל תשמיט דברים חשובים ואל תוסיף משלך."""
+
+# saving: the source itself is given whole to the writing, so here only what the planning needs
+DETAILS_LIGHT = """### נושאים
+רשימה של הנושאים והרעיונות שהרב מדבר עליהם ושנוגעים לבקשה, לפי הסדר: לכל אחד שורה אחת, ואחריה (אם יש)
+משפט אופייני אחד שלו במרכאות. בלי להעתיק את כל הדברים."""
 
 TRANSCRIPT_NOTE = ("(המקור הוא תמלול אוטומטי של הקלטה: יש בו שגיאות שמיעה, בעיקר בשמות, בציטוטים ובמקורות. "
                    "תקן לפי ההקשר את מה שברור, וכשאינך בטוח — כתוב [לא ברור].)\n")
@@ -117,13 +124,16 @@ def extract_one(project, s, model=None):
     what = "תמלול של שיעור מוקלט" if heard else "טקסט"
     parts = _split(text)
     outs = []
+    st = d["settings"]
+    light = st.get("light_reading", True)
+    read_model = (st.get("read_model", "sonnet") if light else model) or model
     for i, part in enumerate(parts):
         prompt = EXTRACT.format(id=s["id"], what=what, title=s["title"], url=s["url"],
                                 part=f"(חלק {i + 1} מתוך {len(parts)})" if len(parts) > 1 else "",
                                 kind=project.kind_name, rav=d["rav"], request=source_request(project, s),
                                 transcript_note=TRANSCRIPT_NOTE if heard else "", text=part,
-                                quality=QUALITY if heard else "")
-        outs.append(ask(prompt, model=model, system=SYSTEM, timeout=1800))
+                                quality=QUALITY if heard else "", details=DETAILS_LIGHT if light else DETAILS_FULL)
+        outs.append(ask(prompt, model=read_model, system=SYSTEM, timeout=1800))
     note = "\n\n".join(outs)
     project.write(note, "notes", f"{s['id']:03d}.md")
     mine = re.findall(r"של הרב:\s*\**\s*(כן|לא ברור|לא)", note)
@@ -311,8 +321,8 @@ def write_chapter(project, plan, i, model=None):
     ids = [x for x in c["sources"] if x in by_id] or [s["id"] for s in project.sources if s["state"] == "read"]
     # the sources themselves when they fit (the rabbi's own words); otherwise what was taken from them
     texts = [(x, project.read("sources", "%03d.txt" % x)) for x in ids]
-    if sum(len(t) for _, t in texts) > CHAPTER_BUDGET:
-        texts = [(x, project.read("notes", "%03d.md" % x)) for x in ids]
+    if sum(len(t) for _, t in texts) > CHAPTER_BUDGET and not d["settings"].get("light_reading", True):
+        texts = [(x, project.read("notes", "%03d.md" % x)) for x in ids]   # (short notes are no use here)
     if sum(len(t) for _, t in texts) > CHAPTER_BUDGET:
         per = CHAPTER_BUDGET // max(1, len(texts))
         texts = [(x, t[:per]) for x, t in texts]
