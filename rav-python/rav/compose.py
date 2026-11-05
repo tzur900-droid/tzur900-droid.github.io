@@ -186,6 +186,13 @@ def source_request(project, s):
     return project.data["request"]
 
 
+def plan_model(project, model):
+    """Planning (and the search) with the thrifty model unless the settings say otherwise; the
+    writing keeps the model chosen in the settings."""
+    st = project.data["settings"]
+    return (st.get("plan_model", "sonnet") if st.get("light_reading", True) else model) or model
+
+
 def instructions_block(project):
     t = (project.data.get("instructions") or "").strip()
     return f"הנחיות המבקש לספר (חובה לקיים אותן):\n{t}\n\n" if t else ""
@@ -220,7 +227,7 @@ def revise_outline(project, comments, model=None):
                            instructions=instructions_block(project), outline=project.read("outline.md"),
                            comments=comments, summaries=summaries)
     log("מתקן את התכנית לפי ההערות…")
-    plan = json_from(ask(prompt, model=model, system=SYSTEM, timeout=1800))
+    plan = json_from(ask(prompt, model=plan_model(project, model), system=SYSTEM, timeout=1800))
     project.write(outline_to_md(plan), "outline.md")
     d["title"] = plan.get("title") or d.get("title") or ""
     project.save()
@@ -248,7 +255,7 @@ def make_outline(project, model=None):
                             request=d["request"], n=len(used), series=series, notes=full,
                             instructions=instructions_block(project))
     log("מתכנן את הספר ומנתח את סגנון הרב…")
-    plan = json_from(ask(prompt, model=model, system=SYSTEM, timeout=2400))
+    plan = json_from(ask(prompt, model=plan_model(project, model), system=SYSTEM, timeout=2400))
     project.write(outline_to_md(plan), "outline.md")
     d["title"] = plan.get("title") or d.get("title") or ""
     project.save()
