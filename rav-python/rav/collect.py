@@ -4,7 +4,7 @@ import os
 import re
 import urllib.parse
 
-from .claude_cli import ClaudeError, ask
+from .claude_cli import ClaudeError, ask, json_from
 from .log import log
 from . import transcribe as tr
 
@@ -369,13 +369,29 @@ def _prompt(project):
 
 CORRECT = """לפניך {part} תמלול אוטומטי של שיעור של {rav} בנושא "{topic}".
 בתמלול יש שגיאות שמיעה: שמות של חכמים וספרים, ציטוטים מפסוקים, מגמרא וממדרש, ביטויים בארמית, ומילים שנשמעו לא נכון.
-תקן רק שגיאות כאלה, לפי ההקשר ולפי הידיעה שלך במקורות. **אל תשנה את הניסוח של הרב, אל תקצר, אל תסכם ואל תוסיף.**
-שמור על החלוקה לפסקאות. מילה שאינך בטוח בה — השאר כמו שהיא.
-החזר רק את הטקסט המתוקן, בלי שום הערה.
+מצא רק שגיאות כאלה, לפי ההקשר ולפי הידיעה שלך במקורות. **אל תשנה את הניסוח של הרב.** מילה שאינך בטוח בה — אל תיגע בה.
+**אל תחזיר את הטקסט.** החזר רק רשימת תיקונים ב־JSON: כל תיקון — הקטע השגוי כמו שהוא כתוב בתמלול (מילה עד כמה
+מילים, בדיוק אות באות, כדי שאפשר יהיה למצוא אותו) והקטע המתוקן. אם אין שגיאות — רשימה ריקה.
+```json
+[{{"from": "והרמבם כותב", "to": "והרמב\"ם כותב"}}]
+```
 
 <<<
 {text}
 >>>"""
+
+
+def apply_fixes(text, fixes):
+    """The corrections Claude listed, put into the text (only pieces found in it exactly)."""
+    n = 0
+    if isinstance(fixes, dict):          # a single correction
+        fixes = [fixes]
+    for f in fixes if isinstance(fixes, list) else []:
+        a, b = (f.get("from") or "", f.get("to") or "") if isinstance(f, dict) else ("", "")
+        if a and b and a != b and a in text and len(b) < 3 * len(a) + 20:
+            text = text.replace(a, b)
+            n += 1
+    return text, n
 
 
 def correct_transcript(project, s, text):
@@ -401,14 +417,19 @@ def correct_transcript(project, s, text):
     def fix(i_part):
         i, part = i_part
         label = f"חלק {i + 1} מתוך {len(parts)} של" if len(parts) > 1 else ""
-        fixed = ask(CORRECT.format(part=label, rav=d.get("rav_full_name") or d["rav"], topic=d["request"],
-                                   text=part), model=model, timeout=1200).strip()
-        # a "correction" much shorter than the part is not a correction: the part stays as it was
-        return fixed if len(fixed) > 0.7 * len(part) else part
+        ans = ask(CORRECT.format(part=label, rav=d.get("rav_full_name") or d["rav"], topic=d["request"], text=part),
+                  model=model, timeout=1200, system="אתה מגיה תמלולים של שיעורי תורה.")
+        try:
+            fixed, n = apply_fixes(part, json_from(ans))
+        except ClaudeError:
+            return part, 0
+        return fixed, n
     from concurrent.futures import ThreadPoolExecutor
     try:
         with ThreadPoolExecutor(max_workers=min(4, len(parts))) as pool:
-            out = list(pool.map(fix, enumerate(parts)))
+            res = list(pool.map(fix, enumerate(parts)))
+        out = [t for t, _ in res]
+        log(f"Claude תיקן {sum(n for _, n in res)} שגיאות בתמלול")
     except ClaudeError as e:
         log(f"התיקון לא הושלם ({str(e).splitlines()[0]}) — נשאר התמלול כמו שיצא")
         return text

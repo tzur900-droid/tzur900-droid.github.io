@@ -44,7 +44,8 @@ def search_web(project, model=None):
                                   instructions=instructions_block(project),
                                   max_sources=d["settings"]["max_sources"])
     log("מחפש באינטרנט (Claude) — זה יכול לקחת כמה דקות…")
-    ans = ask(prompt, tools=("WebSearch", "WebFetch"), model=model, timeout=3600)
+    from .compose import plan_model
+    ans = ask(prompt, tools=("WebSearch", "WebFetch"), model=plan_model(project, model), timeout=3600)
     data = json_from(ans)
     if isinstance(data, list):
         data = {"sources": data}

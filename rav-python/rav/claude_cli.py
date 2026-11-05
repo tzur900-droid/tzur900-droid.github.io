@@ -111,7 +111,10 @@ def ask(prompt, tools=(), cwd=None, model=None, timeout=1800, system=None):
         cmd += ["--allowedTools", ",".join(tools)]
     if model:
         cmd += ["--model", model]
-    if system:
+    if system and not tools:
+        # no tools: our own short instructions in place of Claude Code's long ones (fewer tokens)
+        cmd += ["--system-prompt", system]
+    elif system:
         cmd += ["--append-system-prompt", system]
     if cwd is None:     # a neutral folder: no project instructions of another folder get in
         cwd = os.path.join(tempfile.gettempdir(), "rav-claude")

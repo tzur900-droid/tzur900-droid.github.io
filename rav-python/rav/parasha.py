@@ -106,7 +106,7 @@ def plan_parasha(project, parasha, style, model=None):
                                                     "מבנה של שיחה אצלו, איך הוא פותח ומסיים), כדי לכתוב בלשונו.",
                          style_field="" if style else "תיאור הסגנון")
     log(f"מתכנן את השיחות לפרשת {parasha}…")
-    res = json_from(ask(prompt, model=model, system=compose.SYSTEM, timeout=1800))
+    res = json_from(ask(prompt, model=compose.plan_model(project, model), system=compose.SYSTEM, timeout=1800))
     chapters = []
     for c in res.get("chapters", [])[:mode["talks"]]:
         ids = [x for x in c.get("sources", []) if any(s["id"] == x for s in used)] or [s["id"] for s in used]
