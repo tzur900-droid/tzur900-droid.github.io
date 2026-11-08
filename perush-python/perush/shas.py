@@ -1701,7 +1701,8 @@ class Book:
         elif r["mode"] == "short":
             hc, T = r.get("hc", 0.0), r.get("T", 0.0)
             for c in r["cols"]:
-                stretch([l for l in c if l.y >= T - EPS], hc, self.lh_comm * 1.5)
+                # both columns down to where the Rif widens (one may hold a line less)
+                stretch([l for l in c if l.y >= T - EPS], hc, self.lh_comm * 2.2)
             if not last:
                 self.open_page(r, T)
         elif not last:
