@@ -85,14 +85,63 @@ def parse(md):
                 continue
             else:
                 talk["blocks"].append(("p", line))
+                talk.setdefault("marks", []).extend(
+                    int(x) for m in re.finditer(r"\{מקור(?:ות)?\s*([\d,\s]+)\}", line) for x in re.findall(r"\d+", m.group(1)))
+    # a book whose talks have no list of sources of their own: from the marks and the end list
+    numbered = {}
+    for src in book["all_sources"]:
+        m = re.match(r"^(\d+)\.\s*(.*)", src)
+        if m:
+            numbered[int(m.group(1))] = m.group(2)
+    book["all_sources"] = [re.sub(r"^\d+\.\s*", "", x) for x in book["all_sources"]]
+    for part in book["parts"]:
+        for t in part["talks"]:
+            if not t["sources"] and numbered:
+                seen = []
+                for x in t.get("marks", []):
+                    if x in numbered and x not in seen:
+                        seen.append(x)
+                t["sources"] = [numbered[x] for x in seen]
     return book
 
 
 def clean_source(s):
-    s = re.sub(r"^\(\d+\)\s*", "", s)
+    s = re.sub(r"^\((\d+)\)\s*", r"\1. ", s)
     s = re.sub(r"\s*←\s*בפרקים:.*$", "", s)
     s = re.sub(r"\s*\((?:תומלל|כתוביות|הדף לא|הועתק|נקרא|הקלטה)[^)]*\)\s*$", "", s)
     return s.strip()
+
+
+LIST_PAGE = re.compile(r"^(רשימה:|כל שיעורי|עמוד \d+ ברשימת|שיעורי הרב בנושא)")
+
+
+def source_title(x):
+    """A source's name as a book cites it: without its link, the rabbi's name, the site, '(PDF מלא)'."""
+    t = re.split(r"\s+—\s+https?://", x)[0]
+    t = re.sub(r"\s*\((?:דף רשימה|הועתק|נקרא|PDF)[^)]*\)", "", t)
+    t = re.sub(r"\s*\|?\s*(?:מו\"?ר\s+)?(?:ה?רה\"ג|הרב|ראש הישיבה)\s+זלמן(?:\s+ברוך)?\s+מלמד(?:\s+שליט\"א)?\s*", " ", t)
+    t = re.sub(r"\s*(?:-|–)?\s*(?:מאת\s+)?(?:ה?רה\"ג|הרב)\s+זלמן(?:\s+ברוך)?\s+מלמד(?:\s+שליט\"א)?", "", t)
+    t = re.sub(r"\|\s*(?:אתר ישיבה|דבר תורה לחנוכה|שיעור כללי)\s*", "", t)
+    t = re.sub(r"\s*מאת\s+ראש הישיבה", "", t)
+    t = re.sub(r"\s*מאת\s*[-–]\s*", " – ", t)
+    t = re.sub(r"\s*[-–]\s*\)", ")", t)
+    t = re.sub(r"\s*\|\s*", ", ", t)
+    t = re.sub(r"\s{2,}", " ", t).strip(" ,–-|")
+    return t
+
+
+def note_titles(sources):
+    """The names for a talk's footnote: list pages left out (unless there is nothing else), each
+    lesson once."""
+    names = [source_title(x) for x in sources]
+    real = [n for n in names if not LIST_PAGE.match(n)] or names
+    out, keys = [], []
+    for n in real:
+        key = re.sub(r"[^\u05d0-\u05ea]", "", re.sub(r"\([^)]*\)", "", n))     # (the series in brackets aside)
+        if key and key not in keys:
+            keys.append(key)
+            out.append(n)
+    return out
 
 
 def strip_marks(t):
@@ -310,7 +359,13 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
     if toc_pages:       # the entries with their pages (found by laying the book out once)
         for kind, text, page in toc_pages:
             q = para(style="TOC 1" if kind == 1 else "TOC 2")
-            add_text(q, text)
+            if kind == 1 and ":" in text:
+                first, rest = text.split(":", 1)
+                font_run(q.add_run(first.strip()), 13)
+                q.add_run().add_break()
+                font_run(q.add_run(rest.strip()), 16, True)
+            else:
+                add_text(q, text)
             if kind == 2:
                 font_run(q.add_run("\t" + str(page)), bold=True)
     else:
@@ -322,7 +377,14 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
         if part["name"]:
             d.add_section(WD_SECTION.ODD_PAGE)
             blank_sections.add(len(d.sections) - 1)
-            para(part["name"], style="Heading 1")
+            hp = para(style="Heading 1")
+            if ":" in part["name"]:
+                first, rest = part["name"].split(":", 1)
+                font_run(hp.add_run(first.strip()), 20)
+                hp.add_run().add_break()
+                font_run(hp.add_run(rest.strip()))
+            else:
+                add_text(hp, part["name"])
         for ti, talk in enumerate(part["talks"]):
             if ti == 0:
                 d.add_section(WD_SECTION.NEW_PAGE)
@@ -330,7 +392,7 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
                 page_break()
             h = para(talk["title"], style="Heading 2")
             if talk["sources"]:
-                srcs = "; ".join(re.split(r"\s+—\s+https?://", x)[0] for x in talk["sources"])
+                srcs = "; ".join(note_titles(talk["sources"]))
                 notes.add(h, f"נערך מתוך {'השיעור' if len(talk['sources']) == 1 else 'השיעורים'}: {srcs}.")
             for kind, text in talk["blocks"]:
                 if kind == "h":
@@ -370,7 +432,7 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
         rtl_par(op)
         op.alignment = WD_ALIGN_PARAGRAPH.LEFT
         # a book in parts: the part's name; a book of talks only: the talk's name
-        field(op, 'STYLEREF "Heading 1"' if any(pt["name"] for pt in book["parts"]) else 'STYLEREF "Heading 2"', "", 11)
+        field(op, 'STYLEREF "Heading 2"', "", 11)
         font_run(op.add_run("  |  "), 11)
         field(op, "PAGE", "1", 11, True)
         s._sectPr.append(OxmlElement("w:bidi")) if s._sectPr.find(qn("w:bidi")) is None else None
@@ -383,14 +445,16 @@ def toc_from_pdf(book, pdf):
     printed number = the place in the PDF)."""
     from pypdf import PdfReader
     pages = [(pg.extract_text() or "") for pg in PdfReader(pdf).pages]
-    norm = lambda t: re.sub(r"\s+", "", t)
+    norm = lambda t: re.sub(r"[\s\u0591-\u05C7״\"'׳]+", "", t)     # (also without nikud and quote marks)
     flat = [norm(t) for t in pages]
     out = []
     start = next((i + 1 for i, t in enumerate(flat) if "תוכןעניינים" in t or "םיניינעןכות" in t), 0)
     for part in book["parts"]:
         items = ([(1, part["name"])] if part["name"] else []) + [(2, t["title"]) for t in part["talks"]]
         for kind, text in items:
-            key = norm(text)[:25]
+            # the words after a colon (before it there are often quotes and nikud, which come out
+            # of the PDF in a jumbled order)
+            key = norm(text.split(":", 1)[-1] if (kind == 1 or ":" in text) else text)[:25]
             # pdf text of RTL may come reversed: try both
             found = next((i for i in range(start, len(flat)) if key in flat[i] or key[::-1] in flat[i]), None)
             if found is None:
