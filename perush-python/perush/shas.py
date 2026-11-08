@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from .engine import Frame, Page
 from .abbrev import expand
 from .model import heb
-from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, full_width, space, width
+from .textlayout import PT_PER_MM, Line, Style, Word, break_lines, even_lines, full_width, space, width
 
 EPS = 0.01
 NIKUD = re.compile("[֑-ׇ]")
@@ -1638,7 +1638,11 @@ class Book:
         return r
 
     def finish(self, r):
-        """Stretch the lines so that every column and the text reach the bottom."""
+        """Stretch the lines so that every column and the text reach the bottom (and first
+        even the spaces of every paragraph on the page)."""
+        even_out(r["text"])
+        for c in r["cols"]:
+            even_out(c)
         def stretch(lines, target, cap):
             if not lines:
                 return
@@ -1786,6 +1790,8 @@ class Book:
                     if not lab.startswith("יום "):
                         page.marks.append((x, top + l.y + l.h * 0.72 + below, lab, mst))
             if pg["kind"] == "rosh":
+                for col in pg["cols"]:
+                    even_out(col)
                 for k, col in enumerate(pg["cols"]):
                     if col:
                         page.frames.append(Frame(col, R - k * (pg["colw"] + self.gap), top))
@@ -2221,6 +2227,20 @@ def perek_breaks(rosh, rif, al):
         last = j
     end = None if any(norm(t[0]) == "הדרן" for t in rif[-1]["tokens"]) else hadran.get(order[-1])
     return out, end
+
+
+def even_out(lines):
+    """Each paragraph's lines broken again as one (even_lines), so that their spaces come out
+    even; the lines keep their number, places and widths."""
+    run = []
+    for l in lines:
+        run.append(l)
+        if l.last or l.align == "center":
+            if len(run) >= 2 and l.align != "center":
+                even_lines(run)
+            run = []
+    if len(run) >= 2:
+        even_lines(run)
 
 
 def day_split(npages, ndays):

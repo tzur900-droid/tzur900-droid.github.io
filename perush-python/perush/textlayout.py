@@ -186,3 +186,109 @@ def balance_lines(words, base, lh, w, min_ratio=0.6):
         l.force = True
     best[-1].last = False
     return best
+
+
+# (from the layout engine of the main program: the even spacing of a paragraph)
+def even_lines(lines, slack=10):
+    """Break the words of a paragraph's lines again so that their spaces come out as even as
+    possible (the Knuth-Plass method of TeX: the whole paragraph at once, not line by line),
+    keeping the number of lines and each line's place and width, so that nothing else on the
+    page moves. lines: consecutive lines of one paragraph, all justified. The last line may
+    stay short if it ends the paragraph (its .last is set); otherwise it is justified too.
+    Each break is looked for within slack words of where line-by-line breaking put it.
+    Returns True if the lines were changed."""
+    # paragraphs that end in a centered line (see Word.brk): each by itself
+    cuts = [k for k, l in enumerate(lines[:-1]) if l.align == "center"]
+    if cuts:
+        changed, a = False, 0
+        for k in cuts + [len(lines) - 1]:
+            changed = even_lines(lines[a:k + 1], slack) or changed
+            a = k + 1
+        return changed
+    n_lines = len(lines)
+    if n_lines < 2 or any(l.align != "justify" for l in lines[:-1]) or lines[-1].align not in ("justify", "center"):
+        return False
+    words = [w for l in lines for w in l.words]
+    n = len(words)
+    s = space(lines[0].base)
+    pre = [0.0]
+    joins = [0]                      # joins[k]: maqaf joins among the first k words
+    for w in words:
+        pre.append(pre[-1] + w.w)
+        joins.append(joins[-1] + (1 if getattr(w, 'join', False) else 0))
+    starts = []
+    k = 0
+    for l in lines:
+        starts.append(k)
+        k += len(l.words)
+    free_last = lines[-1].last
+    INF = float("inf")
+    # spaces already even (no line wider than twice a normal space, none over-full): nothing to do
+    worst = 0.0
+    for l in lines:
+        g = sum(1 for w in l.words[:-1] if not getattr(w, 'join', False))
+        if sum(w.w for w in l.words) + g * s * 0.8 > l.width + 0.01:
+            worst = 99.0
+    for k, l in enumerate(lines):
+        g = sum(1 for w in l.words[:-1] if not getattr(w, 'join', False))
+        if k == n_lines - 1 and free_last or g < 1:
+            continue
+        worst = max(worst, (l.width - sum(w.w for w in l.words)) / (g * s))
+    if worst <= 2.0:
+        return False
+
+    def cost(i, j, line_no):
+        """Words i..j-1 on line line_no."""
+        m = j - i
+        if m <= 0:
+            return INF
+        total = pre[j] - pre[i]
+        gaps = (m - 1) - (joins[j - 1] - joins[i])      # spaces between the words of the line
+        width_ = lines[line_no].width
+        if line_no == n_lines - 1 and free_last:
+            return 0.0 if total + gaps * s * 0.8 <= width_ + 0.01 else INF
+        if gaps <= 0:
+            # a lone word can't reach the end of the line: only if there is no other way
+            return 1e8 if total <= width_ + 0.01 else INF
+        r = (width_ - total) / (gaps * s)
+        if r < 0.8:
+            return INF
+        c = (r - 1) ** 2 * 100 if r >= 1 else (1 - r) ** 2 * 400
+        if r > 3:
+            c += (r - 3) ** 2 * 1000
+        return c
+
+    # best[k][j]: the least cost of lines 0..k-1 holding words 0..j-1 (line k begins at j)
+    best = [dict() for _ in range(n_lines + 1)]
+    back = [dict() for _ in range(n_lines + 1)]
+    best[0][0] = 0.0
+    for line_no in range(n_lines):
+        nxt = starts[line_no + 1] if line_no + 1 < n_lines else n
+        if line_no + 1 == n_lines:
+            ends = [n]
+        else:
+            ends = range(max(1, nxt - slack), min(n - 1, nxt + slack) + 1)
+        for i, ci in best[line_no].items():
+            for j in ends:
+                if j <= i or (j < n and getattr(words[j - 1], 'glue', False)):
+                    continue
+                c = ci + cost(i, j, line_no)
+                if c < best[line_no + 1].get(j, INF):
+                    best[line_no + 1][j] = c
+                    back[line_no + 1][j] = i
+    if n not in best[n_lines]:
+        return False
+    old = sum(cost(starts[k], starts[k + 1] if k + 1 < n_lines else n, k) for k in range(n_lines))
+    if best[n_lines][n] >= old - 0.5:
+        return False
+    cuts = [n]
+    j = n
+    for line_no in range(n_lines, 0, -1):
+        j = back[line_no][j]
+        cuts.append(j)
+    cuts.reverse()
+    for k, l in enumerate(lines):
+        ws = words[cuts[k]:cuts[k + 1]]
+        l.words = ws
+        l.natural = sum(w.w for w in ws) + s * (len(ws) - 1)
+    return True
