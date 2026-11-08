@@ -34,13 +34,48 @@ def draw_line(p, line, x_right, top):
         x -= gap
 
 
+def draw_oz_head(p, page, h):
+    """The head of a page as in Oz Vehadar: the perek great in the middle and the amudim
+    under it in square brackets; at the outer edge the page's number (in a grey box where a
+    day begins) and the name of the work, at the inner edge the masechet."""
+    from .textlayout import width
+    m, R = page.rules[0][0], page.rules[0][2]
+    st, big, sub = h["st"], h["big"], h["subst"]
+    base = h["base"]
+    p.setPen(QColor("black"))
+    if h["title"]:
+        p.setFont(qfont(big))
+        p.drawText(QPointF((m + R) / 2 - width(big, h["title"]) / 2, base), h["title"])
+    if h["sub"]:
+        p.setFont(qfont(sub))
+        p.drawText(QPointF((m + R) / 2 - width(sub, h["sub"]) / 2, h["sub_base"]), h["sub"])
+    bold = st.with_bold(True)
+    gap = st.size * 1.2
+    num, work, inner = h["num"], h["work"], h["inner"]
+    nw, ww, iw = width(bold, num), width(st, work), width(st, inner)
+    if h["outer"] == "right":
+        xn, xw, xi = R - nw, R - nw - gap - ww, m
+    else:
+        xn, xw, xi = m, m + nw + gap, R - iw
+    if h["box"]:
+        p.fillRect(QRectF(xn - 3, base - st.size * 0.95, nw + 6, st.size * 1.35), QColor("#d6d6d6"))
+    p.setFont(qfont(bold))
+    p.drawText(QPointF(xn, base), num)
+    p.setFont(qfont(st))
+    p.drawText(QPointF(xw, base), work)
+    p.drawText(QPointF(xi, base), inner)
+
+
 def draw_page(p, page):
     p.setPen(QColor("black"))
     p.setLayoutDirection(Qt.RightToLeft)
     for paint in getattr(page, "paint", []):
         # a page drawn in lines (a title page, a cover)
         paint(p)
-    if page.head:
+    oz = getattr(page, "oz_head", None)
+    if oz:
+        draw_oz_head(p, page, oz)
+    if page.head and not oz:
         right, center, left, st, base = page.head
         # the head spans the text block (its rule): the margins differ on the two sides
         m = page.rules[0][0] if page.rules else 0

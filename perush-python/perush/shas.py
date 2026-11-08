@@ -1000,6 +1000,9 @@ class Unit:
 
 
 LONG_COMM = 15
+ORDINALS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שביעי", "שמיני", "תשיעי", "עשירי",
+            "אחד עשר", "שנים עשר", "שלשה עשר", "ארבעה עשר", "חמשה עשר", "ששה עשר", "שבעה עשר",
+            "שמונה עשר", "תשעה עשר", "עשרים", "עשרים ואחד", "עשרים ושנים", "עשרים ושלשה", "עשרים וארבעה"]
 RIF_FONT = "Drugulin CLM"    # Culmus (GPL); the one face it has is a book weight
 
 
@@ -1015,7 +1018,8 @@ class Book:
         self.m_out = (outer if outer is not None else margin) * PT_PER_MM
         self.W = self.pw - self.m_in - self.m_out
         self.hs = head_size
-        self.head_h = head_size * 1.3 + 5 * PT_PER_MM
+        # the head: the perek great, the amudim under it, a rule, and a little space
+        self.head_h = head_size * 1.9 * 0.9 + head_size * 1.15 + 4.5 * PT_PER_MM
         self.H = self.ph - 2 * self.m - self.head_h
         self.gap = 5 * PT_PER_MM
         self.vgap = 2.5 * PT_PER_MM
@@ -1701,10 +1705,20 @@ class Book:
                 # a blank page, so that the Rif begins on a left-hand page
                 out.append(page)
                 continue
-            page.head = (right, center, num, self.head_style, T + self.hs * 1.3 * 0.8)
+            # the head as in Oz Vehadar (center: (the perek, the amudim))
+            title, sub = center if isinstance(center, tuple) else (center, "")
+            big = Style(RIF_FONT, self.hs * 1.9, True)
+            base = T + big.size * 0.9
+            page.head = (right, title, num, self.head_style, base)
+            page.oz_head = {
+                "st": self.head_style, "big": big, "subst": Style("Frank Ruhl Libre", self.hs * 0.95),
+                "title": title, "sub": sub, "base": base, "sub_base": base + self.hs * 1.15,
+                "num": heb(first + n) if rif_off is None or n < rif_off else heb(n - rif_off + 1),
+                "work": ("רבינו אשר" if pg["kind"] == "rosh" else title_rif),
+                "inner": self.name, "outer": "left" if n % 2 == 0 else "right", "box": day is not None}
             if day is not None:
-                page.head_box = "left" if n % 2 == 0 else "right"
-            page.rules.append((L, T + self.hs * 1.3 + 1 * PT_PER_MM, R))
+                page.oz_head["num"] = f"יום {heb(day)} · {page.oz_head['num']}"
+            page.rules.append((L, base + self.hs * 1.15 + 1.5 * PT_PER_MM, R))
             top = T + self.head_h
             page.marks, page.boxes = [], []
             # where a day begins: "יום" over its number in a grey box, in the margin beside
@@ -2336,10 +2350,32 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
                 if t is not None and t != last_target:
                     l.note = f"רי״ף עמ' {heb(t + 1)}"
                     last_target = t
+    # the perakim: their names (from the Rosh's הדרן) and numbers
+    order = []
+    for x in rosh:
+        if x["perek"] not in order:
+            order.append(x["perek"])
+    pname = {}
+    for x in rosh:
+        for p_ in x["paras"]:
+            if p_ and p_[0][1] == "hadran":
+                t = " ".join(w[0] for w in p_)
+                t = re.sub(r"^\s*הדרן\s+עלך\s+", "", t)
+                t = re.split(r"\s+(?:וסליקא|וסליק)", t)[0].strip(" .:")
+                pname.setdefault(x["perek"], t)
+
+    def perek_title(k):
+        if k is None or k >= len(order):
+            return ""
+        nm = pname.get(order[k], "")
+        return (nm + " " if nm else "") + "פרק " + ORDINALS[k] if k < len(ORDINALS) else nm
+
+    def amudim(a, b):
+        return f"[{a}]" if a == b else f"[{a} - {b}]"
     xref, amud = [], None
     for n, pg in enumerate(rosh_pages):
         refs = [l.unit.ref for col in pg["cols"] for l in col if l.unit.kind == "p"]
-        perek = rosh[refs[0]]["perek"] if refs else ""
+        perek = perek_title(order.index(rosh[refs[0]]["perek"])) if refs else ""
         s = refs[0] if refs else None
         target = para_page.get(al[s]) if (s is not None and rif) else None
         # the amudim of the Gemara the page is on: the one it opens in, to the last marked
@@ -2349,10 +2385,9 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         first = seen[0] if (opens or not amud) and seen else amud
         if seen:
             amud = seen[-1]
-        daf = (f"דף {first}" + (f"–{amud}" if amud != first else "")) if first else ""
-        xref.append(" · ".join(x for x in (perek, daf) if x) +
-                    (f" · ברי\"ף עמ' {heb(target + 1)}" if target is not None else ""))
-    xref += [""] * len(pad)
+        xref.append((perek, amudim(first, amud) if first else ""))
+    xref += [("", "")] * len(pad)
+    starts_of_perek = sorted(perek_at)
     # the head of a page of the Rif: the dafim of the Gemara it is on (from the first passage
     # on it to the last; not the Rif's own pages)
     prev = None
@@ -2366,11 +2401,12 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
             amuds = [a for a in amuds if abs(a[0] - mid) <= 4]
             first, last = amuds[0][1], amuds[-1][1]
             prev = last
-            xref.append(f"דף {first}" + (f"–{last}" if last != first else ""))
-        elif prev:
-            xref.append(f"דף {prev}")
+            sub = amudim(first, last)
         else:
-            xref.append(comm_name)
+            sub = amudim(prev, prev) if prev else ""
+        j0 = next((j for j in refs if j is not None), None)
+        k = bisect.bisect_right(starts_of_perek, j0) if j0 is not None else None
+        xref.append((perek_title(k) if rosh else "", sub))
     title_rif = f"רי\"ף ו{comm_name}" if comm_name else "רי\"ף"
     # the days, by whole pages: the Rosh's pages shared out among the masechet's days, and
     # the Rif's (each day the same number, or one more: the extra pages go to the last days)
