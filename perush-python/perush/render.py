@@ -1,6 +1,6 @@
 """Drawing laid-out pages: on screen (preview images) and into a PDF file."""
 from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt
-from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen
 
 from .textlayout import PT_PER_MM, metrics, qfont, space
 
@@ -27,9 +27,23 @@ def draw_line(p, line, x_right, top):
     baseline = top + (line.h - (m.ascent() + m.descent())) / 2 + m.ascent()
     if line.h > nominal * 3:  # never float a word in a very tall slot
         baseline = top + m.ascent()
+    # where the spaces would open too wide (a narrow column, long words), part of the room
+    # goes between the letters instead
+    track = 0.0
+    if justify and n > 1:
+        sp = space(line.base)
+        if gap > 1.8 * sp:
+            chars = sum(len(w.text) for w in ws)
+            track = min(line.base.size * 0.1, (line.width - total - (n - 1) * 1.8 * sp) / max(1, chars))
+            gap = (line.width - total - track * chars) / (n - 1)
     for w in ws:
-        x -= w.w
-        p.setFont(qfont(w.style))
+        ww = w.w + track * len(w.text)
+        x -= ww
+        f = qfont(w.style)
+        if track:
+            f = QFont(f)
+            f.setLetterSpacing(QFont.AbsoluteSpacing, track)
+        p.setFont(f)
         p.drawText(QPointF(x, baseline), w.text)
         x -= gap
 

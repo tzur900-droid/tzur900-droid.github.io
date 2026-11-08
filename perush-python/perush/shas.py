@@ -1000,6 +1000,7 @@ class Unit:
 
 
 LONG_COMM = 15
+COMM_TIGHT = 0.8    # how far the commentary's spaces may close
 ORDINALS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שביעי", "שמיני", "תשיעי", "עשירי",
             "אחד עשר", "שנים עשר", "שלשה עשר", "ארבעה עשר", "חמשה עשר", "ששה עשר", "שבעה עשר",
             "שמונה עשר", "תשעה עשר", "עשרים", "עשרים ואחד", "עשרים ושנים", "עשרים ושלשה", "עשרים וארבעה"]
@@ -1323,7 +1324,8 @@ class Book:
         (right, width). band (y1, y2): no lines there (the Rif across the page); a column
         goes on under it."""
         cols, i, n = [], 0, len(words)
-        sp = space(self.st_comm)
+        # the spaces may close a little, so that a line takes another word more often
+        sp = space(self.st_comm) * COMM_TIGHT
         for _ in range(2):
             col, y = [], y0
             while i < n:
