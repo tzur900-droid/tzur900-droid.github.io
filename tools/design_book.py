@@ -235,8 +235,11 @@ FOOTNOTES_XML = (
 
 
 class Footnotes:
-    def __init__(self, document):
+    def __init__(self, document, body_mark=True):
+        """body_mark: the number written at the start of the note too (Word needs it with a custom
+        mark; LibreOffice puts its own there, so for the PDF it is left out)."""
         self.doc = document
+        self.body_mark = body_mark
         part = Part(PackURI("/word/footnotes.xml"),
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml",
                     FOOTNOTES_XML.encode("utf-8"), document.part.package)
@@ -262,15 +265,18 @@ class Footnotes:
         rpr.append(parse_xml(f'<w:rFonts {nsdecls("w")} w:ascii="{FONT}" w:hAnsi="{FONT}" w:cs="{FONT}"/>'))
         rpr.append(parse_xml(f'<w:highlight {nsdecls("w")} w:val="yellow"/>'))
         rpr.append(parse_xml(f'<w:vertAlign {nsdecls("w")} w:val="superscript"/>'))
+        custom = star or self.body_mark     # for the PDF a numbered note is numbered by LibreOffice (see odt_labels)
         ref = OxmlElement("w:footnoteReference")
-        ref.set(qn("w:customMarkFollows"), "1")
+        if custom:
+            ref.set(qn("w:customMarkFollows"), "1")
         ref.set(qn("w:id"), str(fid))
         r._r.append(ref)
-        t = OxmlElement("w:t")      # the mark itself, in the same run right after the reference
-        t.text = label
-        r._r.append(t)
+        if custom:
+            t = OxmlElement("w:t")      # the mark itself, in the same run right after the reference
+            t.text = label
+            r._r.append(t)
         esc = (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-        mark = f'<w:t>{label}</w:t>'
+        mark = f'<w:t>{label}</w:t>' if self.body_mark else ('' if star else '<w:footnoteRef/>')
         note = parse_xml(
             f'<w:footnote {nsdecls("w")} w:id="{fid}"><w:p><w:pPr><w:bidi/><w:jc w:val="both"/>'
             f'<w:spacing w:after="30" w:line="240" w:lineRule="auto"/></w:pPr>'
@@ -286,7 +292,7 @@ class Footnotes:
 
 
 # ---------- the document ----------
-def build(book, out, title=None, subtitle=None, by=None, toc_pages=None, highlight_parts=True):
+def build(book, out, title=None, subtitle=None, by=None, toc_pages=None, highlight_parts=True, for_pdf=False):
     d = docx.Document()
     title = title or book["title"]
     subtitle = subtitle or book["subtitle"]
@@ -338,7 +344,7 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None, highlig
     tabw = sec.page_width - sec.left_margin - sec.right_margin
     t2.tab_stops.add_tab_stop(tabw, alignment=2, leader=1)   # left (in RTL: the far end), dots
 
-    notes = Footnotes(d)
+    notes = Footnotes(d, body_mark=not for_pdf)
 
     def para(text="", style=None, align=None, size=None, bold=None, before=None, after=None):
         p = d.add_paragraph(style=style)
@@ -463,6 +469,89 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None, highlig
     d.save(out)
 
 
+SUP = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+
+
+def _entries(text, kind):
+    """The notes in an editor's-notes paragraph, by number: '1. …  2. …', '¹ … ² …' or '[^1]: … [^2]: …'.
+    Only the next expected number counts as a new note, so numbers inside a note do not split it."""
+    if kind == "fn":
+        pat = r"\[\^(\d+)\]:\s*"
+    elif kind == "sup":
+        pat = r"(?:^|\s)([" + SUP + r"]+)\s*"
+    else:
+        pat = r"(?:^|\s)(\d+)\.\s+"
+    out, cur, last = {}, None, 0
+    for m in re.finditer(pat, text):
+        num = int(m.group(1).translate(str.maketrans(SUP, "0123456789")))
+        if cur is not None and num != cur + 1:     # (the first one may be any number)
+            continue
+        if cur is not None:
+            out[cur] = text[last:m.start()]
+        cur, last = num, m.end()
+    if cur is not None:
+        out[cur] = text[last:]
+    return {k: re.sub(r"\s*\{מקור(?:ות)?\s*[\d,\s]+\}", "", v).strip() for k, v in out.items()}
+
+
+def editor_notes(book, report):
+    """The editor's notes written at the end of a talk ('הערות העורך') move to footnotes at their marks
+    in the text (¹ or [^1]); the notes section itself is removed."""
+    for part in book["parts"]:
+        for t in part["talks"]:
+            blocks = t["blocks"]
+            notes = {"fn": {}, "sup": {}}
+            keep = []
+            in_notes = False
+            for k, x in blocks:
+                if k == "p" and re.match(r"^\**\s*הערות (?:ה)?עורך", x.strip()) and len(x) < 120:
+                    in_notes = True
+                    continue
+                if k == "p" and re.match(r"\[\^\d+\]:", x.strip()):
+                    notes["fn"].update(_entries(x.strip(), "fn"))
+                    continue
+                if in_notes and k == "p":
+                    xs = x.strip()
+                    if xs[:1] in SUP:
+                        notes["sup"].update(_entries(xs, "sup"))
+                        continue
+                    if re.match(r"\d+\.\s", xs):
+                        notes["sup"].update(_entries(xs, "num"))
+                        continue
+                in_notes = False
+                keep.append((k, x))
+            if not (notes["fn"] or notes["sup"]):
+                continue
+            n_moved = 0
+
+            def fn(m):
+                nonlocal n_moved
+                v = notes["fn"].get(int(m.group(1)))
+                if not v:
+                    return m.group(0)
+                n_moved += 1
+                return f"⟦{v}⟧"
+
+            def sup(m):
+                nonlocal n_moved
+                v = notes["sup"].get(int(m.group(1).translate(str.maketrans(SUP, "0123456789"))))
+                if not v:
+                    return m.group(0)
+                n_moved += 1
+                return f"⟦{v}⟧"
+            new = []
+            for k, x in keep:
+                if k == "p":
+                    x = re.sub(r"\[\^(\d+)\]", fn, x)
+                    x = re.sub(r"([" + SUP + r"]+)", sup, x)
+                    # a lone '* * *' left at the very end (it closed the notes) is dropped below
+                new.append((k, x))
+            while new and new[-1][0] == "p" and new[-1][1].strip() == "* * *":
+                new.pop()
+            t["blocks"] = new
+            report.append(f"\n== {t['title']}\n  הערות העורך שבסוף השיחה הועברו להערות שוליים במקומן: {n_moved}")
+
+
 def apply_notes(book, notes_dir, report):
     """Source references into footnotes: '(שבת כא, א)' in the text becomes a numbered note (with the
     reference checked, corrected if it was wrong), and a quotation without a source gets one
@@ -490,8 +579,8 @@ def apply_notes(book, notes_dir, report):
                         done = True
                         break
                 state = "לא בטוח" if e.get("unsure") else ("תוקן" if not e.get("ok", True) else "נכון")
-                report.append(f"  ({paren}) → {src}  [{state}]" + (f" — {e['note']}" if e.get("note") else "")
-                              + ("" if done else "  !! לא נמצא בטקסט"))
+                if done:        # (what Claude returned that is not in the text is not reported)
+                    report.append(f"  ({paren}) → {src}  [{state}]" + (f" — {e['note']}" if e.get("note") else ""))
             for e in data.get("quotes", []):
                 q, src = (e.get("quote") or "").strip(), (e.get("source") or "").strip()
                 if not q or not src:
@@ -508,13 +597,15 @@ def apply_notes(book, notes_dir, report):
                         j += 1
                         if b[1][j - 1] in "״\"”":
                             break
-                    if b[1][j:j + 1] == "⟦":
-                        done = True
+                    if b[1][j:j + 3].lstrip()[:1] in ("⟦", "("):     # it already has a source
+                        break
+                    if f"⟦{src}⟧" in b[1][:j]:     # the same source just before, in this paragraph
                         break
                     b[1] = b[1][:j] + f"⟦{src}⟧" + b[1][j:]
                     done = True
                     break
-                report.append(f"  ״{q[:60]}״ → {src}  [נוסף]" + ("" if done else "  !! לא נמצא בטקסט"))
+                if done:
+                    report.append(f"  ״{q[:60]}״ → {src}  [נוסף]")
             for e in data.get("unsure", []):
                 report.append(f"  ? ״{(e.get('quote') or '')[:60]}״ — {e.get('why', '')}")
             t["blocks"] = [tuple(b) for b in blocks]
@@ -544,6 +635,33 @@ def toc_from_pdf(book, pdf):
     return out
 
 
+def odt_labels(path):
+    """LibreOffice numbers footnotes through the whole book: in its own file (.odt) every note gets
+    its number within the talk (from 1 again after every talk title)."""
+    import zipfile
+    z = zipfile.ZipFile(path)
+    items = [(i, z.read(i.filename)) for i in z.infolist()]
+    z.close()
+    xml = dict((i.filename, d) for i, d in items)["content.xml"].decode("utf-8")
+    count = 0
+
+    def fix(m):
+        nonlocal count
+        if m.group(1):      # a talk title
+            count = 0
+            return m.group(0)
+        if m.group(2):      # the '*' note
+            return m.group(0)
+        count += 1
+        return f'<text:note-citation text:label="{count}">{count}</text:note-citation>'
+    xml = re.sub(r'(<text:h [^>]*text:outline-level="2"[^>]*>)|<text:note-citation( text:label="\*")?>[^<]*</text:note-citation>',
+                 fix, xml)
+    out = zipfile.ZipFile(path, "w")
+    for i, d in items:      # (mimetype first and uncompressed, as it was)
+        out.writestr(i, xml.encode("utf-8") if i.filename == "content.xml" else d)
+    out.close()
+
+
 def main():
     import os
     a = sys.argv[1:]
@@ -564,6 +682,7 @@ def main():
     book = parse(md)
     if notes_dir:
         report = []
+        editor_notes(book, report)
         apply_notes(book, notes_dir, report)
         open(os.path.splitext(a[1])[0] + " - בדיקת מקורות.txt", "w", encoding="utf-8").write("\n".join(report))
     out = a[1]
@@ -575,11 +694,17 @@ def main():
         tmp = base + ".toc.docx"
         toc = None
         for _ in range(3):      # the table of contents with its pages; again, until the pages stay
-            build(book, tmp, toc_pages=toc, **opts)
+            build(book, tmp, toc_pages=toc, for_pdf=True, **opts)
             # blank pages kept (a parasha starts on a right-hand page), so a PDF page is a book page
             fmt = 'pdf:writer_pdf_Export:{"IsSkipEmptyPages":{"type":"boolean","value":"false"}}'
-            subprocess.run(["soffice", "--headless", "--convert-to", fmt, "--outdir", os.path.dirname(out) or ".", tmp],
+            outdir = os.path.dirname(out) or "."
+            subprocess.run(["soffice", "--headless", "--convert-to", "odt", "--outdir", outdir, tmp],
                            capture_output=True, timeout=600)
+            odt = base + ".toc.odt"
+            odt_labels(odt)
+            subprocess.run(["soffice", "--headless", "--convert-to", fmt, "--outdir", outdir, odt],
+                           capture_output=True, timeout=600)
+            os.remove(odt)
             new = toc_from_pdf(book, base + ".toc.pdf")
             if new == toc:
                 break
