@@ -72,6 +72,24 @@ def block_size(info):
     return sum(2 + n + n % 2 for n in (info["rosh_pages"], info["rif_pages"]) if n)
 
 
+# the volumes, as printed (whatever their number of pages)
+VOLUMES = [["ברכות", "שבת"], ["עירובין", "פסחים", "יומא", "סוכה"],
+           ["ביצה", "ראש השנה", "תענית", "מגילה", "מועד קטן"], ["יבמות", "כתובות"], ["נדרים", "גיטין", "קידושין"],
+           ["בבא קמא", "בבא מציעא"], ["בבא בתרא"], ["סנהדרין", "מכות", "שבועות", "עבודה זרה"],
+           ["מנחות", "חולין", "בכורות", "נידה"]]
+
+
+def volumes(books):
+    """The volumes (or the parts of them that were built), each with its number.
+    -> [(number, [masechet])]"""
+    out = []
+    for k, ms in enumerate(VOLUMES):
+        have = [m for m in ms if m in books]
+        if have:
+            out.append((k + 1, have))
+    return out
+
+
 def group(books):
     """Files of LO to HI pages, keeping to the sedarim where they can: the whole Shas in
     one when it fits. -> [[masechet]]"""
@@ -271,14 +289,13 @@ def report(books, files):
 def build_shas(root, out_dir, fonts, jobs=4, only=None, log=print):
     from .render import export_pdf
     books = build_all(root, fonts, jobs=jobs, only=only, log=log)
-    groups = group(books)
     os.makedirs(out_dir, exist_ok=True)
     files = []
-    for ms in groups:
+    for vol, ms in volumes(books):
         name = file_name(ms)
         pages = assemble(ms, books)
         export_pdf(pages, os.path.join(out_dir, name + ".pdf"), name)
-        export_pdf([cover_page(ms, len(pages), len(files) + 1)], os.path.join(out_dir, "כריכה - " + name + ".pdf"),
+        export_pdf([cover_page(ms, len(pages), vol)], os.path.join(out_dir, "כריכה - " + name + ".pdf"),
                    "כריכה - " + name)
         files.append((name, ms, len(pages)))
         log(f"{name}: {len(pages)} עמודים")

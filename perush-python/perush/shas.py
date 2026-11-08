@@ -1506,7 +1506,12 @@ class Book:
                 # lines of the Rif in the middle, the commentary around them, and the rest of
                 # it runs on; never a page of commentary alone while the Rif goes on
                 x = a + 1
-                while x < self.total and self.text_lines(a, x, lambda y: (0, self.W - 2 * (self.cw + self.gap)))[1] < min_text:
+                narrow = lambda y: (0, self.W - 2 * (self.cw + self.gap))
+                while x < self.total and self.text_lines(a, x, narrow)[1] < min_text:
+                    x += 1
+                # and its last line full: the words that still go on it
+                n0 = len(self.text_lines(a, x, narrow)[0])
+                while x < self.total and len(self.text_lines(a, x + 1, narrow)[0]) == n0:
                     x += 1
                 r = self.compose(a, x, cptr)
                 r["cnext"] = cptr + r["n"]
@@ -1521,7 +1526,8 @@ class Book:
                     if self.units[k].kind != "p":
                         continue
                     q = self.compose(a, e, cptr)
-                    if q["fits"] and self.full(q):
+                    # (not a page of a line or two of the Rif)
+                    if q["fits"] and self.full(q) and q["th"] - q.get("t0", 0.0) >= min_text:
                         r = q
                         break
             if r["mode"] == "short" and not r["at_end"] and self.H - r["total"] > 1.5 * self.lh_rif:
@@ -1603,7 +1609,7 @@ class Book:
         lone = last.natural < last.width * 0.5
         if r2["fits"] and (lone or (self.full(r2) if r2["mode"] == "long" else self.H - r2["total"] < self.lh_rif * 1.5)):
             return r2
-        if lone and not r["fits"] and len(r2["text"]) >= 2:
+        if lone and not r["fits"] and len(r2["text"]) >= 3:
             # a page of more commentary than it holds (it runs on): its few lines of the Rif
             # end on a full one all the same
             r2["cnext"] = r2["cptr"] + r2["n"]
