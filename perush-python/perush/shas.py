@@ -1577,18 +1577,36 @@ class Book:
         return self.H - q["total"] < 2 * self.lh_comm
 
     def end_on_line(self, r):
-        """End the Rif on a full line when the page stays full without the last line."""
+        """A page that cuts the Rif in a passage ends it on a full line, as in the Gemara:
+        the last line filled with a few words more where the page takes them, or else the
+        page ends at the line before it (where it stays full, or where a short last line
+        would be a word or two alone)."""
         t = r["text"]
         if r["at_end"] or not t or not getattr(t[-1], "cut", False):
             return r
         last = t[-1]
-        if last.natural >= last.width * 0.9 or len(t) < 2:
+        if last.natural >= last.width * 0.85 or len(t) < 2:
             return r
+        # 1. a few words more, on the same lines
+        for b3 in range(r["b"] + 1, min(self.total, r["b"] + 25) + 1):
+            r3 = self.compose(r["a"], b3, r["cptr"])
+            if not r3["fits"] or len(r3["text"]) != len(t) or not r3["text"]:
+                break
+            l3 = r3["text"][-1]
+            if l3.natural >= l3.width * 0.85:
+                return r3
+        # 2. the page ends at the line before
         b2 = r["b"] - len(last.words)
         if b2 <= r["a"]:
             return r
         r2 = self.compose(r["a"], b2, r["cptr"])
-        if r2["fits"] and (self.full(r2) if r2["mode"] == "long" else self.H - r2["total"] < self.lh_rif * 1.5):
+        lone = last.natural < last.width * 0.5
+        if r2["fits"] and (lone or (self.full(r2) if r2["mode"] == "long" else self.H - r2["total"] < self.lh_rif * 1.5)):
+            return r2
+        if lone and not r["fits"] and len(r2["text"]) >= 2:
+            # a page of more commentary than it holds (it runs on): its few lines of the Rif
+            # end on a full one all the same
+            r2["cnext"] = r2["cptr"] + r2["n"]
             return r2
         return r
 
