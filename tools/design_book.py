@@ -392,8 +392,8 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
                 page_break()
             h = para(talk["title"], style="Heading 2")
             if talk["sources"]:
-                srcs = "; ".join(note_titles(talk["sources"]))
-                notes.add(h, f"נערך מתוך {'השיעור' if len(talk['sources']) == 1 else 'השיעורים'}: {srcs}.")
+                names = note_titles(talk["sources"])
+                notes.add(h, f"נערך מתוך {'השיעור' if len(names) == 1 else 'השיעורים'}: {'; '.join(names)}.")
             for kind, text in talk["blocks"]:
                 if kind == "h":
                     para(strip_marks(text), style="Heading 3")
