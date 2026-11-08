@@ -21,6 +21,7 @@ from docx.oxml.ns import nsdecls, qn
 from docx.shared import Cm, Pt
 
 FONT = "FrankRuehl"
+HL = '<w:highlight w:val="yellow"/>'      # what the program changed in the book is marked so
 BODY_PT = 12.5
 
 
@@ -243,24 +244,39 @@ class Footnotes:
         self.part = part
         self.root = parse_xml(FOOTNOTES_XML)
         self.next = 1
+        self.count = 0      # the number of the note within the talk (restart() at every talk)
 
-    def add(self, p, text):
-        """A footnote; its mark is '*' (the section numbers notes as * † ‡, again on every page)."""
+    def restart(self):
+        self.count = 0
+
+    def add(self, p, text, star=False):
+        """A footnote at the end of p: numbered (1, 2, 3 — again in every talk), or the '*' note.
+        The mark is written out (customMarkFollows), so every program shows the same number."""
         fid = self.next
         self.next += 1
+        if not star:
+            self.count += 1
+        label = "*" if star else str(self.count)
         r = p.add_run()
-        r._r.get_or_add_rPr().append(parse_xml(f'<w:rStyle {nsdecls("w")} w:val="FootnoteReference"/>'))
-        r._r.get_or_add_rPr().append(parse_xml(f'<w:vertAlign {nsdecls("w")} w:val="superscript"/>'))
+        rpr = r._r.get_or_add_rPr()
+        rpr.append(parse_xml(f'<w:rFonts {nsdecls("w")} w:ascii="{FONT}" w:hAnsi="{FONT}" w:cs="{FONT}"/>'))
+        rpr.append(parse_xml(f'<w:highlight {nsdecls("w")} w:val="yellow"/>'))
+        rpr.append(parse_xml(f'<w:vertAlign {nsdecls("w")} w:val="superscript"/>'))
         ref = OxmlElement("w:footnoteReference")
+        ref.set(qn("w:customMarkFollows"), "1")
         ref.set(qn("w:id"), str(fid))
         r._r.append(ref)
+        t = OxmlElement("w:t")      # the mark itself, in the same run right after the reference
+        t.text = label
+        r._r.append(t)
         esc = (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        mark = f'<w:t>{label}</w:t>'
         note = parse_xml(
             f'<w:footnote {nsdecls("w")} w:id="{fid}"><w:p><w:pPr><w:bidi/><w:jc w:val="both"/>'
-            f'<w:spacing w:after="40" w:line="240" w:lineRule="auto"/></w:pPr>'
+            f'<w:spacing w:after="30" w:line="240" w:lineRule="auto"/></w:pPr>'
             f'<w:r><w:rPr><w:rFonts w:ascii="{FONT}" w:hAnsi="{FONT}" w:cs="{FONT}"/><w:vertAlign w:val="superscript"/>'
-            f'<w:sz w:val="20"/><w:szCs w:val="20"/><w:rtl/></w:rPr><w:footnoteRef/></w:r>'
-            f'<w:r><w:rPr><w:rFonts w:ascii="{FONT}" w:hAnsi="{FONT}" w:cs="{FONT}"/><w:sz w:val="19"/><w:szCs w:val="19"/><w:rtl/></w:rPr>'
+            f'<w:sz w:val="20"/><w:szCs w:val="20"/>{HL}<w:rtl/></w:rPr>{mark}</w:r>'
+            f'<w:r><w:rPr><w:rFonts w:ascii="{FONT}" w:hAnsi="{FONT}" w:cs="{FONT}"/><w:sz w:val="19"/><w:szCs w:val="19"/>{HL}<w:rtl/></w:rPr>'
             f'<w:t xml:space="preserve"> {esc}</w:t></w:r></w:p></w:footnote>')
         self.root.append(note)
 
@@ -270,7 +286,7 @@ class Footnotes:
 
 
 # ---------- the document ----------
-def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
+def build(book, out, title=None, subtitle=None, by=None, toc_pages=None, highlight_parts=True):
     d = docx.Document()
     title = title or book["title"]
     subtitle = subtitle or book["subtitle"]
@@ -296,7 +312,7 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
     pf.space_after = Pt(6)
     pf.line_spacing = 1.18
     h1, h2, h3 = d.styles["Heading 1"], d.styles["Heading 2"], d.styles["Heading 3"]
-    for st, size in ((h1, 30), (h2, 24), (h3, 14)):
+    for st, size in ((h1, 30), (h2, 30), (h3, 15)):
         style_font(st, size, bold=(st is h3))
         st.font.color.rgb = None
         st.paragraph_format.keep_with_next = True
@@ -306,10 +322,11 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
     h1.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
     h1.paragraph_format.space_before = Pt(160)
     h2.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    h2.paragraph_format.space_before = Pt(30)
-    h2.paragraph_format.space_after = Pt(26)
-    h3.paragraph_format.space_before = Pt(14)
-    h3.paragraph_format.space_after = Pt(6)
+    h2.paragraph_format.space_before = Pt(0)
+    h2.paragraph_format.space_after = Pt(30)
+    h2.paragraph_format.line_spacing = 1.0
+    h3.paragraph_format.space_before = Pt(16)
+    h3.paragraph_format.space_after = Pt(8)
     for name, size, bold in (("TOC 1", 14, True), ("TOC 2", 13, True)):
         st = d.styles.add_style(name, 1) if name not in [s.name for s in d.styles] else d.styles[name]
         style_font(st, size, bold)
@@ -333,7 +350,12 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
         if after is not None:
             p.paragraph_format.space_after = Pt(after)
         if text:
-            add_text(p, text, size, bold)
+            for i, piece in enumerate(re.split(r"⟦(.+?)⟧", text)):
+                if i % 2 == 0:
+                    if piece:
+                        add_text(p, piece, size, bold)
+                else:
+                    notes.add(p, piece)
         return p
 
     def page_break():
@@ -385,15 +407,16 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
                 font_run(hp.add_run(rest.strip()))
             else:
                 add_text(hp, part["name"])
+            if highlight_parts:
+                for r in hp.runs:
+                    r._r.get_or_add_rPr().append(parse_xml(f'<w:highlight {nsdecls("w")} w:val="yellow"/>'))
         for ti, talk in enumerate(part["talks"]):
-            if ti == 0:
-                d.add_section(WD_SECTION.NEW_PAGE)
-            else:
-                page_break()
+            d.add_section(WD_SECTION.NEW_PAGE)
+            notes.restart()
             h = para(talk["title"], style="Heading 2")
             if talk["sources"]:
                 names = note_titles(talk["sources"])
-                notes.add(h, f"נערך מתוך {'השיעור' if len(names) == 1 else 'השיעורים'}: {'; '.join(names)}.")
+                notes.add(h, f"נערך מתוך {'השיעור' if len(names) == 1 else 'השיעורים'}: {'; '.join(names)}.", star=True)
             for kind, text in talk["blocks"]:
                 if kind == "h":
                     para(strip_marks(text), style="Heading 3")
@@ -415,8 +438,8 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
         s.different_first_page_header_footer = (i == 0)
         fp = s._sectPr.find(qn("w:footnotePr"))
         if fp is None:
-            s._sectPr.append(parse_xml(f'<w:footnotePr {nsdecls("w")}><w:numFmt w:val="chicago"/>'
-                                       f'<w:numRestart w:val="eachPage"/></w:footnotePr>'))
+            s._sectPr.append(parse_xml(f'<w:footnotePr {nsdecls("w")}><w:numFmt w:val="decimal"/>'
+                                       f'<w:numRestart w:val="eachSect"/></w:footnotePr>'))
         if i == 0 or i in blank_sections:     # the title pages and the parasha pages: no running head
             s.header.is_linked_to_previous = False
             s.even_page_header.is_linked_to_previous = False
@@ -438,6 +461,63 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
         s._sectPr.append(OxmlElement("w:bidi")) if s._sectPr.find(qn("w:bidi")) is None else None
     notes.save()
     d.save(out)
+
+
+def apply_notes(book, notes_dir, report):
+    """Source references into footnotes: '(שבת כא, א)' in the text becomes a numbered note (with the
+    reference checked, corrected if it was wrong), and a quotation without a source gets one
+    (only those Claude was sure of). Every change is written to report."""
+    import json
+    import os
+    n = 0
+    for part in book["parts"]:
+        for t in part["talks"]:
+            n += 1
+            path = os.path.join(notes_dir, f"{n:02d}.json")
+            if not os.path.exists(path):
+                continue
+            data = json.load(open(path, encoding="utf-8"))
+            report.append(f"\n== {t['title']}")
+            blocks = [[k, strip_marks(x) if k == "p" else x] for k, x in t["blocks"]]
+            for e in data.get("parens", []):
+                paren, src = (e.get("paren") or "").strip(), (e.get("source") or "").strip()
+                if not paren or not src:
+                    continue
+                done = False
+                for b in blocks:
+                    if b[0] == "p" and f"({paren})" in b[1]:
+                        b[1] = b[1].replace(f"({paren})", f"⟦{src}⟧", 1)
+                        done = True
+                        break
+                state = "לא בטוח" if e.get("unsure") else ("תוקן" if not e.get("ok", True) else "נכון")
+                report.append(f"  ({paren}) → {src}  [{state}]" + (f" — {e['note']}" if e.get("note") else "")
+                              + ("" if done else "  !! לא נמצא בטקסט"))
+            for e in data.get("quotes", []):
+                q, src = (e.get("quote") or "").strip(), (e.get("source") or "").strip()
+                if not q or not src:
+                    continue
+                done = False
+                for b in blocks:
+                    if b[0] != "p":
+                        continue
+                    i = b[1].find(q)
+                    if i < 0:
+                        continue
+                    j = i + len(q)
+                    while j < len(b[1]) and b[1][j] in "״\"”'׳.,:;!?…":       # after the closing quotation mark
+                        j += 1
+                        if b[1][j - 1] in "״\"”":
+                            break
+                    if b[1][j:j + 1] == "⟦":
+                        done = True
+                        break
+                    b[1] = b[1][:j] + f"⟦{src}⟧" + b[1][j:]
+                    done = True
+                    break
+                report.append(f"  ״{q[:60]}״ → {src}  [נוסף]" + ("" if done else "  !! לא נמצא בטקסט"))
+            for e in data.get("unsure", []):
+                report.append(f"  ? ״{(e.get('quote') or '')[:60]}״ — {e.get('why', '')}")
+            t["blocks"] = [tuple(b) for b in blocks]
 
 
 def toc_from_pdf(book, pdf):
@@ -465,6 +545,7 @@ def toc_from_pdf(book, pdf):
 
 
 def main():
+    import os
     a = sys.argv[1:]
     opts = {}
     for k in ("--title", "--subtitle", "--by"):
@@ -474,13 +555,21 @@ def main():
             del a[i:i + 2]
     pdf = "--pdf" in a
     a = [x for x in a if x != "--pdf"]
+    notes_dir = None
+    if "--notes" in a:
+        i = a.index("--notes")
+        notes_dir = a[i + 1]
+        del a[i:i + 2]
     md = open(a[0], encoding="utf-8").read()
     book = parse(md)
+    if notes_dir:
+        report = []
+        apply_notes(book, notes_dir, report)
+        open(os.path.splitext(a[1])[0] + " - בדיקת מקורות.txt", "w", encoding="utf-8").write("\n".join(report))
     out = a[1]
     build(book, out, **opts)
     print(f"{len(book['parts'])} פרשות, {sum(len(p['talks']) for p in book['parts'])} שיחות → {out}")
     if pdf:
-        import os
         import subprocess
         base = os.path.splitext(out)[0]
         tmp = base + ".toc.docx"
