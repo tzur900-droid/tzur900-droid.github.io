@@ -55,6 +55,8 @@ def parse(md):
             if part is None:
                 part = {"name": "", "talks": []}
                 book["parts"].append(part)
+            # names only, as asked ("פרק א: …" of books written before that was fixed)
+            name = re.sub(r"^\s*(?:פרק|שיחה|שיעור|חלק)\s+[\u05d0-\u05ea\d]{1,4}['׳\"]?\s*[:.\-–—]\s*", "", name) or name
             talk = {"title": name, "blocks": [], "sources": []}
             part["talks"].append(talk)
             mode = "talk"
@@ -367,7 +369,8 @@ def build(book, out, title=None, subtitle=None, by=None, toc_pages=None):
         op = s.header.paragraphs[0]
         rtl_par(op)
         op.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        field(op, 'STYLEREF "Heading 1"', "", 11)
+        # a book in parts: the part's name; a book of talks only: the talk's name
+        field(op, 'STYLEREF "Heading 1"' if any(pt["name"] for pt in book["parts"]) else 'STYLEREF "Heading 2"', "", 11)
         font_run(op.add_run("  |  "), 11)
         field(op, "PAGE", "1", 11, True)
         s._sectPr.append(OxmlElement("w:bidi")) if s._sectPr.find(qn("w:bidi")) is None else None
