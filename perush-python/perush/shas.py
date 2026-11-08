@@ -520,14 +520,15 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
             # two of them at least not among the commentary's commonest words (לא, אבל, כל ...)
             if len({src[i] for i, _ in own if sseq[i] not in weak}) < 2:
                 n = 0
-            head = len(best) == 2 and e in mine and i0 == dh_end and best[0][1] == 0
             # and words that follow one another in both: three, or two in a chain of four
             run = top = 1
             for (ia, pa), (ib, pb) in zip(best, best[1:]):
                 run = run + 1 if (ib == ia + 1 and pb == pa + 1) else 1
                 top = max(top, run)
             close = top >= 3 or (top >= 2 and len(best) >= 4)
-            if dense and ((n >= 3 and close) or head):
+            # four words of Rashi at least (a little changed is still his), never a word or
+            # two torn from what he says
+            if dense and n >= 4 and close and i1 - i0 + 1 >= 4:
                 for k in range(i0, i1 + 1):
                     bold[k] = 1
                 if trace is not None:
@@ -916,7 +917,7 @@ def rif_page_marks(rosh, rif, al):
                 t.append(label)
 
 
-GEM_MARK = re.compile(r"^\[דף [א-ת]+[.:]\]$")
+GEM_MARK = re.compile(r"^\[[א-ת]+[.:]\]$")
 
 
 def parse_gemara(lines):
@@ -984,7 +985,7 @@ def gemara_marks(rosh, gem_lines):
     # into the text, from the end so that the places stay right
     for a, label in reversed(marks):
         i, pi, ti = flat[a]
-        rosh[i]["paras"][pi].insert(ti, [f"[דף {label}]", "gem"])
+        rosh[i]["paras"][pi].insert(ti, [f"[{label}]", "gem"])
     return len(marks)
 
 
@@ -1041,14 +1042,20 @@ class Book:
         # מתני' and גמ': in the Rif great, as in the Gemara of Vilna; elsewhere a little larger
         lab = Style(RIF_FONT, st.size * 1.6, True) if st.family == RIF_FONT else Style("David Libre", st.size * 1.08, True)
         big = Style(st.family, st.size * 1.3, True)
-        gem = Style(st.family, st.size * 0.75)
+        # the Gemara's amud [נה:] and a reference (גיטין ו.): small, in square letters
+        gem = Style("Frank Ruhl Libre", st.size * 0.8)
         # the dibbur hamatchil bold and a quarter larger, to stand out over Rashi's wording
         copen = Style(RIF_FONT, st.size * 1.45, True)
         dh = Style(RIF_FONT, st.size * 1.25, True)
+        # Rashi's wording in the commentary: a little heavier than the text (not the bold
+        # of the dibbur); מתני' that opens a Mishna great, as in the Rif
+        rashi = Style("Frank Ruhl Libre SemiBold", st.size)
+        clab = Style(RIF_FONT, st.size * 1.6, True)
         out = []
         for t in toks:
             w, bold = t[0], t[1]
-            s_ = {"label": lab, "open": big, "gem": gem, "rashi": st.with_bold(True), "hadran": b, "dh": dh, "copen": copen}.get(bold) or (b if bold else st)
+            s_ = {"label": lab, "open": big, "gem": gem, "rashi": rashi, "hadran": b, "dh": dh, "copen": copen, "src": gem,
+                  "clab": clab}.get(bold) or (b if bold else st)
             out.append(Word(w, s_, width(s_, w), t[2] if len(t) > 2 else None))
         return out
 
@@ -1086,14 +1093,50 @@ class Book:
         return units
 
     def rif_units(self, day_at):
-        """The Rif's passages; they run on with no break between them. Where a day begins,
-        its number goes in the margin beside the line (the passage's first word carries it)."""
+        """The Rif's passages; they run on with no break between them, but for the perakim,
+        as in the Rif of Vilna: "הדרן עלך ..." on a line of its own in the middle at the end
+        of a perek, and the next perek on a new line, its first word large. The masechet's
+        first word great, in a frame, on a line of its own. (self.rif_perek: passage that
+        begins a perek -> the הדרן of the one before it, or None when the Rif has it.)"""
         units, self.rif_day_at = [], dict(day_at)
+        perek = getattr(self, "rif_perek", {})
+        hst = Style(RIF_FONT, self.st_rif.size, True)
+
+        def hadran_unit(text):
+            ws = [Word(w, hst, width(hst, w)) for w in text.split()]
+            for w in ws:
+                w.line = "center"
+            return Unit("h", ws)
         for j, p in enumerate(self.rif):
             toks = p["tokens"]
-            if j in day_at and toks:
-                toks = [[toks[0][0], toks[0][1], f"יום {heb(day_at[j])}"]] + toks[1:]
-            units.append(Unit("p", self.words(toks, self.st_rif), j))
+            if j in perek and j > 0 and perek[j]:
+                units.append(hadran_unit(perek[j]))
+            ws = self.words(toks, self.st_rif)
+            # the Rif's own הדרן: its line in the middle
+            q = next((k for k, t in enumerate(toks) if norm(t[0]) == "הדרן"), None)
+            if q is not None and q > 0:
+                for w in ws[q:]:
+                    w.line = "center"
+            first = next((k for k, t in enumerate(toks) if t[1] not in ("gem", "src", "label")), None)
+            if j == 0 and first is not None:
+                # the masechet's first word: great, framed, alone in the middle
+                w = ws[first]
+                st = Style(RIF_FONT, self.st_rif.size * 2.6, True)
+                big = Word(w.text, st, width(st, w.text), w.ref)
+                big.line, big.framed = "center", True
+                # (a mark before it, as of the amud, goes on after it, in the text)
+                ws = [big] + ws[:first] + ws[first + 1:]
+            elif j in perek and first is not None:
+                # a perek begins: on a new line, its first word large
+                for w in ws[:first]:
+                    w.brk = False
+                ws[0].brk = True
+                w = ws[first]
+                st = Style(RIF_FONT, self.st_rif.size * 1.6, True)
+                ws[first] = Word(w.text, st, width(st, w.text), w.ref)
+            units.append(Unit("p", ws, j))
+        if getattr(self, "rif_end", None):
+            units.append(hadran_unit(self.rif_end))
         return units
 
     # -------------------------------------------------- the Rosh: two columns
@@ -1157,6 +1200,7 @@ class Book:
         self.total = t
         # the commentary as one run of words, entry after entry
         self.cwords, self.c_end_of_para = [], {}
+        self.c_ends, self.c_pmax = [], []
         # where a day begins in the commentary: its first entry on the day's passages of the
         # Rif (a day with no commentary on them has no mark in it)
         starts = sorted(getattr(self, "rif_day_at", {}).items())
@@ -1170,16 +1214,22 @@ class Book:
         for k, e in enumerate(self.comm):
             toks = e["tokens"]
             # the dibbur hamatchil in its own letters (square, bold), also where it is Rashi's
-            toks = [[t[0], "dh"] if q < e.get("dh_len", 0) and t[1] in (True, "rashi", "dh") else t
-                    for q, t in enumerate(toks)]
+            # (and a dibbur the comment comes to in its course, bold in the source: the same)
+            toks = [[t[0], "dh"] + list(t[2:]) if (q < e.get("dh_len", 0) and t[1] in (True, "rashi", "dh")) or t[1] is True
+                    else t for q, t in enumerate(toks)]
             if k in day_entry and toks:
                 toks = [[toks[0][0], toks[0][1], f"יום {heb(day_entry[k])}"]] + toks[1:]
-            if e.get("open"):
+            mis = [q for q in range(min(len(toks), e.get("dh_len", 0) + 1)) if norm(toks[q][0]) in ("מתני", "מתניתין")]
+            if mis:
+                # מתני' that opens a Mishna: great, beyond the dibbur's size
+                q = mis[0]
+                toks = toks[:q] + [[toks[q][0], "clab"] + list(toks[q][2:])] + toks[q + 1:]
+            elif e.get("open"):
                 # the word that opens a Mishna, large in square letters
                 k = next((i for i, t in enumerate(toks) if norm(t[0]) not in SKIP_DH), 0)
                 toks = toks[:k] + [[toks[k][0], "copen"] + list(toks[k][2:])] + toks[k + 1:]
             if e.get("gem"):
-                toks = [[f"[דף {e['gem']}]", "gem"]] + toks
+                toks = [[f"[{e['gem']}]", "gem"]] + toks
             ws = self.words(toks, self.st_comm)
             # a long comment (its dibbur and what it says to the next dibbur, LONG_COMM lines
             # or more across the commentary's half of the page) begins a line of its own
@@ -1189,6 +1239,37 @@ class Book:
             e["c_start"] = len(self.cwords)
             self.cwords.extend(ws)
             self.c_end_of_para[e["para"]] = len(self.cwords)
+        # where each comment belongs in the Rif: the word its dibbur hamatchil ends on (or,
+        # where it is not found, the end of its passage); the comments in their order, so a
+        # comment waits for those before it
+        unit_k = {u.ref: k for k, u in enumerate(units) if u.kind == "p"}
+        loose_of = {}
+        top = -1
+        for e in self.comm:
+            k = unit_k.get(e["para"])
+            at = None
+            if k is not None:
+                if k not in loose_of:
+                    loose_of[k] = [loose(w.text) for w in units[k].words]
+                ws = loose_of[k]
+                dh = [loose(t[0]) for t in e["tokens"][:e.get("dh_len", 0)] if norm(t[0]) not in SKIP_DH]
+                dh = [x for x in dh if x][:3]
+                if len(dh) >= 2:
+                    at = next((self.off[k] + q + len(dh) - 1 for q in range(len(ws) - len(dh) + 1)
+                               if ws[q:q + len(dh)] == dh), None)
+                if at is None:
+                    at = self.off[k] + len(units[k].words) - 1
+            top = max(top, at if at is not None else top)
+            self.c_pmax.append(top)
+        # the end of each comment's words
+        starts = [e["c_start"] for e in self.comm] + [len(self.cwords)]
+        self.c_ends = starts[1:]
+
+    def c_until(self, b):
+        """How many commentary words belong to the Rif before word b: the comments whose
+        dibbur (and every comment before them) is there."""
+        k = bisect.bisect_left(self.c_pmax, b)
+        return self.c_ends[k - 1] if k else 0
 
     def c_upto(self, para):
         """How many commentary words belong to passages up to para (inclusive)."""
@@ -1294,14 +1375,16 @@ class Book:
             done_unit = last_unit if self.off[last_unit] + len(u.words) <= b else last_unit - 1
             started = [x.ref for x in self.units[:last_unit + 1] if x.kind == "p"]
             completed = [x.ref for x in self.units[:done_unit + 1] if x.kind == "p"]
+            # may come: the comments on the passages begun; owed: those on the passages
+            # ended, and every comment whose dibbur is on the page or before it
             avail = self.c_upto(started[-1]) if started else cptr
-            req = self.c_upto(completed[-1]) if completed else cptr
+            req = max(self.c_upto(completed[-1]) if completed else cptr, self.c_until(b))
         else:
             avail = req = cptr
             back = [x.ref for x in self.units[:self.unit_at(a) if a < self.total else len(self.units)] if x.kind == "p"]
             if a < self.total and self.off[self.unit_at(a)] < a:
                 back = back[:-1]
-            avail = req = max(cptr, self.c_upto(back[-1]) if back else cptr)
+            avail = req = max(cptr, self.c_until(a))
         if r["at_end"]:
             avail = req = len(self.cwords)
         avail, req = max(avail, cptr), max(req, cptr)
@@ -1591,7 +1674,7 @@ class Book:
             l.h *= f
 
     # -------------------------------------------------- pages
-    def render(self, rosh_pages, rif_pages, xref, title_rosh, title_rif, first=1):
+    def render(self, rosh_pages, rif_pages, xref, title_rosh, title_rif, first=1, rif_off=None, day_at=None):
         out = []
         allp = rosh_pages + rif_pages
         for n, pg in enumerate(allp):
@@ -1606,7 +1689,12 @@ class Book:
             mr, ml = (R + self.pw) / 2, L / 2        # the middles of the margins
             right = f"{self.name} · {title_rosh if pg and pg['kind'] == 'rosh' else title_rif}"
             center = xref[n]
-            num = heb(first + n)
+            # the Rosh and the Rif each numbered from א
+            num = heb(first + n) if rif_off is None or n < rif_off else heb(n - rif_off + 1)
+            day = (day_at or {}).get(n)
+            if day is not None:
+                # a day begins on this page: its number in a grey box, with the day
+                num = f"יום {heb(day)} · {num}"
             if n % 2 == 1:
                 right, num = num, right
             if pg is None:
@@ -1614,6 +1702,8 @@ class Book:
                 out.append(page)
                 continue
             page.head = (right, center, num, self.head_style, T + self.hs * 1.3 * 0.8)
+            if day is not None:
+                page.head_box = "left" if n % 2 == 0 else "right"
             page.rules.append((L, T + self.hs * 1.3 + 1 * PT_PER_MM, R))
             top = T + self.head_h
             page.marks, page.boxes = [], []
@@ -1642,6 +1732,8 @@ class Book:
                         page.frames.append(Frame(col, R - k * (pg["colw"] + self.gap), top))
                     for l in col:
                         day_box(mr if k == 0 else ml, l, bst)
+                        if getattr(l, "note", None):
+                            page.marks.append((mr if k == 0 else ml, top + l.y + l.h * 0.72, l.note, mst))
             else:
                 for l in pg["text"]:
                     day_box(R - l.right + self.gap / 2 if l.right > 1 else mr, l, sst if l.right > 1 else bst)
@@ -1653,6 +1745,12 @@ class Book:
                         day_box(ml, l, bst)
                 if pg["text"]:
                     page.frames.append(Frame(pg["text"], R, top))
+                    for l in pg["text"]:
+                        if any(getattr(w, "framed", False) for w in l.words):
+                            # the masechet's first word: a frame round it
+                            cx = R - l.right - l.width / 2
+                            page.deco = getattr(page, "deco", []) + [
+                                (cx - l.natural / 2 - 10, top + l.y + 1, l.natural + 20, l.h - 2)]
                 cols = pg["cols"]
                 if cols and cols[0]:
                     page.frames.append(Frame(cols[0], R, top))
@@ -1732,6 +1830,68 @@ def day_plan(root):
         first[m] = n
         n += days[m]
     return days, first
+
+
+AMUD = re.compile(r"^([א-ת\"״׳']{1,6})(?:\s+ע(?:\"|''|״|')([אב])|([.:]))$")
+
+
+def amud_label(text):
+    """'ב ע"א', 'י"ט ע"ב', 'נה:' -> 'ב.', 'יט:', 'נה:'; or None."""
+    m = AMUD.match(text.strip())
+    if not m:
+        return None
+    side = m.group(3) or ("." if m.group(2) == "א" else ":")
+    return re.sub(r"[\"״׳']", "", m.group(1)) + side
+
+
+def set_refs(toks, start=0):
+    """The Gemara's amudim and references, as printed by Oz Vehadar: an amud of the
+    masechet in square brackets, without "דף" ([נה:], "gem"); a reference to another place
+    in round brackets, small, without "דף" ((גיטין ו.), "src"). Each becomes one word.
+    Tokens before start are left as they are (the dibbur hamatchil). -> new list."""
+    out, k = list(toks[:start]), start
+    while k < len(toks):
+        w = toks[k][0]
+        if w[:1] in "([":
+            close = ")" if w[0] == "(" else "]"
+            e = next((q for q in range(k, min(len(toks), k + 7)) if toks[q][0].rstrip(".,:;").endswith(close)), None)
+            if e is not None:
+                text = " ".join(t[0] for t in toks[k:e + 1])
+                end = text.rindex(close)
+                inner, trail = text[1:end].strip(), text[end + 1:]
+                words = inner.split()
+                rest = [x for x in words if x not in ("דף", "בדף", "ובדף")]
+                lab = amud_label(" ".join(rest)) if rest else None
+                extra = list(toks[k][2:])
+                if lab and (words[0] == "דף" or close == "]") and len(rest) <= 2:
+                    # an amud of this masechet
+                    out.append([f"[{lab}]{trail}", "gem"] + extra)
+                    k = e + 1
+                    continue
+                if close == ")" and len(rest) <= 5 and ("דף" in words or (rest and amud_label(rest[-1]))):
+                    if rest and amud_label(rest[-1]):
+                        rest[-1] = amud_label(rest[-1])
+                    out.append([f"({' '.join(rest)}){trail}", "src"] + extra)
+                    k = e + 1
+                    continue
+        out.append(toks[k])
+        k += 1
+    return out
+
+
+def daf_before_mishna(toks, most=5):
+    """An amud that begins a few words after מתני' is marked before it. In place."""
+    k = 0
+    while k < len(toks):
+        if toks[k][1] == "gem":
+            for j in range(k - 1, max(-1, k - most - 2), -1):
+                if toks[j][1] == "gem":
+                    break
+                if norm(toks[j][0]) in ("מתני", "מתניתין"):
+                    toks.insert(j, toks.pop(k))
+                    break
+        k += 1
+    return toks
 
 
 def plain_refs(toks):
@@ -1974,6 +2134,51 @@ def first_starts(rosh, rif, comm, ndays, al):
     return starts
 
 
+def perek_breaks(rosh, rif, al):
+    """Where the perakim begin in the Rif (it has no headings): at the passage of the first
+    siman of each perek of the Rosh, or after the Rif's own הדרן. -> ({passage: the הדרן of
+    the perek before it, or None where the Rif has its own}, the last הדרן or None)."""
+    if not rif or not rosh:
+        return {}, None
+    hadran, order = {}, []
+    for i, x in enumerate(rosh):
+        if x["perek"] not in order:
+            order.append(x["perek"])
+        for p in x["paras"]:
+            if p and p[0][1] == "hadran":
+                hadran[x["perek"]] = " ".join(t[0] for t in p)
+    own = {j + 1 for j, p in enumerate(rif) if any(norm(t[0]) == "הדרן" for t in p["tokens"])}
+    out, last = {}, 0
+    for k, name in enumerate(order[1:], 1):
+        i0 = next(i for i, x in enumerate(rosh) if x["perek"] == name)
+        j = al[i0]
+        # the Rif's own הדרן just before it decides the place
+        near = [x for x in own if j - 3 <= x <= j + 3]
+        if near:
+            j = min(near, key=lambda x: abs(x - j))
+        if j <= last or j >= len(rif):
+            continue
+        out[j] = None if j in own else hadran.get(order[k - 1])
+        last = j
+    end = None if any(norm(t[0]) == "הדרן" for t in rif[-1]["tokens"]) else hadran.get(order[-1])
+    return out, end
+
+
+def day_split(npages, ndays):
+    """The first page of each of ndays days over npages pages: the same number each day,
+    or one more for the last days (they take the pages left over). A day that gets no
+    page of its own (more days than pages) begins with the day before it: None."""
+    if not npages or not ndays:
+        return [None] * ndays
+    base, extra = divmod(npages, ndays)
+    out, at = [], 0
+    for d in range(ndays):
+        size = base + (1 if d >= ndays - extra else 0)
+        out.append(at if size else None)
+        at += size
+    return out
+
+
 def check_layout(book, rosh_pages, rif_pages):
     """What is wrong in the layout of a masechet: text beyond the bottom of the page, a
     page left with a hole at the bottom (not the last), a page of the Rif without the Rif
@@ -2046,21 +2251,6 @@ def check_layout(book, rosh_pages, rif_pages):
             twice = len(laid) - len({id(w) for w in laid})
             out.append({"kind": "words", "page": 0,
                         "detail": f"{name}: {lost} מילים חסרות, {twice} כפולות, או סדר שונה"})
-    # every day marked once in the Rosh, and (where there is a Rif) once in the Rif and once
-    # in the commentary
-    def days_in(words):
-        return [w.ref for w in words if isinstance(w.ref, str) and w.ref.startswith("יום ")]
-    rosh_days = days_in(w for pg in rosh_pages for c in pg["cols"] for l in c for w in l.words)
-    parts = [("הרא\"ש", rosh_days)]
-    if rif_pages:
-        parts.append(("הרי\"ף", days_in(w for pg in rif_pages for l in pg["text"] for w in l.words)))
-        if book.cwords:
-            parts.append(("המפרש", days_in(w for pg in rif_pages for c in pg["cols"] for l in c for w in l.words)))
-    for name, got in parts:
-        want = getattr(book, "comm_days", len(parts[0][1])) if name == "המפרש" else len(parts[0][1])
-        if len(got) != len(set(got)) or len(got) != want:
-            out.append({"kind": "days", "page": 0,
-                        "detail": f"{name}: {len(got)} סימוני ימים ({len(set(got))} שונים) מול {len(parts[0][1])} ברא\"ש"})
     if rosh_pages:
         same("הרא\"ש", [w for pg in rosh_pages for c in pg["cols"] for l in c if l.unit.kind == "p" for w in l.words],
              [w for u in book.rosh_units_list if u.kind == "p" for w in u.words])
@@ -2081,15 +2271,26 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     al = align(rosh, rif) if rif and rosh else [0] * len(rosh)
     if rif and rosh:
         report.append(f"ברא\"ש {complete_sentences(rosh, rif, al)} מילים בהשלמת משפטים")
-        rif_page_marks(rosh, rif, al)
     gem = sources(root, m)["gemara"]
     if rosh and gem:
         report.append(f"ברא\"ש {gemara_marks(rosh, read(gem[0]))} סימני דפי הגמרא")
     issues = fix(rosh, rif, comm, al, found) if fix else []
-    starts = day_starts(rosh, rif, comm, ndays, al)
-    rosh_days = {k: first_day + d for d, (k, _) in enumerate(starts)}
-    rif_days = {j: first_day + d for d, (_, j) in enumerate(starts)} if rif else {}
-    book = Book(m, rosh, rif, comm, comm_name, page, **(sizes or {}))
+    # the amudim and the references as Oz Vehadar prints them ([נה:], (גיטין ו.))
+    for x in rosh:
+        x["paras"] = [daf_before_mishna(set_refs(p)) for p in x["paras"]]
+    for p in rif:
+        p["tokens"] = daf_before_mishna(set_refs(p["tokens"]))
+    for e in comm:
+        e["tokens"] = daf_before_mishna(set_refs(e["tokens"], e.get("dh_len", 0)))
+    # the days go by whole pages (after the layout): no marks in the text
+    rosh_days, rif_days = {}, {}
+    perek_at, perek_end = perek_breaks(rosh, rif, al)
+
+    def new_book():
+        b = Book(m, rosh, rif, comm, comm_name, page, **(sizes or {}))
+        b.rif_perek, b.rif_end = perek_at, perek_end
+        return b
+    book = new_book()
     rosh_pages = book.layout_rosh(book.rosh_units(rosh_days)) if rosh else []
     rif_pages = book.layout_rif(book.rif_units(rif_days)) if rif else []
     # a comment the Ran gives pages before (or after) the passage of the Rif it explains,
@@ -2103,7 +2304,7 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
             k = next((q for q, x in enumerate(comm) if x["para"] > e["para"]), len(comm))
             comm.insert(k, e)
         report.append(f"ב{comm_name} {len(far)} דיבורים הועברו ליד הקטע שלהם ברי\"ף")
-        book = Book(m, rosh, rif, comm, comm_name, page, **(sizes or {}))
+        book = new_book()
         rosh_pages = book.layout_rosh(book.rosh_units(rosh_days)) if rosh else []
         rif_pages = book.layout_rif(book.rif_units(rif_days)) if rif else []
     # the Rif from a left-hand page (an odd one): a blank page after the Rosh when it ends on one
@@ -2120,7 +2321,21 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     for n, pg in enumerate(rif_pages):
         for l in pg["text"]:
             for ref in getattr(l, "refs", [l.unit.ref]):
-                para_page.setdefault(ref, off + n)
+                para_page.setdefault(ref, n)          # the Rif's own numbering, from א
+    # in the Rosh's margin, by the line where a siman begins: the page of the Rif where its
+    # passage is (when it is not the page named before it)
+    last_target = None
+    for pg in rosh_pages:
+        for col in pg["cols"]:
+            for l in col:
+                u = l.unit
+                if u.kind != "p" or not u.first or getattr(u, "_noted", False) or not rif:
+                    continue
+                u._noted = True
+                t = para_page.get(al[u.ref])
+                if t is not None and t != last_target:
+                    l.note = f"רי״ף עמ' {heb(t + 1)}"
+                    last_target = t
     xref, amud = [], None
     for n, pg in enumerate(rosh_pages):
         refs = [l.unit.ref for col in pg["cols"] for l in col if l.unit.kind == "p"]
@@ -2129,7 +2344,7 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         target = para_page.get(al[s]) if (s is not None and rif) else None
         # the amudim of the Gemara the page is on: the one it opens in, to the last marked
         ws = [w.text for col in pg["cols"] for l in col for w in l.words]
-        seen = [w[4:-1] for w in ws if GEM_MARK.match(w)]
+        seen = [w[1:-1] for w in ws if GEM_MARK.match(w)]
         opens = seen and any(GEM_MARK.match(w) for w in ws[:2])    # a mark at the head of the page
         first = seen[0] if (opens or not amud) and seen else amud
         if seen:
@@ -2157,19 +2372,21 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         else:
             xref.append(comm_name)
     title_rif = f"רי\"ף ו{comm_name}" if comm_name else "רי\"ף"
-    pages = book.render(rosh_pages, pad + rif_pages, xref, "פסקי הרא\"ש", title_rif)
-    report.append(f"{m}: {len(rosh_pages)} עמודי רא\"ש, {len(rif_pages)} עמודי רי\"ף, ימים {heb(first_day)}–{heb(first_day + len(starts) - 1)}")
-    # where every day begins: its page (as the head numbers it) in the Rosh and in the Rif
-    off = len(rosh_pages) + len(pad)
-    day_pages = {}
-    for part, pgs, base, get in (("rosh", rosh_pages, 0, lambda pg: [l for c in pg["cols"] for l in c]),
-                                 ("rif", rif_pages, off, lambda pg: pg["text"])):
-        for n, pg in enumerate(pgs):
-            for l in get(pg):
-                for w in l.words:
-                    if isinstance(w.ref, str) and w.ref.startswith("יום "):
-                        day_pages.setdefault(w.ref, {})[part] = heb(base + n + 1)
-    info_days = [(d, day_pages.get(f"יום {heb(d)}", {})) for d in range(first_day, first_day + len(starts))]
+    # the days, by whole pages: the Rosh's pages shared out among the masechet's days, and
+    # the Rif's (each day the same number, or one more: the extra pages go to the last days)
+    rosh_start, rif_start = day_split(len(rosh_pages), ndays), day_split(len(rif_pages), ndays)
+    day_at = {}
+    for d in range(ndays):
+        if rosh_start[d] is not None:
+            day_at[rosh_start[d]] = first_day + d
+        if rif_pages and rif_start[d] is not None:
+            day_at[off + rif_start[d]] = first_day + d
+    pages = book.render(rosh_pages, pad + rif_pages, xref, "פסקי הרא\"ש", title_rif, rif_off=off, day_at=day_at)
+    report.append(f"{m}: {len(rosh_pages)} עמודי רא\"ש, {len(rif_pages)} עמודי רי\"ף, ימים {heb(first_day)}–{heb(first_day + ndays - 1)}")
+    info_days = [(first_day + d, {"rosh": heb(rosh_start[d] + 1) if rosh_start[d] is not None else "",
+                                  "rif": heb(rif_start[d] + 1) if rif_pages and rif_start[d] is not None else ""})
+                 for d in range(ndays)]
+    starts = range(ndays)
     info = {"name": m, "comm_name": comm_name, "rosh_pages": len(rosh_pages), "rif_pages": len(rif_pages),
             "day_pages": info_days,
             "first_day": first_day, "last_day": first_day + len(starts) - 1, "issues": issues,

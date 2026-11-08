@@ -193,7 +193,7 @@ def cover_page(ms, n_pages, volume, colour=COVER, page=B5):
     """The whole cover of a file (front, spine and back) as one page."""
     from . import design
     W, H, paint = design.gate_cover(page, n_pages, name_items(ms, 18, rosh=0.9), ["הלכות", "רב אלפס", "div", ("פסקי", 0.9), ("הרא״ש", 0.9)],
-                                    ms, "כרך " + heb(volume), design.PALETTES[colour], leaf=LEAF)
+                                    ms, heb(volume), design.PALETTES[colour], leaf=LEAF)
     p = Page(W, H)
     p.paint = [paint]
     return p

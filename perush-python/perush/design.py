@@ -1112,13 +1112,13 @@ PALETTES = {
                       shade=("#ffffff", "#a3c0de"), shadow="#6b8bb0", ground="#a9cbe6"),
     "שמנת ושחור": dict(line="#151515", leaf="#a88a5c", tint="#efe3c8", ink="#111111", paper="#fbf6ea",
                        shade=("#fffaf0", "#e0c99a"), shadow="#8a7a5e", ground="#efe3c8"),
-    "שמנת": dict(line="#5b4123", leaf="#a88a5c", tint="#efe3c8", ink="#3a2814", paper="#fbf6ea",
+    "שמנת": dict(line="#5b4123", leaf="#c4ab82", tint="#efe3c8", ink="#3a2814", paper="#fbf6ea",
                  shade=("#fffaf0", "#e0c99a"), shadow="#b39a6e", ground="#efe3c8"),
 }
 
 
 def gate_page(w, h, items, foot_title, foot_lines, pal=GREY, sides=(("אמונת", "עתיך", "חוסן"), ("ישועות", "חכמת", "ודעת")),
-              feet=(("זרעים", "מועד", "נשים"), ("נזיקין", "קדשים", "טהרות")), margin=24.0, dedication=()):
+              feet=(("זרעים", "מועד", "נשים"), ("נזיקין", "קדשים", "טהרות")), margin=24.0, dedication=(), ornament=False):
     """The gate of the Oz Vehadar Shas, w by h points from (0, 0): a frame of filigree, a
     great round arch, pillars on both sides with the words of the verse at the head, a
     vine down them and the sedarim at the foot, and a little gate of twisted columns and
@@ -1287,6 +1287,26 @@ def gate_page(w, h, items, foot_title, foot_lines, pal=GREY, sides=(("אמונת
                 text_c(p, mid, yy, t, st, ink)
         top, bot = spring - rx * 0.45, panel_bot - 16 - ded_h
         y0 = top + max(0.0, (bot - top - y) / 2) - 10
+        if ornament and bot - (top + y) > 90:
+            # the name higher, and in the opening under it a medallion, light
+            y0 = top + 4
+            oy1, oy2 = y0 + y + 18, bot - 6
+            rr = min((oy2 - oy1) / 2, w_in * 0.3)
+            cy = (oy1 + oy2) / 2
+            p.setBrush(Qt.NoBrush)
+            p.setPen(pen(line, 0.9))
+            p.drawEllipse(QPointF(mid, cy), rr, rr)
+            p.setPen(pen(pal["leaf"], 0.5))
+            p.drawEllipse(QPointF(mid, cy), rr - 4, rr - 4)
+            p.drawEllipse(QPointF(mid, cy), rr - 13, rr - 13)
+            n = max(8, int(2 * math.pi * (rr - 8.5) / 8))
+            for k in range(n):
+                a = 2 * math.pi * k / n
+                p.drawEllipse(QPointF(mid + math.cos(a) * (rr - 8.5), cy + math.sin(a) * (rr - 8.5)), 1.6, 1.6)
+            rosette(p, mid, cy, rr - 19, pal["leaf"], 0.6, 16)
+            rosette(p, mid, cy, (rr - 19) * 0.45, line, 0.5, 8)
+            for f in (1, -1):
+                fleuron(p, mid - f * (rr + 16), cy, 13, pal["leaf"], 0.6, f * -90)
         for kind, yy, text, st in ops:
             if kind == "shaded":
                 shaded(p, mid, y0 + yy, text, st, line, maxw=w_in - 10, shade=pal["shade"], shadow=pal["shadow"])
@@ -1307,7 +1327,7 @@ def gate_cover(trim, pages, items, spine_lines, masechtot, volume, pal, bleed=3.
     sw = spine_width(pages, leaf) * PT_PER_MM
     b = bleed * PT_PER_MM
     W, H = 2 * tw + sw + 2 * b, th + 2 * b
-    front = gate_page(tw, th, items, "", [(volume, 15)], pal, margin=20.0)
+    front = gate_page(tw, th, items, "", [(volume, 22)], pal, margin=20.0, ornament=True)
 
     def paint(p):
         p.save()

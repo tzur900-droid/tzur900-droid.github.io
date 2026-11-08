@@ -20,6 +20,9 @@ def draw_line(p, line, x_right, top):
     if line.align == "center":
         x = x_right - (line.width - (total + gap * (n - 1))) / 2
     m = metrics(line.base)
+    if line.align == "center":
+        # a line of its own with great letters: placed by them
+        m = metrics(max((w.style for w in ws), key=lambda st: st.size))
     nominal = line.base.size * 1.0
     baseline = top + (line.h - (m.ascent() + m.descent())) / 2 + m.ascent()
     if line.h > nominal * 3:  # never float a word in a very tall slot
@@ -39,16 +42,25 @@ def draw_page(p, page):
         paint(p)
     if page.head:
         right, center, left, st, base = page.head
+        # the head spans the text block (its rule): the margins differ on the two sides
         m = page.rules[0][0] if page.rules else 0
-        R = page.width - m
+        R = page.rules[0][2] if page.rules else page.width - m
         bold = st.with_bold(True)
         from .textlayout import width
+        box = getattr(page, "head_box", None)
+        if box:
+            # a day begins on this page: its number (with the day) in a grey box
+            t = right if box == "right" else left
+            tw = width(bold, t)
+            x0 = R - tw if box == "right" else m
+            p.fillRect(QRectF(x0 - 3, base - st.size * 0.95, tw + 6, st.size * 1.35), QColor("#d6d6d6"))
+            p.setPen(QColor("black"))
         if right:
             p.setFont(qfont(bold))
             p.drawText(QPointF(R - width(bold, right), base), right)
         if center:
             p.setFont(qfont(st))
-            p.drawText(QPointF(page.width / 2 - width(st, center) / 2, base), center)
+            p.drawText(QPointF((m + R) / 2 - width(st, center) / 2, base), center)
         if left:
             p.setFont(qfont(bold))
             p.drawText(QPointF(m, base), left)
@@ -75,6 +87,22 @@ def draw_page(p, page):
         p.drawText(QPointF(x - _w(small, word) / 2, yc - h / 2 + st.size * 0.3 + small.size * 0.85), word)
         p.setFont(qfont(st))
         p.drawText(QPointF(x - _w(st, num) / 2, yc + h / 2 - st.size * 0.45), num)
+    for x, y, w, h in getattr(page, "deco", []):
+        # a frame for a great opening word: a double line, little scrolls at its sides
+        pen2 = QPen(QColor("black"))
+        pen2.setWidthF(1.1)
+        p.setPen(pen2)
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(QRectF(x, y, w, h))
+        pen2.setWidthF(0.45)
+        p.setPen(pen2)
+        p.drawRect(QRectF(x + 2.5, y + 2.5, w - 5, h - 5))
+        from .design import rosette
+        for cx, cy in ((x, y), (x + w, y), (x, y + h), (x + w, y + h)):
+            p.setBrush(QColor("white"))
+            p.drawEllipse(QPointF(cx, cy), 3.2, 3.2)
+            rosette(p, cx, cy, 3, "black", 0.35, 6)
+        p.setPen(QColor("black"))
     for fr in page.frames:
         for line in fr.lines:
             draw_line(p, line, fr.x_right - line.right, fr.top + line.y)

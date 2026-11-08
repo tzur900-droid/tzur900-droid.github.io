@@ -128,14 +128,31 @@ def break_lines(words, base, lh, width_at, y0=0.0, align="justify", tight=1.0):
     i, n, y = 0, len(words), y0
     while i < n:
         right, w = width_at(y)
+        if getattr(words[i], "line", None) == "center":
+            # a line of its own, centred (a heading in the run of the text: הדרן, the
+            # masechet's first word); as tall as its letters need
+            cur, nat, j = [words[i]], words[i].w, i + 1
+            while j < n and getattr(words[j], "line", None) == "center" and nat + sp + words[j].w <= w + 0.01:
+                nat += sp + words[j].w
+                cur.append(words[j])
+                j += 1
+            h = max(lh, max(x.style.size for x in cur) * 1.3)
+            lines.append(Line(cur, right, w, nat, h, base, "center", True, y))
+            if lines[-2:-1]:
+                lines[-2].last = True
+            y += h
+            i = j
+            continue
         cur = [words[i]]
         nat = words[i].w
         j = i + 1
-        while j < n and nat + sp + words[j].w <= w + 0.01:
+        while (j < n and nat + sp + words[j].w <= w + 0.01 and not getattr(words[j], "brk", False)
+               and getattr(words[j], "line", None) != "center"):
             nat += sp + words[j].w
             cur.append(words[j])
             j += 1
-        lines.append(Line(cur, right, w, nat, lh, base, align, j >= n, y))
+        end = j >= n or getattr(words[j], "brk", False) or getattr(words[j], "line", None) == "center"
+        lines.append(Line(cur, right, w, nat, lh, base, align, end, y))
         y += lh
         i = j
     return lines
