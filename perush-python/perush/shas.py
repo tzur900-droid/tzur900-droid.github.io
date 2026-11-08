@@ -1382,7 +1382,9 @@ class Book:
             # may come: the comments on the passages begun; owed: those on the passages
             # ended, and every comment whose dibbur is on the page or before it
             avail = self.c_upto(started[-1]) if started else cptr
-            req = max(self.c_upto(completed[-1]) if completed else cptr, self.c_until(b))
+            req = self.c_upto(completed[-1]) if completed else cptr
+            if getattr(self, "strict", True):
+                req = max(req, self.c_until(b))
         else:
             avail = req = cptr
             back = [x.ref for x in self.units[:self.unit_at(a) if a < self.total else len(self.units)] if x.kind == "p"]
@@ -1472,6 +1474,71 @@ class Book:
         text, t = self.text_lines(a, b, wa, t0)
         return cs, h, text, t, t0
 
+    def rif_page(self, a, cptr, min_text):
+        """The page of the Rif from word a with the commentary from cptr (not yet finished)."""
+        lo, hi, g = a + 1, min(self.total, a + 800), 0
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if self.compose(a, mid, cptr)["fits"]:
+                g, lo = mid, mid + 1
+            else:
+                hi = mid - 1
+        if g:
+            x, miss = g + 1, 0
+            while x <= min(self.total, g + 40) and miss < 8:
+                if self.compose(a, x, cptr)["fits"]:
+                    g, miss = x, 0
+                else:
+                    miss += 1
+                x += 1
+        r = self.compose(a, g, cptr) if g else None
+        if r is None or r["th"] - r.get("t0", 0.0) < min_text and not r["at_end"]:
+            # a commentary longer than a page (or owed for passages already set): a few
+            # lines of the Rif in the middle, the commentary around them, and the rest of
+            # it runs on; never a page of commentary alone while the Rif goes on
+            x = a + 1
+            narrow = lambda y: (0, self.W - 2 * (self.cw + self.gap))
+            while x < self.total and self.text_lines(a, x, narrow)[1] < min_text:
+                x += 1
+            # and its last line full: the words that still go on it
+            n0 = len(self.text_lines(a, x, narrow)[0])
+            while x < self.total and len(self.text_lines(a, x + 1, narrow)[0]) == n0:
+                x += 1
+            r = self.compose(a, x, cptr)
+            r["cnext"] = cptr + r["n"]
+        if not r["at_end"] and r["b"] > a:
+            # end the page at the end of a passage (the Rif's colon) when it stays full
+            for k in range(self.unit_at(r["b"] - 1), -1, -1):
+                e = self.off[k] + len(self.units[k].words)
+                if e > r["b"]:
+                    continue
+                if e <= a or r["b"] - e > 70:
+                    break
+                if self.units[k].kind != "p":
+                    continue
+                q = self.compose(a, e, cptr)
+                # (not a page of a line or two of the Rif)
+                if q["fits"] and self.full(q) and q["th"] - q.get("t0", 0.0) >= min_text:
+                    r = q
+                    break
+        if r["mode"] == "short" and not r["at_end"] and self.H - r["total"] > 1.5 * self.lh_rif:
+            # the Rif widened under a short commentary and still leaves a hole: rather a
+            # little less of the Rif, with the commentary filling the page around it
+            x = r["b"] - 1
+            while x > a + 1:
+                q = self.compose(a, x, cptr)
+                if q["fits"] and q["mode"] == "long" and q["th"] - q.get("t0", 0.0) >= min_text:
+                    r = q
+                    break
+                x -= 3
+        r = self.end_on_line(r)
+        r = self.fill_below(r)
+        return r
+
+    def hole(self, r):
+        lines = list(r["text"]) + [l for c in r["cols"] for l in c]
+        return self.H - max((l.y + l.h for l in lines), default=0.0)
+
     def layout_rif(self, units):
         self.rif_flow(units)
         pages, a, cptr, guard = [], 0, 0, 0
@@ -1485,63 +1552,15 @@ class Book:
                 pages.append(self.finish(r))
                 cptr = r["cnext"]
                 continue
-            lo, hi, g = a + 1, min(self.total, a + 800), 0
-            while lo <= hi:
-                mid = (lo + hi) // 2
-                if self.compose(a, mid, cptr)["fits"]:
-                    g, lo = mid, mid + 1
-                else:
-                    hi = mid - 1
-            if g:
-                x, miss = g + 1, 0
-                while x <= min(self.total, g + 40) and miss < 8:
-                    if self.compose(a, x, cptr)["fits"]:
-                        g, miss = x, 0
-                    else:
-                        miss += 1
-                    x += 1
-            r = self.compose(a, g, cptr) if g else None
-            if r is None or r["th"] - r.get("t0", 0.0) < min_text and not r["at_end"]:
-                # a commentary longer than a page (or owed for passages already set): a few
-                # lines of the Rif in the middle, the commentary around them, and the rest of
-                # it runs on; never a page of commentary alone while the Rif goes on
-                x = a + 1
-                narrow = lambda y: (0, self.W - 2 * (self.cw + self.gap))
-                while x < self.total and self.text_lines(a, x, narrow)[1] < min_text:
-                    x += 1
-                # and its last line full: the words that still go on it
-                n0 = len(self.text_lines(a, x, narrow)[0])
-                while x < self.total and len(self.text_lines(a, x + 1, narrow)[0]) == n0:
-                    x += 1
-                r = self.compose(a, x, cptr)
-                r["cnext"] = cptr + r["n"]
-            if not r["at_end"] and r["b"] > a:
-                # end the page at the end of a passage (the Rif's colon) when it stays full
-                for k in range(self.unit_at(r["b"] - 1), -1, -1):
-                    e = self.off[k] + len(self.units[k].words)
-                    if e > r["b"]:
-                        continue
-                    if e <= a or r["b"] - e > 70:
-                        break
-                    if self.units[k].kind != "p":
-                        continue
-                    q = self.compose(a, e, cptr)
-                    # (not a page of a line or two of the Rif)
-                    if q["fits"] and self.full(q) and q["th"] - q.get("t0", 0.0) >= min_text:
-                        r = q
-                        break
-            if r["mode"] == "short" and not r["at_end"] and self.H - r["total"] > 1.5 * self.lh_rif:
-                # the Rif widened under a short commentary and still leaves a hole: rather a
-                # little less of the Rif, with the commentary filling the page around it
-                x = r["b"] - 1
-                while x > a + 1:
-                    q = self.compose(a, x, cptr)
-                    if q["fits"] and q["mode"] == "long" and q["th"] - q.get("t0", 0.0) >= min_text:
-                        r = q
-                        break
-                    x -= 3
-            r = self.end_on_line(r)
-            r = self.fill_below(r)
+            r = self.rif_page(a, cptr, min_text)
+            if not r["at_end"] and self.hole(r) > 3 * self.lh_comm:
+                # the comments on the next words of the Rif are too long for it: rather the
+                # rule of the passages (their comments when they end) than a hole here
+                self.strict = False
+                r2 = self.rif_page(a, cptr, min_text)
+                self.strict = True
+                if self.hole(r2) < self.hole(r):
+                    r = r2
             pages.append(self.finish(r))
             a, cptr = r["b"], r["cnext"]
         return pages
