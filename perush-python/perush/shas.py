@@ -64,7 +64,8 @@ def tokens(line, bold_tags=True):
             note = []
         elif w == "\x06":
             if note:
-                out.append(["(" + " ".join(note) + ")", "src"])
+                # a star in the text, the note itself small in the margin
+                out.append(["*", "star", "הגה:" + " ".join(note)])
             note = None
         elif note is not None:
             note.append(w)
@@ -191,8 +192,9 @@ def mark_labels(paras):
     start of a passage or after a full stop), are set in their own font."""
     for toks in paras:
         for i, t in enumerate(toks):
-            if norm(t[0]) in ("גמ", "גמרא", "מתני", "מתניתין") and (
-                    i == 0 or re.search(r"[:.]$", toks[i - 1][0])):
+            # only where a part begins: at the start, or after a colon (not a full stop)
+            prev = next((toks[j][0] for j in range(i - 1, -1, -1) if not re.match(r"^[\[(]", toks[j][0])), None)
+            if norm(t[0]) in ("גמ", "גמרא", "מתני", "מתניתין") and (prev is None or re.search(r":$", prev)):
                 t[1] = "label"
 
 
@@ -1199,7 +1201,7 @@ COMM_HEAD = {"נימוקי יוסף": ("נמוקי", "יוסף"), 'ר"ן': ("ר�
              "רבינו יהונתן": ("רבינו", "יהונתן")}
 COMM_AHEAD = 12     # words of the Rif after a page whose comments may still come on it
 COMM_TIGHT = 0.8    # how far the commentary's spaces may close
-ORDINALS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שביעי", "שמיני", "תשיעי", "עשירי",
+ORDINALS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "ששי", "שביעי", "שמיני", "תשיעי", "עשירי",
             "אחד עשר", "שנים עשר", "שלשה עשר", "ארבעה עשר", "חמשה עשר", "ששה עשר", "שבעה עשר",
             "שמונה עשר", "תשעה עשר", "עשרים", "עשרים ואחד", "עשרים ושנים", "עשרים ושלשה", "עשרים וארבעה"]
 RIF_FONT = "Drugulin CLM"    # Culmus (GPL); the one face it has is a book weight
@@ -1258,7 +1260,7 @@ class Book:
         out = []
         for t in toks:
             w, bold = t[0], t[1]
-            s_ = {"label": lab, "open": big, "gem": gem, "rashi": rashi, "hadran": b, "dh": dh, "copen": copen, "src": gem,
+            s_ = {"label": lab, "open": big, "gem": gem, "rashi": rashi, "hadran": b, "dh": dh, "copen": copen, "src": gem, "star": Style("Frank Ruhl Libre", st.size * 0.7, True),
                   "clab": clab}.get(bold) or (b if bold else st)
             out.append(Word(w, s_, width(s_, w), t[2] if len(t) > 2 else None))
         return out
@@ -1608,7 +1610,7 @@ class Book:
             # may come: the comments on the passages begun; owed: those on the passages
             # ended, and every comment whose dibbur is on the page or before it
             # (but not those on words further on than a line or two after the page)
-            avail = min(self.c_upto(started[-1]) if started else cptr, self.c_until(b + COMM_AHEAD))
+            avail = self.c_upto(started[-1]) if started else cptr
             req = self.c_upto(completed[-1]) if completed else cptr
             if getattr(self, "strict", True):
                 req = max(req, self.c_until(b))
@@ -1760,7 +1762,7 @@ class Book:
                     break
                 x -= 3
         r = self.end_on_line(r)
-        r = self.fill_below(r)
+        # (no commentary under a Rif that widened over the page: never Rif between commentary)
         return r
 
     def hole(self, r):
@@ -2028,8 +2030,34 @@ class Book:
 
             mst = Style("Frank Ruhl Libre", 7.5, True)
 
+            nst = Style("Frank Ruhl Libre", 6.2)
+            outer_x0, outer_x1 = (0.0, L) if n % 2 == 0 else (R, self.pw)
+            note_y = [0.0]
+
+            def margin_note(l, text):
+                # an editor's note: small, in the outer margin by its line, a few lines if need be
+                w_ = outer_x1 - outer_x0 - 4 * PT_PER_MM
+                xc = (outer_x0 + outer_x1) / 2
+                y = max(top + l.y + l.h * 0.72, note_y[0])
+                line, lines = "", []
+                for wd in ("* " + text).split():
+                    t = (line + " " + wd).strip()
+                    if line and width(nst, t) > w_:
+                        lines.append(line)
+                        line = wd
+                    else:
+                        line = t
+                if line:
+                    lines.append(line)
+                for t in lines:
+                    page.marks.append((xc, y, t, nst))
+                    y += nst.size * 1.25
+                note_y[0] = y + nst.size * 0.4
+
             def day_box(x, l, st):
-                labs = [w.ref for w in l.words if isinstance(w.ref, str)]
+                for lab in [w.ref for w in l.words if isinstance(w.ref, str) and w.ref.startswith("הגה:")]:
+                    margin_note(l, lab[4:])
+                labs = [w.ref for w in l.words if isinstance(w.ref, str) and not w.ref.startswith("הגה:")]
                 days = [lab for lab in labs if lab.startswith("יום ")]
                 for lab in days:
                     word, num_ = lab.split(" ", 1)
@@ -2320,6 +2348,16 @@ def load_masechet(root, m, found=None):
             comm[0]["tokens"] = comm[0]["tokens"][k:]
         else:
             comm[0]["tokens"] = comm[0]["tokens"][1:]
+    # the commentary's own heads of perakim ("פרק ראשון"): the page's head says it
+    ords = {norm(w) for w in ORDINALS}
+    for e in comm:
+        t = e["tokens"]
+        if len(t) >= 2 and norm(t[0][0]) == "פרק" and norm(t[1][0]) in ords:
+            k = 2
+            while k < len(t) and norm(t[k][0]) in ords | {"ואחד", "עשר", "ושנים"}:
+                k += 1
+            e["tokens"] = t[k:]
+    comm = [e for e in comm if e["tokens"]]
     if comm:
         link_comm(comm, rif)
     mark_labels([t for x in rosh for t in x["paras"]])
@@ -2805,17 +2843,15 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     prev = None
     for n, pg in enumerate(rif_pages):
         refs = [r for l in pg["text"] for r in getattr(l, "refs", [l.unit.ref]) if l.unit.kind == "p"]
-        amuds = sorted({(rif[j]["amud_n"], rif[j]["amud"]) for j in refs if rif[j].get("amud")})
-        if amuds:
-            # a passage that brings a sugya from a far daf does not stretch the head: only
-            # the amudim near the page's middle one (two dafim each way)
-            mid = amuds[len(amuds) // 2][0]
-            amuds = [a for a in amuds if abs(a[0] - mid) <= 4]
-            first, last = amuds[0][1], amuds[-1][1]
-            prev = last
-            sub = amudim(first, last)
-        else:
-            sub = amudim(prev, prev) if prev else ""
+        # the amudim by the Rif's own marks of the Gemara's pages ([ב.]) on the page: from the
+        # one it is in at its head to the last marked on it
+        ws = [w.text for l in pg["text"] for w in l.words]
+        seen = [w[1:-1] for w in ws if GEM_MARK.match(w)]
+        opens = seen and any(GEM_MARK.match(w) for w in ws[:2])
+        first = seen[0] if (opens or not prev) and seen else prev
+        last = seen[-1] if seen else prev
+        prev = last
+        sub = amudim(first, last) if first else ""
         j0 = next((j for j in refs if j is not None), None)
         k = bisect.bisect_right(starts_of_perek, j0) if j0 is not None else None
         xref.append(((perek_title(k) + " " + m) if rosh else m, sub))
