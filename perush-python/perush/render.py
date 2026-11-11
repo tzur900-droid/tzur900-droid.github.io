@@ -66,7 +66,8 @@ def draw_oz_head(p, page, h):
     if h["sub"]:
         p.setFont(qfont(sub))
         p.drawText(QPointF(mid - width(sub, h["sub"]) / 2, h["sub_base"]), h["sub"])
-    bold = st.with_bold(True)
+    # the page's number great and bold, as in Oz Vehadar
+    bold = h.get("numst") or st.with_bold(True)
     num = h["num"]
     nw = width(bold, num)
     right_word, left_word = h["work"]
@@ -84,7 +85,7 @@ def draw_oz_head(p, page, h):
             ww = width(st, word)
             p.drawText(QPointF((a + c) / 2 - ww / 2, base), word)
     if h["box"]:
-        p.fillRect(QRectF(xn - 3, base - st.size * 0.95, nw + 6, st.size * 1.35), QColor("#d6d6d6"))
+        p.fillRect(QRectF(xn - 3, base - bold.size * 0.95, nw + 6, bold.size * 1.3), QColor("#d6d6d6"))
     p.setPen(QColor("black"))
     p.setFont(qfont(bold))
     p.drawText(QPointF(xn, base), num)

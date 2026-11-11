@@ -1325,6 +1325,23 @@ class Book:
                     col.pop()
                 cols.append(col)
             last = i >= n
+            if last and len(cols) == 2:
+                # the last page: both columns the same length (the right one a line more at most)
+                flat_ = cols[0] + cols[1]
+                tot = sum(l.h for l in flat_)
+                # the cut that leaves the right column as long as the left or a little longer
+                best, acc = None, 0.0
+                for k in range(len(flat_) + 1):
+                    if k:
+                        acc += flat_[k - 1].h
+                    if acc >= tot - acc - EPS and acc <= self.H + EPS and tot - acc <= self.H + EPS:
+                        best = k
+                        break
+                k = best if best is not None else len(cols[0])
+                # (not a heading alone at the foot of the right column)
+                while 0 < k < len(flat_) and flat_[k - 1].unit.kind != "p":
+                    k -= 1
+                cols = [flat_[:k], flat_[k:]]
             for col in cols:
                 tot = sum(l.h for l in col)
                 spare = self.H - tot
@@ -1907,7 +1924,7 @@ class Book:
             base = T + big.size * 0.9
             page.head = (right, title, num, self.head_style, base)
             page.oz_head = {
-                "st": self.head_style, "big": big, "subst": Style("Frank Ruhl Libre", self.hs * 0.95),
+                "st": self.head_style, "big": big, "numst": Style(RIF_FONT, self.hs * 1.7, True), "subst": Style("Frank Ruhl Libre", self.hs * 0.95),
                 "title": title, "sub": sub, "base": base, "sub_base": base + self.hs * 1.15,
                 "num": heb(first + n) if rif_off is None or n < rif_off else heb(n - rif_off + 1),
                 # the work's name on the two sides of the perek: רבינו ... אשר
@@ -2677,7 +2694,8 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         return (nm + " " if nm else "") + "פרק " + ORDINALS[k] if k < len(ORDINALS) else nm
 
     def amudim(a, b):
-        return f"[{a}]" if a == b else f"[{a} - {b}]"
+        # with the masechet's name, as in Oz Vehadar: [יבמות ב. - ג:]
+        return f"[{m} {a}]" if a == b else f"[{m} {a} - {b}]"
     xref, amud = [], None
     for n, pg in enumerate(rosh_pages):
         refs = [l.unit.ref for col in pg["cols"] for l in col if l.unit.kind == "p"]
