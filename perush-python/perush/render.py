@@ -36,15 +36,24 @@ def draw_line(p, line, x_right, top):
             chars = sum(len(w.text) for w in ws)
             track = min(line.base.size * 0.1, (line.width - total - (n - 1) * 1.8 * sp) / max(1, chars))
             gap = (line.width - total - track * chars) / (n - 1)
+    from .textlayout import width as _wd
     for w in ws:
         ww = w.w + track * len(w.text)
         x -= ww
-        f = qfont(w.style)
+        p.setFont(qfont(w.style))
         if track:
-            f = QFont(f)
-            f.setLetterSpacing(QFont.AbsoluteSpacing, track)
-        p.setFont(f)
-        p.drawText(QPointF(x, baseline), w.text)
+            # the room between the letters put in letter by letter (Qt's letter spacing is
+            # measured for the screen only, and comes out otherwise in a PDF): the word
+            # keeps its width exactly, and the column its edge
+            cws = [_wd(w.style, ch) for ch in w.text]
+            sp_ = (ww - sum(cws)) / max(1, len(cws) - 1) if len(cws) > 1 else 0.0
+            cur = x + ww
+            for ch, cw in zip(w.text, cws):
+                cur -= cw
+                p.drawText(QPointF(cur, baseline), ch)
+                cur -= sp_
+        else:
+            p.drawText(QPointF(x, baseline), w.text)
         x -= gap
 
 
@@ -73,19 +82,28 @@ def draw_oz_head(p, page, h):
     right_word, left_word = h["work"]
     # the number at the outer edge; each word of the name midway between the perek and
     # the edge on its side (on the outer side: between the perek and the number)
+    day = h.get("day", "") if h["box"] else ""
+    dst = st.__class__(st.family, st.size * 0.85, True)
+    dw = width(dst, day) + st.size * 0.5 if day else 0.0
     if h["outer"] == "right":
         xn = R - nw
-        right_end, left_end = xn - st.size, m
+        right_end, left_end = xn - dw - st.size, m
     else:
         xn = m
-        right_end, left_end = R, m + nw + st.size
+        right_end, left_end = R, m + nw + dw + st.size
     p.setFont(qfont(st))
     for word, a, c in ((right_word, mid + tw / 2, right_end), (left_word, left_end, mid - tw / 2)):
         if word:
             ww = width(st, word)
             p.drawText(QPointF((a + c) / 2 - ww / 2, base), word)
     if h["box"]:
-        p.fillRect(QRectF(xn - 3, base - bold.size * 0.95, nw + 6, bold.size * 1.3), QColor("#d6d6d6"))
+        # a day begins: the number and, small beside it, the day, in a grey box
+        bx = xn - dw if h["outer"] == "right" else xn
+        p.fillRect(QRectF(bx - 3, base - bold.size * 0.95, nw + dw + 6, bold.size * 1.3), QColor("#d6d6d6"))
+        p.setPen(QColor("black"))
+        p.setFont(qfont(dst))
+        dx = xn - dw if h["outer"] == "right" else xn + nw + st.size * 0.5
+        p.drawText(QPointF(dx, base), day)
     p.setPen(QColor("black"))
     p.setFont(qfont(bold))
     p.drawText(QPointF(xn, base), num)
@@ -148,20 +166,21 @@ def draw_page(p, page):
         p.setFont(qfont(st))
         p.drawText(QPointF(x - _w(st, num) / 2, yc + h / 2 - st.size * 0.45), num)
     for x, y, w, h in getattr(page, "deco", []):
-        # a frame for a great opening word: a double line, little scrolls at its sides
+        # a panel for a great opening word: a light ground, a thick and a thin rule, and a
+        # little leaf on each side, as an engraved panel
+        from .design import acanthus
+        p.fillRect(QRectF(x, y, w, h), QColor("#eeeeee"))
         pen2 = QPen(QColor("black"))
-        pen2.setWidthF(1.1)
+        pen2.setWidthF(1.0)
         p.setPen(pen2)
         p.setBrush(Qt.NoBrush)
         p.drawRect(QRectF(x, y, w, h))
-        pen2.setWidthF(0.45)
+        pen2.setWidthF(0.4)
         p.setPen(pen2)
-        p.drawRect(QRectF(x + 2.5, y + 2.5, w - 5, h - 5))
-        from .design import rosette
-        for cx, cy in ((x, y), (x + w, y), (x, y + h), (x + w, y + h)):
-            p.setBrush(QColor("white"))
-            p.drawEllipse(QPointF(cx, cy), 3.2, 3.2)
-            rosette(p, cx, cy, 3, "black", 0.35, 6)
+        p.drawRect(QRectF(x + 2.2, y + 2.2, w - 4.4, h - 4.4))
+        s_ = h * 0.32
+        for f, x0 in ((1, x + 5), (-1, x + w - 5)):
+            acanthus(p, x0, y + h / 2, s_, 0 if f == 1 else 180, "#555555", 0.4)
         p.setPen(QColor("black"))
     for fr in page.frames:
         for line in fr.lines:

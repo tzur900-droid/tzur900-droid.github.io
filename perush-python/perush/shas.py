@@ -738,7 +738,11 @@ def comm_gemara_marks(comm, amudim, gtoks, gamud):
     index = {}
     for k in range(len(seq) - 1):
         index.setdefault(tuple(seq[k:k + 2]), []).append(k)
-    last, count = None, 0
+    # the commentary begins on the masechet's first amud
+    last, count = gem_daf("ב."), 0
+    if comm:
+        comm[0]["gem"] = "ב."
+        count = 1
     for e in comm:
         a = amudim[e["para"]]
         dh = dh_words(e)
@@ -1329,7 +1333,7 @@ class Book:
             if j == 0 and first is not None:
                 # the masechet's first word: great, framed, alone in the middle
                 w = ws[first]
-                st = Style(RIF_FONT, self.st_rif.size * 2.6, True)
+                st = Style(RIF_FONT, self.st_rif.size * 2.2, True)
                 big = Word(w.text, st, width(st, w.text), w.ref)
                 big.line, big.framed = "center", True
                 # (a mark before it, as of the amud, goes on after it, in the text)
@@ -2018,7 +2022,7 @@ class Book:
                 "work": (("רבינו", "אשר") if pg["kind"] == "rosh" else COMM_HEAD.get(self.comm_name, ("הלכות", "רב אלפס"))),
                 "inner": self.name, "outer": "left" if n % 2 == 0 else "right", "box": day is not None}
             if day is not None:
-                page.oz_head["num"] = f"יום {heb(day)} · {page.oz_head['num']}"
+                page.oz_head["day"] = f"יום {heb(day)}"
             # (no rule under the head, as in Oz Vehadar: only its span)
             page.head_span = (L, R)
             top = T + self.head_h
@@ -2093,8 +2097,9 @@ class Book:
                         if any(getattr(w, "framed", False) for w in l.words):
                             # the masechet's first word: a frame round it
                             cx = R - l.right - l.width / 2
+                            pad = l.h * 0.9
                             page.deco = getattr(page, "deco", []) + [
-                                (cx - l.natural / 2 - 10, top + l.y + 1, l.natural + 20, l.h - 2)]
+                                (cx - l.natural / 2 - pad, top + l.y + 1, l.natural + 2 * pad, l.h - 2)]
                 cols = pg["cols"]
                 if cols and cols[0]:
                     page.frames.append(Frame(cols[0], R, top))
@@ -2246,7 +2251,13 @@ def set_refs(toks, start=0, here=None, masechet=None):
                 rest = [x for x in words if x not in DAF_WORDS]
                 lab = amud_label(" ".join(rest)) if rest else None
                 extra = list(toks[k][2:])
-                if lab and (words[0] == "דף" or close == "]") and len(rest) <= 2 and (close == "]" or here is None):
+                # (square brackets: the amud the text is at; one far from it is a reference)
+                far_ = (close == "]" and toks[k][1] != "gem" and here is not None and here.get("n") is not None
+                        and lab and gem_daf(lab) is not None and abs(gem_daf(lab) - here["n"]) > 3)
+                if far_:
+                    close = ")"
+                    words = ["דף"] + rest
+                if lab and not far_ and (words[0] == "דף" or close == "]") and len(rest) <= 2 and (close == "]" or here is None):
                     # an amud of this masechet
                     out.append([f"[{lab}]{trail}", "gem"] + extra)
                     if here is not None:
@@ -2743,7 +2754,10 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     for p in rif:
         p["tokens"] = daf_before_mishna(set_refs(p["tokens"]))
     for e in comm:
-        e["tokens"] = daf_before_mishna(set_refs(e["tokens"], e.get("dh_len", 0)))
+        # (in the commentary every reference in round brackets is a reference; its own
+        # amud marks come from comm_gemara_marks)
+        here = {"n": rif[e["para"]].get("amud_n") if rif and e.get("para") is not None else None}
+        e["tokens"] = daf_before_mishna(set_refs(e["tokens"], e.get("dh_len", 0), here=here, masechet=m))
     # the days go by whole pages (after the layout): no marks in the text
     rosh_days, rif_days = {}, {}
     perek_at, perek_end = perek_breaks(rosh, rif, al)
@@ -2849,6 +2863,8 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         seen = [w[1:-1] for w in ws if GEM_MARK.match(w)]
         opens = seen and any(GEM_MARK.match(w) for w in ws[:2])
         first = seen[0] if (opens or not prev) and seen else prev
+        if n == 0:
+            first = "ב."          # the masechet's first page is on its first amud
         last = seen[-1] if seen else prev
         prev = last
         sub = amudim(first, last) if first else ""
