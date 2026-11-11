@@ -1280,15 +1280,23 @@ class Book:
 
     def rosh_units(self, day_at):
         """day_at: siman index -> day number starting there."""
-        units, perek = [], None
+        units, perek, nperek = [], None, -1
         for i, s in enumerate(self.rosh):
             if s["perek"] != perek:
                 perek = s["perek"]
+                nperek += 1
                 if perek:
-                    units.append(self.heading(perek, self.st_rosh))
+                    # as in Oz Vehadar: "פרק שני", great, in the letters of the Rif
+                    name = "פרק " + ORDINALS[nperek] if nperek < len(ORDINALS) else perek
+                    u = self.heading(name, Style(RIF_FONT, self.st_rosh.size), 1.6)
+                    u.space = 1.9
+                    units.append(u)
             for k, p in enumerate(s["paras"]):
                 if p and p[0][1] == "hadran":
-                    units.append(self.heading(" ".join(w for w, *_ in p), self.st_rosh, 1.1))
+                    # "הדרן עלך ...": on its own line in the middle, bold, a little larger
+                    u = self.heading(" ".join(w for w, *_ in p), Style(RIF_FONT, self.st_rosh.size), 1.15)
+                    u.space = 1.8
+                    units.append(u)
                     continue
                 toks = p
                 if k == 0:
@@ -1358,7 +1366,7 @@ class Book:
             if u.kind == "p":
                 ls = break_lines(u.words, st, lh, full_width(w))
             else:
-                hl = lh * 1.35
+                hl = lh * getattr(u, "space", 1.35)
                 ls = break_lines(u.words, u.words[0].style, hl, full_width(w), 0.0, "center")
                 for l in ls:
                     l.last = True

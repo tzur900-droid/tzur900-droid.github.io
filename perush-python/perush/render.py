@@ -84,7 +84,7 @@ def draw_oz_head(p, page, h):
     # the edge on its side (on the outer side: between the perek and the number)
     day = h.get("day", "") if h["box"] else ""
     dst = st.__class__(st.family, st.size * 0.85, True)
-    dw = width(dst, day) + st.size * 0.5 if day else 0.0
+    dw = 0.0                      # (the day goes under the number)
     if h["outer"] == "right":
         xn = R - nw
         right_end, left_end = xn - dw - st.size, m
@@ -97,13 +97,12 @@ def draw_oz_head(p, page, h):
             ww = width(st, word)
             p.drawText(QPointF((a + c) / 2 - ww / 2, base), word)
     if h["box"]:
-        # a day begins: the number and, small beside it, the day, in a grey box
-        bx = xn - dw if h["outer"] == "right" else xn
-        p.fillRect(QRectF(bx - 3, base - bold.size * 0.95, nw + dw + 6, bold.size * 1.3), QColor("#d6d6d6"))
-        p.setPen(QColor("black"))
-        p.setFont(qfont(dst))
-        dx = xn - dw if h["outer"] == "right" else xn + nw + st.size * 0.5
-        p.drawText(QPointF(dx, base), day)
+        # a day begins: the number in a grey box, and right under it, small, the day
+        p.fillRect(QRectF(xn - 3, base - bold.size * 0.95, nw + 6, bold.size * 1.3), QColor("#d6d6d6"))
+        if day:
+            p.setPen(QColor("black"))
+            p.setFont(qfont(dst))
+            p.drawText(QPointF(xn + nw / 2 - width(dst, day) / 2, base + bold.size * 0.35 + dst.size), day)
     p.setPen(QColor("black"))
     p.setFont(qfont(bold))
     p.drawText(QPointF(xn, base), num)
