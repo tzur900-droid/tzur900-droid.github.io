@@ -16,6 +16,8 @@ Each finding: {'kind', 'where', 'text', 'fixed'}; kinds:
             Rashi was not looked at for it
   ran_lone  one word of the Ran bold alone as Rashi's; it loses it
 """
+import os
+
 from .shas import loose, lseq, norm, stem
 
 LONG = 8          # a far quotation this long or longer is reported, not corrected
@@ -172,6 +174,7 @@ KINDS = {
     "link": "דיבור בר\"ן שנמצא בקטע אחר ברי\"ף",
     "no_rashi": "דיבור בר\"ן בלי בדיקת רש\"י",
     "ran_lone": "מילה אחת בר\"ן מודגשת לבד",
+    "regress": "קטע שסומן בדפים המודפסים ולא הודגש",
     "overflow": "טקסט יוצא מהעמוד",
     "hole": "חלל בתחתית עמוד",
     "empty": "טור ריק",
@@ -180,3 +183,27 @@ KINDS = {
     "words": "מילים חסרות או כפולות",
     "days": "ימי לימוד שלא מסומנים פעם אחת",
 }
+
+
+MARKED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tests", "rosh_bold.txt")
+
+
+def marked(rosh, m, path=MARKED):
+    """The stretches marked on the printed pages as the Rif's wording (tests/rosh_bold.txt):
+    each must be bold in the Rosh; one that is not is reported ("regress")."""
+    out = []
+    if not os.path.exists(path):
+        return out
+    flat = [t for x in rosh for p in x["paras"] for t in p if t[1] not in ("gem", "src")]
+    seq = [norm(t[0]) for t in flat]
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#") or "|" not in line:
+            continue
+        mm, ph = [x.strip() for x in line.split("|", 1)]
+        if mm != m:
+            continue
+        w = [norm(x) for x in ph.split()]
+        hits = [k for k in range(len(seq) - len(w) + 1) if seq[k:k + len(w)] == w]
+        if not hits or not all(flat[hits[0] + q][1] is True for q in range(len(w))):
+            out.append({"kind": "regress", "where": m, "text": ph, "fixed": False})
+    return out

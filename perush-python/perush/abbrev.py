@@ -150,6 +150,18 @@ ABBREV = """
 ת"ח=תלמיד חכם|תלמידי חכמים
 תוס'=תוספות
 ה'=השם
+כ"ג=כהן גדול
+ת"ל=תלמוד לומר
+מד"ס=מדברי סופרים
+ד"ס=דברי סופרים
+ת"ר=תנו רבנן
+ש"מ=שמע מינה
+מנה"מ=מנא הני מילי
+מנ"ל=מנא לן
+ק"ו=קל וחומר
+ע"י=על ידי
+ע"ז=עבודה זרה
+ק"ש=קריאת שמע
 """
 
 NUMBERS = {
@@ -183,7 +195,8 @@ def expand(word):
         if any(c not in PREFIX for c in pre):
             break
         bare = rest.replace('"', "").replace("'", "")
-        number = '"' in rest and bare in NUMBERS
+        # (a number: ט"ו, or a letter alone: ג')
+        number = ('"' in rest or (rest.endswith("'") and len(bare) == 1)) and bare in NUMBERS
         # after ב, מ or ל a number before anything else: בי"א is "on the eleventh", not
         # "on some say"
         if rest in TABLE and not (number and pre and pre[-1] in "במל"):

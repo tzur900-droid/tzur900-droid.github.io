@@ -277,6 +277,117 @@ def stem(x):
     return x
 
 
+def stem2(x):
+    """A loose word without up to two letters of prefix and a final ו, ה, א or י, for a
+    quotation said a little differently (להכות and להכותו, את אביו and לאביו)."""
+    for _ in range(2):
+        if len(x) > 3 and x[0] in "ודהבלמשכ":
+            x = x[1:]
+    if len(x) > 3 and x[-1] in "והאי":
+        x = x[:-1]
+    return x
+
+
+def bridge_quotes(toks, ref_toks, found, para_of, most=12, edge=8):
+    """Holes in the bold of a quotation (the Rosh quoting the Rif): between two stretches
+    found, the words of toks between them are bold too where they are the Rif's words
+    between the same two places (a word or two changed, added or left out: the Oz Vehadar
+    Rosh has them bold), not across a word that changes the meaning and not where the
+    quoting text speaks for itself (פי', כלומר); and a stretch goes on to the edges of
+    the quotation while its words go on to be the Rif's. -> words made bold."""
+    def forms(t):
+        out = set()
+        for x in lwords(t[0]):
+            out.add(stem2(x))
+            if len(x) >= 3 and x[0] in "ודהבלמשכ":
+                out.add(stem2(x[1:]))
+            if len(x) == 3 and x[-1] in "הא":
+                out.add(x[:2])
+        return out
+    S = [forms(t) for t in toks]
+    R = [forms(t) for t in ref_toks]
+    count = 0
+
+    def like(a, b):
+        """the same word, or one said a little differently (a letter changed, added or left out)"""
+        if a == b:
+            return True
+        if min(len(a), len(b)) < 4 or abs(len(a) - len(b)) > 1:
+            return False
+        # one edit at most
+        if len(a) == len(b):
+            return sum(x != y for x, y in zip(a, b)) <= 1
+        if len(a) > len(b):
+            a, b = b, a
+        return any(b[:k] + b[k + 1:] == a for k in range(len(b)))
+
+    def meets(fs, gs):
+        return any(like(a, b) for a in fs for b in gs)
+
+    def plain(k):
+        return toks[k][1] is False
+
+    def bold(ks):
+        nonlocal count
+        for k in ks:
+            if toks[k][1] is False:
+                toks[k][1] = True
+                count += 1
+
+    def own(k):
+        n = norm(toks[k][0])
+        return n in OWN or toks[k][0].startswith("(") or toks[k][1] not in (False, True)
+    order = sorted(found)
+    for (a1, b1, c1, d1), (a2, b2, c2, d2) in zip(order, order[1:]):
+        gs = list(range(b1 + 1, a2))
+        if not gs or len(gs) > most or para_of[b1] != para_of[a2] or not all(plain(k) for k in gs):
+            continue
+        if not (d1 < c2 <= d1 + most + 1):
+            continue
+        gr = list(range(d1 + 1, c2))
+        if any(own(k) for k in gs):
+            continue
+        # (the words of the Rif a little around its gap: a word the two put in another place)
+        around = range(max(0, d1 - 3), min(len(ref_toks), c2 + 3))
+        theirs = {norm(ref_toks[k][0]) for k in around}
+        if any(norm(toks[k][0]) in MEANING and norm(toks[k][0]) not in theirs for k in gs):
+            continue
+        rbag = set().union(*(R[k] for k in around)) if around else set()
+        hit = sum(1 for k in gs if meets(S[k], rbag))
+        if (gr and hit * 2 >= len(gs) and len(gs) - hit <= 3) or (not gr and len(gs) <= 2):
+            bold(gs)
+    # the edges: on from the end of a stretch (and back from its start) while the words are
+    # the Rif's next (or before) words, to the end of the sentence at most
+    for a, b, c, d in order:
+        for step in (1, -1):
+            i, j = (b + 1, d + 1) if step == 1 else (a - 1, c - 1)
+            took, n = [], 0
+            while 0 <= i < len(toks) and 0 <= j < len(ref_toks) and n < edge and para_of[i] == para_of[a]:
+                if not plain(i) or own(i):
+                    break
+                si, rj = S[i], R[j]
+                nxt = j + step
+                if meets(si, rj):
+                    took.append(i)
+                    i, j, n = i + step, j + step, n + 1
+                elif 0 <= nxt < len(ref_toks) and meets(si, R[nxt]):
+                    took.append(i)
+                    i, j, n = i + step, nxt + step, n + 1
+                elif 0 <= i + step < len(toks) and norm(toks[i][0]) not in MEANING and meets(S[i + step], rj) \
+                        and plain(i + step):
+                    took += [i, i + step]
+                    i, j, n = i + 2 * step, j + step, n + 2
+                else:
+                    break
+                end = toks[took[-1]][0] if step == 1 else toks[i - step][0]
+                if step == 1 and re.search(r"[.:]$", end):
+                    break
+                if step == -1 and 0 <= i and re.search(r"[.:]$", toks[i][0]):
+                    break
+            bold(took)
+    return count
+
+
 def mark_aligned(toks, ref_toks, n=4, min_run=4, big=12, mid=7, near=40, far=200, max_occ=60, found=None,
                  loose_words=False, fill=None):
     """Make bold in toks every stretch (min_run words or more) of the text of ref_toks,
@@ -1045,7 +1156,8 @@ class Book:
         else:
             b = st.with_bold(True)
         # מתני' and גמ': in the Rif great, as in the Gemara of Vilna; elsewhere a little larger
-        lab = Style(RIF_FONT, st.size * 1.6, True) if st.family == RIF_FONT else Style("David Libre", st.size * 1.08, True)
+        # (in the Rosh too, as in the Rif)
+        lab = Style(RIF_FONT, st.size * 1.6, True)
         big = Style(st.family, st.size * 1.3, True)
         # the Gemara's amud [נה:] and a reference (גיטין ו.): small, in square letters
         gem = Style("Frank Ruhl Libre", st.size * 0.8)
@@ -1910,14 +2022,53 @@ def amud_label(text):
     return re.sub(r"[\"״׳']", "", m.group(1)) + side
 
 
-def set_refs(toks, start=0):
+BAVLI = ["ברכות", "שבת", "עירובין", "ערובין", "פסחים", "שקלים", "יומא", "סוכה", "ביצה", "ראש השנה", "תענית",
+         "מגילה", "מועד קטן", "חגיגה", "יבמות", "כתובות", "נדרים", "נזיר", "סוטה", "גיטין", "קידושין", "קדושין",
+         "בבא קמא", "בבא מציעא", "בבא בתרא", "ב\"ק", "ב\"מ", "ב\"ב", "סנהדרין", "מכות", "שבועות", "עבודה זרה",
+         "ע\"ז", "הוריות", "זבחים", "מנחות", "חולין", "בכורות", "ערכין", "תמורה", "כריתות", "מעילה", "תמיד",
+         "נדה", "נידה"]
+DAF_WORDS = ("דף", "בדף", "ובדף", "לדף")
+
+
+def set_refs(toks, start=0, here=None, masechet=None):
     """The Gemara's amudim and references, as printed by Oz Vehadar: an amud of the
     masechet in square brackets, without "דף" ([נה:], "gem"); a reference to another place
-    in round brackets, small, without "דף" ((גיטין ו.), "src"). Each becomes one word.
-    Tokens before start are left as they are (the dibbur hamatchil). -> new list."""
+    in round brackets, small, without "דף" ((גיטין ו.), "src"), also where the text writes
+    it without brackets ("כדתנן סוטה ב.", "בפרק אלמנה ניזונית דף ק:"); a reference to a
+    place in this masechet as (לקמן לה:) or (לעיל ה.), by the amud the text is at
+    (here: {"n": ...}, kept from one call to the next; None: no such word). Each becomes
+    one word. Tokens before start are left as they are (the dibbur hamatchil). -> new list."""
     out, k = list(toks[:start]), start
+    names = sorted(((n.split(), n) for n in BAVLI), key=lambda x: -len(x[0]))
+    mine = masechet.split() if masechet else None
+
+    def where(lab):
+        """לקמן or לעיל, for an amud of this masechet (none where the text has just said it)"""
+        if any(norm(t[0]) in ("לקמנ", "כדלקמנ", "דלקמנ", "ולקמנ", "לעיל", "כדלעיל", "דלעיל", "ולעיל")
+               for t in out[-4:]):
+            return ""
+        n = gem_daf(lab)
+        if here is None or here.get("n") is None or n is None:
+            return None
+        return "לקמן" if n > here["n"] else "לעיל"
+
+    def name_at(j):
+        """the masechet named by the words from j: (its words, how many tokens) or None"""
+        for ws, nm in names:
+            got = [norm(t[0]) for t in toks[j:j + len(ws)]]
+            if got == [norm(w) for w in ws]:
+                return ws, len(ws)
+        return None
+
+    def ref(place, lab, trail, extra):
+        out.append([f"({' '.join(place + [lab])}){trail}", "src"] + extra)
+
     while k < len(toks):
         w = toks[k][0]
+        if toks[k][1] == "gem":
+            n = gem_daf(w.strip("[]"))
+            if here is not None and n is not None:
+                here["n"] = n
         if w[:1] in "([":
             close = ")" if w[0] == "(" else "]"
             e = next((q for q in range(k, min(len(toks), k + 7)) if toks[q][0].rstrip(".,:;").endswith(close)), None)
@@ -1926,20 +2077,61 @@ def set_refs(toks, start=0):
                 end = text.rindex(close)
                 inner, trail = text[1:end].strip(), text[end + 1:]
                 words = inner.split()
-                rest = [x for x in words if x not in ("דף", "בדף", "ובדף")]
+                rest = [x for x in words if x not in DAF_WORDS]
                 lab = amud_label(" ".join(rest)) if rest else None
                 extra = list(toks[k][2:])
-                if lab and (words[0] == "דף" or close == "]") and len(rest) <= 2:
+                if lab and (words[0] == "דף" or close == "]") and len(rest) <= 2 and (close == "]" or here is None):
                     # an amud of this masechet
                     out.append([f"[{lab}]{trail}", "gem"] + extra)
+                    if here is not None:
+                        here["n"] = gem_daf(lab)
                     k = e + 1
                     continue
                 if close == ")" and len(rest) <= 5 and ("דף" in words or (rest and amud_label(rest[-1]))):
                     if rest and amud_label(rest[-1]):
                         rest[-1] = amud_label(rest[-1])
-                    out.append([f"({' '.join(rest)}){trail}", "src"] + extra)
+                    place, at = rest[:-1], rest[-1]
+                    if mine and [norm(x) for x in place[:len(mine)]] == [norm(x) for x in mine]:
+                        # this masechet: לקמן or לעיל
+                        rel = where(at)
+                        if rel is not None:
+                            place = ([rel] if rel else []) + place[len(mine):]
+                    elif not place and here is not None:
+                        rel = where(at)
+                        if rel:
+                            place = [rel]
+                    ref(place, at, trail, extra)
                     k = e + 1
                     continue
+        # without brackets: (a masechet) (דף) an amud
+        nm = name_at(k)
+        j = k + (nm[1] if nm else 0)
+        has_daf = j < len(toks) and norm(toks[j][0]) in [norm(x) for x in DAF_WORDS]
+        if has_daf:
+            j += 1
+        if (nm or has_daf) and j < len(toks) and toks[j][1] != "gem":
+            raw = toks[j][0]
+            core = raw.rstrip(",;)")
+            lab = amud_label(core)
+            if lab and (nm or has_daf):
+                trail = raw[len(core):]
+                place = list(nm[0]) if nm else []
+                if nm and mine and [norm(x) for x in nm[0]] == [norm(x) for x in mine]:
+                    rel = where(lab)
+                    place = ([rel] if rel else []) if rel is not None else place
+                elif not nm:
+                    prev = norm(out[-1][0]) if out else ""
+                    if prev in ("לקמנ", "לעיל") and out[-1][1] in (False, True):
+                        place = [out.pop()[0]]
+                    elif where(lab) is not None:
+                        place = [where(lab)] if where(lab) else []
+                    else:
+                        out.append(toks[k])
+                        k += 1
+                        continue
+                ref(place, lab, trail, list(toks[k][2:]))
+                k = j + 1
+                continue
         out.append(toks[k])
         k += 1
     return out
@@ -1993,8 +2185,14 @@ def load_masechet(root, m, found=None):
     mark_labels([t for x in rosh for t in x["paras"]])
     mark_labels([p["tokens"] for p in rif])
     if rif:
-        n = mark_aligned([t for x in rosh for p in x["paras"] for t in p], [t for p in rif for t in p["tokens"]],
-                         loose_words=True, fill=(3, 5), found=found)
+        flat = [t for x in rosh for p in x["paras"] for t in p]
+        para_of = [k for k, p in enumerate(p for x in rosh for p in x["paras"]) for _ in p]
+        rflat = [t for p in rif for t in p["tokens"]]
+        here = []
+        n = mark_aligned(flat, rflat, loose_words=True, fill=(3, 5), found=here)
+        n += bridge_quotes(flat, rflat, here, para_of)
+        if found is not None:
+            found.extend(here)
         report.append(f"ברא\"ש הודגשו {n} מילים מהרי\"ף")
     if comm:
         # the commentary's own dibbur hamatchil in plain type (as in the Oz Vehadar Rif);
@@ -2355,9 +2553,12 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     if rosh and gem:
         report.append(f"ברא\"ש {gemara_marks(rosh, read(gem[0]))} סימני דפי הגמרא")
     issues = fix(rosh, rif, comm, al, found) if fix else []
+    from .shas_check import marked
+    issues += marked(rosh, m)
     # the amudim and the references as Oz Vehadar prints them ([נה:], (גיטין ו.))
+    at = {"n": None}
     for x in rosh:
-        x["paras"] = [daf_before_mishna(set_refs(p)) for p in x["paras"]]
+        x["paras"] = [daf_before_mishna(set_refs(p, here=at, masechet=m)) for p in x["paras"]]
     for p in rif:
         p["tokens"] = daf_before_mishna(set_refs(p["tokens"]))
     for e in comm:
