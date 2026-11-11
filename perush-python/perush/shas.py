@@ -288,6 +288,44 @@ def stem(x):
     return x
 
 
+def extend_dibburim(comm, rif, most=6):
+    """A dibbur the source marks short (only אע"פ of "אע"פ שבסקילה"): on to the words that
+    go on with it in the Rif's passage, to the end of what the Rif says there at most
+    `most` words more, not over a full stop. -> words added."""
+    count = 0
+    for e in comm:
+        toks = e["tokens"]
+        j = e.get("para")
+        if j is None:
+            continue
+        ref = [loose(t[0]) for jj in range(max(0, j - 1), min(len(rif), j + 2)) for t in rif[jj]["tokens"]]
+        k = 0
+        while k < len(toks):
+            if toks[k][1] != "dh":
+                k += 1
+                continue
+            e2 = k
+            while e2 < len(toks) and toks[e2][1] == "dh":
+                e2 += 1
+            run = [loose(t[0]) for t in toks[k:e2] if loose(t[0])]
+            # (not the commentary's own words: גרסינן, סליקו, אמר המחבר)
+            if run and norm(toks[k][0]) not in ("גרסינ", "וגרסינ", "גרסי", "וגרסי", "סליקו", "אמר") \
+                    and not re.search(r"[.:]$", toks[e2 - 1][0]):
+                at = [q for q in range(len(ref) - len(run) + 1) if ref[q:q + len(run)] == run]
+                if at:
+                    q, add = at[0] + len(run), 0
+                    while e2 < len(toks) and q < len(ref) and add < most and toks[e2][1] is False \
+                            and loose(toks[e2][0]) == ref[q]:
+                        toks[e2][1] = "dh"
+                        add += 1
+                        count += 1
+                        e2, q = e2 + 1, q + 1
+                        if re.search(r"[.:]$", toks[e2 - 1][0]):
+                            break
+            k = e2
+    return count
+
+
 def stem2(x):
     """A loose word without up to two letters of prefix and a final ו, ה, א or י, for a
     quotation said a little differently (להכות and להכותו, את אביו and לאביו)."""
@@ -1215,7 +1253,7 @@ class Book:
         dh = Style(RIF_FONT, st.size * 1.25, True)
         # Rashi's wording in the commentary: a little heavier than the text (not the bold
         # of the dibbur); מתני' that opens a Mishna great, as in the Rif
-        rashi = Style("Frank Ruhl Libre SemiBold", st.size)
+        rashi = Style("Frank Ruhl Libre Medium", st.size)
         clab = Style(RIF_FONT, st.size * 1.6, True)
         out = []
         for t in toks:
@@ -1845,6 +1883,26 @@ class Book:
                 l.y = y
                 y += l.h
 
+        def together(groups, target, cap):
+            """lines of several columns opened by the same amount each, so that the lines of
+            the two columns stay side by side (even spacing across the page); the longer
+            column reaches target"""
+            groups = [g for g in groups if g]
+            if not groups:
+                return
+            adds = []
+            for g in groups:
+                spare = target - (g[0].y + sum(l.h for l in g))
+                adds.append(spare / len(g) if 0 < spare <= cap else None)
+            ok = [a for a in adds if a is not None]
+            add = min(ok) if ok and all(a is not None or len(g) < 2 for a, g in zip(adds, groups)) else 0.0
+            for g in groups:
+                y = g[0].y
+                for l in g:
+                    l.h += add
+                    l.y = y
+                    y += l.h
+
         last = r["at_end"] and r["cnext"] >= len(self.cwords)
         T = r.get("T", 0.0) if r["text"] else 0.0
 
@@ -1876,8 +1934,10 @@ class Book:
                         l.y = t0 + (l.y - t0) * f
                         l.h *= f
         if r["mode"] == "long":
-            for c in r["cols"]:
-                open_under(c, self.H, self.lh_comm * 1.5)
+            if r["text"]:
+                together([[l for l in c if l.y >= lim - EPS] for c in r["cols"]], self.H, self.lh_comm * 1.5)
+            else:
+                together([below_top(c) for c in r["cols"]], self.H, self.lh_comm * 1.5)
         elif r["mode"] == "short" and "below" in r:
             T = r.get("T", 0.0)
             for c in r["cols"]:
@@ -1889,9 +1949,8 @@ class Book:
             stretch(r["text"], r["below"] - self.vgap, self.lh_rif * 0.25 * max(1, len(r["text"])))
         elif r["mode"] == "short":
             hc, T = r.get("hc", 0.0), r.get("T", 0.0)
-            for c in r["cols"]:
-                # both columns down to where the Rif widens (one may hold a line less)
-                stretch([l for l in c if l.y >= T - EPS], hc, self.lh_comm * 2.2)
+            # both columns down to where the Rif widens, by the same amount
+            together([[l for l in c if l.y >= T - EPS] for c in r["cols"]], hc, self.lh_comm * 2.2)
             if not last:
                 self.open_page(r, T)
         elif not last:
@@ -2284,6 +2343,7 @@ def load_masechet(root, m, found=None):
                 if t[1] is True:
                     t[1] = "dh"
                     e["dh_len"] += 1
+        report.append(f"ב{s['comm_name']} {extend_dibburim(comm, rif)} מילים שהושלמו לדיבור המתחיל")
         if s["rashi"] and s["gemara"]:
             rashi = parse_rashi(read(s["rashi"][0]))
             if s.get("rashbam"):
