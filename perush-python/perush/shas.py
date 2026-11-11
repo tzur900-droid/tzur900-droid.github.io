@@ -978,6 +978,36 @@ def complete_sentences(rosh, rif, al, most=6):
     return count
 
 
+def close_small_holes(rosh, rif, al, most=4):
+    """A word or a few left plain between two bold words of the Rosh (after the check):
+    bold where the Rif's passages of the siman have the same words in a row, the bold word
+    before them and the one after them too (it is the Rif's wording, לא and אבל as well).
+    -> words made bold."""
+    count = 0
+    for i, s in enumerate(rosh):
+        lo = max(0, al[i] - 1)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 1
+        seq = [stem2(x) for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]]
+        text = " " + " ".join(seq) + " "
+        for p in s["paras"]:
+            k = 1
+            while k < len(p):
+                if p[k][1] is False and p[k - 1][1] is True:
+                    e = k
+                    while e < len(p) and p[e][1] is False:
+                        e += 1
+                    if e < len(p) and p[e][1] is True and e - k <= most:
+                        ws = [stem2(x) for t in p[k - 1:e + 1] for x in lwords(t[0])]
+                        if ws and " " + " ".join(ws) + " " in text:
+                            for q in range(k, e):
+                                p[q][1] = True
+                                count += 1
+                    k = e
+                else:
+                    k += 1
+    return count
+
+
 def rif_page_marks(rosh, rif, al):
     """Mark in the Rosh where each page of the Rif begins: the place in the Rosh where the
     words that open the page are found (near the siman that matches its passage), or else
@@ -2553,6 +2583,8 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     if rosh and gem:
         report.append(f"ברא\"ש {gemara_marks(rosh, read(gem[0]))} סימני דפי הגמרא")
     issues = fix(rosh, rif, comm, al, found) if fix else []
+    if rif and rosh:
+        report.append(f"ברא\"ש {close_small_holes(rosh, rif, al)} מילים בחורים קטנים בציטוטים")
     from .shas_check import marked
     issues += marked(rosh, m)
     # the amudim and the references as Oz Vehadar prints them ([נה:], (גיטין ו.))
