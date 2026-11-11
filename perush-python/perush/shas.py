@@ -1325,18 +1325,66 @@ class Book:
             for w in ws:
                 w.line = "center"
             return Unit("h", ws)
+        # "סליק פירקא" at the head of a passage: the perek's הדרן in its place (as in Oz
+        # Vehadar), not both of them one after the other
+        consumed, end_done, skip_start = set(), False, set()
         for j, p in enumerate(self.rif):
             toks = p["tokens"]
-            if j in perek and j > 0 and perek[j]:
+            lead = [k for k, t in enumerate(toks) if t[1] not in ("gem", "src")][:2]
+            slq = len(lead) == 2 and norm(toks[lead[0]][0]) == "סליק" and norm(toks[lead[1]][0]) == "פירקא"
+            if slq:
+                # (the perek that begins within a passage or three of it; else, a Rif's own
+                # section, as the Mishnayot it brings from another masechet: its own words)
+                nxt = [k for k in perek if j <= k <= j + 3 and k > 0 and perek[k] and k not in consumed]
+                if nxt:
+                    text = perek[min(nxt)]
+                    consumed.add(min(nxt))
+                elif getattr(self, "rif_end", None) and not end_done and j >= len(self.rif) - 3:
+                    text, end_done = self.rif_end, True
+                elif any(j < k <= j + 40 and perek[k] and k not in consumed for k in perek):
+                    # (the perek's הדרן comes a little later, after a section of the Rif's
+                    # own: "סליק פירקא" here is not printed, once is enough)
+                    text = None
+                else:
+                    text = "סליק פירקא"
+                toks = [t for k, t in enumerate(toks) if k not in lead]
+                rest = [t for t in toks if t[1] not in ("gem", "src")]
+                if j in perek and j > 0 and perek[j] and j not in consumed:
+                    units.append(hadran_unit(perek[j]))
+                if text:
+                    units.append(hadran_unit(text))
+                if not rest:
+                    continue
+                if j not in perek and norm(rest[0][0]).startswith("וסליק"):
+                    # (וסליק מסכת ...: on its own line in the middle, after it)
+                    units.append(hadran_unit(" ".join(t[0] for t in rest)))
+                    continue
+            elif j in perek and j > 0 and perek[j] and j not in consumed:
                 units.append(hadran_unit(perek[j]))
             ws = self.words(toks, self.st_rif)
             # the Rif's own הדרן: its line in the middle
             q = next((k for k, t in enumerate(toks) if norm(t[0]) in ("הדרנ", "סליקו")), None)
             if q is not None:
-                # (on a line of its own, its own font: not the size of a perek's first word)
-                for w in ws[q:]:
+                # (on a line of its own, its own font: not the size of a perek's first word;
+                # where the next perek goes on in the same passage, after its amud's mark,
+                # that one begins on a new line, its first word large)
+                r = next((k for k in range(q + 1, len(toks)) if toks[k][1] in ("gem", "src")), None)
+                f = next((k for k in range(r, len(toks)) if toks[k][1] not in ("gem", "src", "label")), None) if r is not None else None
+                for w in ws[q:r if f is not None else None]:
+                    if w.style.family == self.st_rif.family and w.style.size == self.st_rif.size:
+                        # (as the הדרן put in where the Rif has none: bold, in its letters)
+                        w.style, w.w = hst, width(hst, w.text)
                     w.line = "center"
                     w.brk = False
+                if f is not None:
+                    w = ws[f]
+                    st = Style(RIF_FONT, self.st_rif.size * 1.6, True)
+                    big = Word(w.text, st, width(st, w.text), w.ref)
+                    big.brk = True
+                    for x in ws[r:]:
+                        x.brk = False
+                    ws = ws[:r] + [big] + ws[r:f] + ws[f + 1:]
+                    skip_start.add(j + 1)
             first = next((k for k, t in enumerate(toks) if t[1] not in ("gem", "src", "label")), None)
             if j == 0 and first is not None:
                 # the masechet's first word: great, framed, alone in the middle
@@ -1346,16 +1394,18 @@ class Book:
                 big.line, big.framed = "center", True
                 # (a mark before it, as of the amud, goes on after it, in the text)
                 ws = [big] + ws[:first] + ws[first + 1:]
-            elif j in perek and first is not None:
+            elif j in perek and first is not None and j not in skip_start:
                 # a perek begins: on a new line, its first word large
-                for w in ws[:first]:
-                    w.brk = False
-                ws[0].brk = True
                 w = ws[first]
                 st = Style(RIF_FONT, self.st_rif.size * 1.6, True)
-                ws[first] = Word(w.text, st, width(st, w.text), w.ref)
+                big = Word(w.text, st, width(st, w.text), w.ref)
+                # (the amud's mark before it goes on after it, not on a line of its own)
+                ws = [big] + ws[:first] + ws[first + 1:]
+                for w in ws:
+                    w.brk = False
+                ws[0].brk = True
             units.append(Unit("p", ws, j))
-        if getattr(self, "rif_end", None):
+        if getattr(self, "rif_end", None) and not end_done:
             units.append(hadran_unit(self.rif_end))
         return units
 
@@ -2610,19 +2660,34 @@ def perek_breaks(rosh, rif, al):
             if p and p[0][1] == "hadran":
                 hadran[x["perek"]] = " ".join(t[0] for t in p)
     own = {j + 1 for j, p in enumerate(rif) if any(norm(t[0]) in ("הדרנ", "סליקו") for t in p["tokens"])}
+    # "סליק פירקא" at the head of a passage: the perek ends there (the next begins after it,
+    # or in the same passage when more follows)
+    slq = set()
+    for j, p in enumerate(rif):
+        ws = [norm(t[0]) for t in p["tokens"] if t[1] not in ("gem", "src")]
+        if ws[:2] == ["סליק", "פירקא"] and not (len(ws) > 2 and ws[2].startswith("וסליק")):
+            slq.add(j if len(ws) > 2 else j + 1)
+
+    def fallback(start):
+        # (a perek the Rosh closes with no הדרן of its own: "הדרן עלך" and the first two
+        # words of the perek in the Rif, its name)
+        ws = [re.sub(r"[^\u05d0-\u05ea\"']", "", t[0]) for t in rif[start]["tokens"]
+              if t[1] not in ("gem", "src", "label") and not any(c in t[0] for c in "()[]") and norm(t[0]) != "דפ" and norm(t[0]) not in ("מתני", "מתניתינ", "גמ", "גמרא", "סליק", "פירקא")]
+        ws = [w for w in ws if w][:2]
+        return "הדרן עלך " + " ".join(ws) if ws else None
     out, last = {}, 0
     for k, name in enumerate(order[1:], 1):
         i0 = next(i for i, x in enumerate(rosh) if x["perek"] == name)
         j = al[i0]
         # the Rif's own הדרן just before it decides the place
-        near = [x for x in own if j - 3 <= x <= j + 3]
+        near = [x for x in own if j - 3 <= x <= j + 3] or [x for x in slq if j - 3 <= x <= j + 3]
         if near:
             j = min(near, key=lambda x: abs(x - j))
         if j <= last or j >= len(rif):
             continue
-        out[j] = None if j in own else hadran.get(order[k - 1])
+        out[j] = None if j in own else hadran.get(order[k - 1]) or fallback(last)
         last = j
-    end = None if any(norm(t[0]) in ("הדרנ", "סליקו") for t in rif[-1]["tokens"]) else hadran.get(order[-1])
+    end = None if any(norm(t[0]) in ("הדרנ", "סליקו") for t in rif[-1]["tokens"]) else hadran.get(order[-1]) or fallback(last)
     return out, end
 
 
