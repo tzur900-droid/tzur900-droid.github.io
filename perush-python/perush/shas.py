@@ -1280,9 +1280,11 @@ class Book:
             ws = self.words(toks, self.st_rif)
             # the Rif's own הדרן: its line in the middle
             q = next((k for k, t in enumerate(toks) if norm(t[0]) in ("הדרנ", "סליקו")), None)
-            if q is not None and q > 0:
+            if q is not None:
+                # (on a line of its own, its own font: not the size of a perek's first word)
                 for w in ws[q:]:
                     w.line = "center"
+                    w.brk = False
             first = next((k for k, t in enumerate(toks) if t[1] not in ("gem", "src", "label")), None)
             if j == 0 and first is not None:
                 # the masechet's first word: great, framed, alone in the middle
