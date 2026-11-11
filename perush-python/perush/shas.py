@@ -1033,6 +1033,142 @@ def complete_sentences(rosh, rif, al, most=6):
     return count
 
 
+def drop_requotes(rosh, rif, al, before=6, share=0.6, log=None):
+    """A line of the Rif the Rosh brings again in its own words (after it has quoted the
+    passage, in the discussion that follows: "ומקשינן ... למה האריך הש"ס לומר אי דקא טעין
+    ..."): plain, as Oz Vehadar prints it; bold once, where the Rosh quotes it. Not where
+    the Rif has it again too. -> words made plain."""
+    count = 0
+    for i, s in enumerate(rosh):
+        lo = max(0, al[i] - 2)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
+        R = [stem2(x) for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]]
+        rc = {}
+        for q in range(len(R) - 2):
+            g = tuple(R[q:q + 3])
+            rc[g] = rc.get(g, 0) + 1
+        W, src = [], []
+        for p in s["paras"]:
+            seq, at = lseq(p)
+            W += [stem2(x) for x in seq]
+            src += [(p, k) for k in at]
+        bold = [p[k][1] is True for p, k in src]
+        seen = {}
+        q = 0
+        while q < len(W):
+            if not bold[q]:
+                # (what the Rosh says before in its own words, plain, is not a quotation)
+                q += 1
+                continue
+            e = q
+            while e < len(W) and bold[e]:
+                e += 1
+            plain = 0
+            while q - plain - 1 >= 0 and not bold[q - plain - 1]:
+                plain += 1
+            grams = [tuple(W[x:x + 3]) for x in range(q, e - 2)]
+            # (a line brought again, short, beside a quotation of the passage that has it
+            # within it; not a quotation as long as the one before, which may be the real one)
+            again = [g for g in grams if seen.get(g, 0) >= 2 * (e - q)]
+            twice = [g for g in grams if rc.get(g, 0) >= 2]
+            if plain >= before and e - q <= 15 and grams and len(again) >= share * len(grams) \
+                    and len(twice) < share * len(grams):
+                toks = {(id(p), k): (p, k) for p, k in src[q:e]}
+                for p, k in toks.values():
+                    if p[k][1] is True:
+                        p[k][1] = False
+                        count += 1
+                for x in range(q, e):
+                    bold[x] = False
+                if log is not None:
+                    log.append((s["perek"], s["num"], " ".join(p[k][0] for p, k in toks.values())))
+            for x in range(q, e - 2):
+                g = tuple(W[x:x + 3])
+                if bold[x]:
+                    # (the length of the bold stretch it stands in)
+                    seen[g] = max(seen.get(g, 0), e - q)
+            q = e
+    return count
+
+
+def near_word(a, b):
+    """Two loose words the same but for a letter (שכלו and שבלו, דם and דמים, לה and להם)."""
+    a, b = stem2(a), stem2(b)
+    if a == b:
+        return True
+    if min(len(a), len(b)) >= 2 and (a.startswith(b) or b.startswith(a)) and abs(len(a) - len(b)) <= 2:
+        return True
+    if len(a) == len(b) >= 4 and sum(x != y for x, y in zip(a, b)) == 1:
+        return True
+    return False
+
+
+def follow_quote(rosh, rif, al, most=10, share=0.7, log=None):
+    """A few words left plain inside a quotation where the Rosh says the Rif's words a
+    little differently (דמים for דם, the Rif's misprint שבלו for שכלו) and leaves out a
+    sentence of it after them, so that no stretch of the same words is found: bold where
+    they follow, word by word, the Rif's words after the bold before them (most of them,
+    in order, the first one too; the last one too, unless bold comes right after them).
+    Not across a word that changes the meaning, which the Rif has not there.
+    -> words made bold."""
+    count = 0
+    for i, s in enumerate(rosh):
+        lo = max(0, al[i] - 2)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
+        R = [x for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]]
+        RS = [stem2(x) for x in R]
+        at3 = {}
+        for q in range(len(RS) - 2):
+            at3.setdefault(tuple(RS[q:q + 3]), []).append(q)
+        for p in s["paras"]:
+            W, src = lseq(p)
+            bold = [p[k][1] is True for k in src]
+            q = 3
+            while q < len(W):
+                if bold[q] or not all(bold[q - 3:q]):
+                    q += 1
+                    continue
+                e = q
+                while e < len(W) and not bold[e]:
+                    e += 1
+                gap = W[q:e]
+                after = e < len(W)
+                # (not a reference: "בפרק חזקת הבתים (דף לד)" goes in its own letters)
+                if not (2 <= len(gap) <= most) or any(p[k][1] not in (True, False) or "(" in p[k][0] or ")" in p[k][0]
+                                                     or norm(p[k][0]) in ("דפ", "בדפ") for k in src[q:e]):
+                    q = e
+                    continue
+                best = None
+                for r0 in at3.get(tuple(stem2(x) for x in W[q - 3:q]), []):
+                    seg = R[r0 + 3:r0 + 3 + len(gap) + 3]
+                    # in order: each word of the gap against the Rif's words after the last one taken
+                    hits, r, first, last = 0, 0, False, False
+                    for g, w in enumerate(gap):
+                        for d in range(r, min(len(seg), r + 3)):
+                            if near_word(w, seg[d]):
+                                hits += 1
+                                r = d + 1
+                                first = first or g == 0
+                                last = g == len(gap) - 1
+                                break
+                    if hits >= share * len(gap) and first and (last or after):
+                        theirs = {norm(x) for x in seg}
+                        if any(norm(p[k][0]) in MEANING and norm(p[k][0]) not in theirs
+                               for k in set(src[q:e])):
+                            continue
+                        best = r0
+                        break
+                if best is not None:
+                    for k in sorted(set(src[q:e])):
+                        if p[k][1] is False:
+                            p[k][1] = True
+                            count += 1
+                    if log is not None:
+                        log.append((s["perek"], s["num"], " ".join(W[max(0, q - 3):e + 2]), " ".join(R[best:best + len(gap) + 6])))
+                q = e
+    return count
+
+
 def close_small_holes(rosh, rif, al, most=4):
     """A word or a few left plain between two bold words of the Rosh (after the check):
     bold where the Rif's passages of the siman have the same words in a row, the bold word
@@ -2812,12 +2948,14 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     al = align(rosh, rif) if rif and rosh else [0] * len(rosh)
     if rif and rosh:
         report.append(f"ברא\"ש {complete_sentences(rosh, rif, al)} מילים בהשלמת משפטים")
+        report.append(f"ברא\"ש {drop_requotes(rosh, rif, al)} מילים בציטוט שחוזר בדברי הרא\"ש (לא מודגשות שוב)")
     gem = sources(root, m)["gemara"]
     if rosh and gem:
         report.append(f"ברא\"ש {gemara_marks(rosh, read(gem[0]))} סימני דפי הגמרא")
     issues = fix(rosh, rif, comm, al, found) if fix else []
     if rif and rosh:
         report.append(f"ברא\"ש {close_small_holes(rosh, rif, al)} מילים בחורים קטנים בציטוטים")
+        report.append(f"ברא\"ש {follow_quote(rosh, rif, al)} מילים בציטוט בשינוי לשון קל")
     from .shas_check import marked, marked_comm
     issues += marked(rosh, m) + marked_comm(comm, m)
     # the amudim and the references as Oz Vehadar prints them ([נה:], (גיטין ו.))
