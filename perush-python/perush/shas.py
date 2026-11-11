@@ -336,7 +336,7 @@ def bridge_quotes(toks, ref_toks, found, para_of, most=12, edge=8):
 
     def own(k):
         n = norm(toks[k][0])
-        return n in OWN or toks[k][0].startswith("(") or toks[k][1] not in (False, True)
+        return n in OWN or n in ("קיל", "וקיל", "דקיל", "והלכתא") or toks[k][0].startswith("(") or toks[k][1] not in (False, True)
     order = sorted(found)
     for (a1, b1, c1, d1), (a2, b2, c2, d2) in zip(order, order[1:]):
         gs = list(range(b1 + 1, a2))
