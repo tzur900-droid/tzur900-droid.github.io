@@ -20,20 +20,20 @@ from perush import shas, shas_book, shas_check, textlayout  # noqa: E402
 textlayout.load_bundled_fonts(os.path.join(HERE, "fonts"))
 
 
-def style_name(st, base):
+def style_name(st, base, part):
     """A name for a character style, by its font and its size beside the base text's."""
     k = round(st.size / base.size, 2)
     fam = {"Frank Ruhl Libre": "FrankRuhl", "Frank Ruhl Libre Medium": "FrankRuhlMedium",
            "Frank Ruhl Libre SemiBold": "FrankRuhlSemiBold", "Drugulin CLM": "Drugulin",
            "David Libre": "David"}.get(st.family, st.family)
-    return f"{fam}{'-Bold' if st.bold else ''}-{k}"
+    return f"{part}-{fam}{'-Bold' if st.bold else ''}-{k}"
 
 
-def runs(words, base, styles, kinds):
+def runs(words, base, styles, part):
     """[Word] -> [{text, style, (note)}], consecutive words of a style joined."""
     out = []
     for w in words:
-        name = style_name(w.style, base)
+        name = style_name(w.style, base, part)
         styles[name] = {"font": w.style.family, "bold": w.style.bold, "size": round(w.style.size, 2),
                         "of_base": round(w.style.size / base.size, 2)}
         note = w.ref[4:] if isinstance(w.ref, str) and w.ref.startswith("הגה:") else None
@@ -75,15 +75,15 @@ def export(root, m, out_dir):
     for u in b.rosh_units_list:
         kind = {"p": "paragraph", "h": "heading"}.get(u.kind, u.kind)
         data["rosh"].append({"kind": kind, "siman": u.ref if u.kind == "p" else None, "first_of_siman": u.first,
-                             "runs": runs(u.words, b.st_rosh, styles, None)})
+                             "runs": runs(u.words, b.st_rosh, styles, "Rosh")})
     for k, u in enumerate(b.units):
         data["rif"].append({"kind": {"p": "passage", "h": "perek_end"}.get(u.kind, u.kind),
-                            "passage": u.ref, "first_word": b.off[k], "runs": runs(u.words, b.st_rif, styles, None)})
+                            "passage": u.ref, "first_word": b.off[k], "runs": runs(u.words, b.st_rif, styles, "Rif")})
     for k, e in enumerate(b.comm):
         a = e["c_start"]
         z = b.comm[k + 1]["c_start"] if k + 1 < len(b.comm) else len(b.cwords)
         data["comments"].append({"passage": e["para"], "anchor_rif_word": b.c_pmax[k] if k < len(b.c_pmax) else None,
-                                 "runs": runs(b.cwords[a:z], b.st_comm, styles, None)})
+                                 "runs": runs(b.cwords[a:z], b.st_comm, styles, "Comm")})
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, f"{m}.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=0)
