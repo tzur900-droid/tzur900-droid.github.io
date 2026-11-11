@@ -1123,6 +1123,10 @@ def gemara_marks(rosh, gem_lines):
         if cur is None or n > cur:
             marks.append((a, label))
             cur = n
+    # the first amud at the start of the Rosh (its first words, the Mishna, are often
+    # matched to where the Gemara brings them again a little later)
+    if marks:
+        marks[0] = (0, marks[0][1])
     # into the text, from the end so that the places stay right
     for a, label in reversed(marks):
         i, pi, ti = flat[a]
