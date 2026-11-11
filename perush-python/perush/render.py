@@ -50,34 +50,44 @@ def draw_line(p, line, x_right, top):
 
 def draw_oz_head(p, page, h):
     """The head of a page as in Oz Vehadar: the perek great in the middle and the amudim
-    under it in square brackets; at the outer edge the page's number (in a grey box where a
-    day begins) and the name of the work, at the inner edge the masechet."""
+    under it in square brackets; the name of the work in two, one word on each side of
+    the perek (רבינו ... אשר); the page's number at the outer edge (in a grey box where a
+    day begins). No rule under it."""
     from .textlayout import width
-    m, R = page.rules[0][0], page.rules[0][2]
+    m, R = page.head_span
     st, big, sub = h["st"], h["big"], h["subst"]
     base = h["base"]
+    mid = (m + R) / 2
     p.setPen(QColor("black"))
+    tw = width(big, h["title"]) if h["title"] else 0.0
     if h["title"]:
         p.setFont(qfont(big))
-        p.drawText(QPointF((m + R) / 2 - width(big, h["title"]) / 2, base), h["title"])
+        p.drawText(QPointF(mid - tw / 2, base), h["title"])
     if h["sub"]:
         p.setFont(qfont(sub))
-        p.drawText(QPointF((m + R) / 2 - width(sub, h["sub"]) / 2, h["sub_base"]), h["sub"])
+        p.drawText(QPointF(mid - width(sub, h["sub"]) / 2, h["sub_base"]), h["sub"])
     bold = st.with_bold(True)
-    gap = st.size * 1.2
-    num, work, inner = h["num"], h["work"], h["inner"]
-    nw, ww, iw = width(bold, num), width(st, work), width(st, inner)
+    num = h["num"]
+    nw = width(bold, num)
+    right_word, left_word = h["work"]
+    # the number at the outer edge; each word of the name midway between the perek and
+    # the edge on its side (on the outer side: between the perek and the number)
     if h["outer"] == "right":
-        xn, xw, xi = R - nw, R - nw - gap - ww, m
+        xn = R - nw
+        right_end, left_end = xn - st.size, m
     else:
-        xn, xw, xi = m, m + nw + gap, R - iw
+        xn = m
+        right_end, left_end = R, m + nw + st.size
+    p.setFont(qfont(st))
+    for word, a, c in ((right_word, mid + tw / 2, right_end), (left_word, left_end, mid - tw / 2)):
+        if word:
+            ww = width(st, word)
+            p.drawText(QPointF((a + c) / 2 - ww / 2, base), word)
     if h["box"]:
         p.fillRect(QRectF(xn - 3, base - st.size * 0.95, nw + 6, st.size * 1.35), QColor("#d6d6d6"))
+    p.setPen(QColor("black"))
     p.setFont(qfont(bold))
     p.drawText(QPointF(xn, base), num)
-    p.setFont(qfont(st))
-    p.drawText(QPointF(xw, base), work)
-    p.drawText(QPointF(xi, base), inner)
 
 
 def draw_page(p, page):

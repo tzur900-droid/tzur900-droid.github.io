@@ -1910,11 +1910,14 @@ class Book:
                 "st": self.head_style, "big": big, "subst": Style("Frank Ruhl Libre", self.hs * 0.95),
                 "title": title, "sub": sub, "base": base, "sub_base": base + self.hs * 1.15,
                 "num": heb(first + n) if rif_off is None or n < rif_off else heb(n - rif_off + 1),
-                "work": ("רבינו אשר" if pg["kind"] == "rosh" else title_rif),
+                # the work's name on the two sides of the perek: רבינו ... אשר
+                "work": (("רבינו", "אשר") if pg["kind"] == "rosh" else
+                         (("רי\"ף", self.comm_name) if self.comm_name else ("הלכות", "רב אלפס"))),
                 "inner": self.name, "outer": "left" if n % 2 == 0 else "right", "box": day is not None}
             if day is not None:
                 page.oz_head["num"] = f"יום {heb(day)} · {page.oz_head['num']}"
-            page.rules.append((L, base + self.hs * 1.15 + 1.5 * PT_PER_MM, R))
+            # (no rule under the head, as in Oz Vehadar: only its span)
+            page.head_span = (L, R)
             top = T + self.head_h
             page.marks, page.boxes = [], []
             # where a day begins: "יום" over its number in a grey box, in the margin beside
