@@ -207,3 +207,26 @@ def marked(rosh, m, path=MARKED):
         if not hits or not all(flat[hits[0] + q][1] is True for q in range(len(w))):
             out.append({"kind": "regress", "where": m, "text": ph, "fixed": False})
     return out
+
+
+MARKED_COMM = os.path.join(os.path.dirname(MARKED), "comm_bold.txt")
+
+
+def marked_comm(comm, m, path=MARKED_COMM):
+    """The same for the commentary (tests/comm_bold.txt): bold as Rashi's or as a dibbur."""
+    out = []
+    if not os.path.exists(path):
+        return out
+    flat = [t for e in comm for t in e["tokens"] if t[1] not in ("gem", "src")]
+    seq = [norm(t[0]) for t in flat]
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#") or "|" not in line:
+            continue
+        mm, ph = [x.strip() for x in line.split("|", 1)]
+        if mm != m:
+            continue
+        w = [norm(x) for x in ph.split()]
+        hits = [k for k in range(len(seq) - len(w) + 1) if seq[k:k + len(w)] == w]
+        if not hits or not all(flat[hits[0] + q][1] in ("rashi", "dh", True) for q in range(len(w))):
+            out.append({"kind": "regress", "where": m, "text": ph, "fixed": False})
+    return out
