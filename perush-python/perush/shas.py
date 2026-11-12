@@ -1403,6 +1403,8 @@ class Book:
             s_ = {"label": lab, "open": big, "gem": gem, "rashi": rashi, "hadran": b, "dh": dh, "copen": copen, "src": gem, "star": Style("Frank Ruhl Libre", st.size * 0.7, True),
                   "clab": clab}.get(bold) or (b if bold else st)
             out.append(Word(w, s_, width(s_, w), t[2] if len(t) > 2 else None))
+            # its part in the text, for the character styles of InDesign
+            out[-1].role = ROLES.get(bold) if isinstance(bold, str) else ("ציטוט" if bold else "טקסט")
         return out
 
     def marker(self, day, st):
@@ -1410,9 +1412,12 @@ class Book:
         t = f"יום {heb(day)}"
         return Unit("d", [Word(t, s, width(s, t))])
 
-    def heading(self, text, st, k=1.3):
+    def heading(self, text, st, k=1.3, role="כותרת"):
         s = Style(st.family, st.size * k, True)
-        return Unit("h", [Word(w, s, width(s, w)) for w in text.split()])
+        ws = [Word(w, s, width(s, w)) for w in text.split()]
+        for w in ws:
+            w.role = role
+        return Unit("h", ws)
 
     def rosh_units(self, day_at):
         """day_at: siman index -> day number starting there."""
@@ -1424,13 +1429,13 @@ class Book:
                 if perek:
                     # as in Oz Vehadar: "פרק שני", great, in the letters of the Rif
                     name = "פרק " + ORDINALS[nperek] if nperek < len(ORDINALS) else perek
-                    u = self.heading(name, Style(RIF_FONT, self.st_rosh.size), 1.6)
+                    u = self.heading(name, Style(RIF_FONT, self.st_rosh.size), 1.6, "כותרת פרק")
                     u.space = 1.9
                     units.append(u)
             for k, p in enumerate(s["paras"]):
                 if p and p[0][1] == "hadran":
                     # "הדרן עלך ...": on its own line in the middle, bold, a little larger
-                    u = self.heading(" ".join(w for w, *_ in p), Style(RIF_FONT, self.st_rosh.size), 1.15)
+                    u = self.heading(" ".join(w for w, *_ in p), Style(RIF_FONT, self.st_rosh.size), 1.15, "הדרן")
                     u.space = 1.8
                     units.append(u)
                     continue
@@ -1460,6 +1465,7 @@ class Book:
             ws = [Word(w, hst, width(hst, w)) for w in text.split()]
             for w in ws:
                 w.line = "center"
+                w.role = "הדרן"
             return Unit("h", ws)
         # "סליק פירקא" at the head of a passage: the perek's הדרן in its place (as in Oz
         # Vehadar), not both of them one after the other
@@ -1510,13 +1516,14 @@ class Book:
                     if w.style.family == self.st_rif.family and w.style.size == self.st_rif.size:
                         # (as the הדרן put in where the Rif has none: bold, in its letters)
                         w.style, w.w = hst, width(hst, w.text)
+                    w.role = "הדרן"
                     w.line = "center"
                     w.brk = False
                 if f is not None:
                     w = ws[f]
                     st = Style(RIF_FONT, self.st_rif.size * 1.6, True)
                     big = Word(w.text, st, width(st, w.text), w.ref)
-                    big.brk = True
+                    big.brk, big.role = True, "פתיחת פרק"
                     for x in ws[r:]:
                         x.brk = False
                     ws = ws[:r] + [big] + ws[r:f] + ws[f + 1:]
@@ -1528,6 +1535,7 @@ class Book:
                 st = Style(RIF_FONT, self.st_rif.size * 2.2, True)
                 big = Word(w.text, st, width(st, w.text), w.ref)
                 big.line, big.framed = "center", True
+                big.role = "מילה פותחת מסכת"
                 # (a mark before it, as of the amud, goes on after it, in the text)
                 ws = [big] + ws[:first] + ws[first + 1:]
             elif j in perek and first is not None and j not in skip_start:
@@ -1535,6 +1543,7 @@ class Book:
                 w = ws[first]
                 st = Style(RIF_FONT, self.st_rif.size * 1.6, True)
                 big = Word(w.text, st, width(st, w.text), w.ref)
+                big.role = "פתיחת פרק"
                 # (the amud's mark before it goes on after it, not on a line of its own)
                 ws = [big] + ws[:first] + ws[first + 1:]
                 for w in ws:
@@ -2381,7 +2390,8 @@ AMUD = re.compile(r"^([א-ת\"״׳']{1,6})(?:\s+ע(?:\"|''|״|')([אב])|([.:]))
 def amud_label(text):
     """'ב ע"א', 'י"ט ע"ב', 'נה:' -> 'ב.', 'יט:', 'נה:'; or None."""
     m = AMUD.match(text.strip())
-    if not m:
+    # (a number, not a word: "(סוטה ספק:)" is the Gemara's words, not סוטה, amud ספק)
+    if not m or not heb_num(m.group(1)):
         return None
     side = m.group(3) or ("." if m.group(2) == "א" else ":")
     return re.sub(r"[\"״׳']", "", m.group(1)) + side
@@ -2395,6 +2405,101 @@ BAVLI = ["ברכות", "שבת", "עירובין", "ערובין", "פסחים",
 DAF_WORDS = ("דף", "בדף", "ובדף", "לדף")
 
 
+# the parts of the text, as the character styles are named for InDesign
+ROLES = {"label": "מתני גמ", "open": "פתיחת סימן", "gem": "דף גמרא", "src": "מראה מקום", "rashi": "לשון רשי",
+         "dh": "דיבור המתחיל", "copen": "פתיחת משנה", "clab": "מתני גמ", "star": "כוכבית", "hadran": "הדרן"}
+
+TANACH = ["בראשית", "שמות", "ויקרא", "במדבר", "דברים", "יהושע", "שופטים", "שמואל", "ש\"א", "ש\"ב",
+          "מלכים", "מ\"א", "מ\"ב", "ישעיה", "ישעיהו", "ירמיה", "ירמיהו", "יחזקאל", "הושע", "יואל", "עמוס",
+          "עובדיה", "יונה", "מיכה", "נחום", "חבקוק", "צפניה", "חגי", "זכריה", "מלאכי", "תהלים", "תהילים",
+          "משלי", "איוב", "שיר", "רות", "איכה", "קהלת", "אסתר", "דניאל", "עזרא", "נחמיה", "דברי", "דה\"א", "דה\"ב"]
+MISHNA_ONLY = ["פאה", "דמאי", "כלאים", "שביעית", "תרומות", "מעשרות", "מעשר", "חלה", "ערלה", "ביכורים",
+               "עדיות", "אבות", "מדות", "מידות", "קנים", "כלים", "אהלות", "נגעים", "פרה", "טהרות", "מקואות",
+               "מכשירין", "זבים", "עוקצין", "ידים", "תוספתא", "ירושלמי", "רמב\"ם", "מרדכי", "במרדכי", "הגהות",
+               "בהגהות", "טור", "ספרי", "ספרא", "מכילתא"]
+REF_WORDS = ["פרק", "פ'", "בפרק", "ריש", "סוף", "סי'", "סימן", "הלכה", "הל'", "הלכות", "מהל'", "מהלכות", "משנה",
+             "מ\"ב", "שם", "ושם", "פירקין", "בפירקין", "דפירקין", "ועיין", "עיין", "וע'", "ע'", "דף", "עמוד"]
+
+
+HEB_VAL = {c: v for c, v in zip("אבגדהוזחטיכלמנסעפצקרשת", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50,
+                                                               60, 70, 80, 90, 100, 200, 300, 400])}
+HEB_VAL.update({"ך": 20, "ם": 40, "ן": 50, "ף": 80, "ץ": 90})
+
+
+def heb_num(w):
+    """A Hebrew numeral as a reference writes it (כ״ה, ה׳, טו, קטז, ב'): its letters from the
+    greatest down (ט"ו, ט"ז as they are written), not a word (ספק, נמי)."""
+    w = re.sub(r"[׳'״\"]", "", w.strip(".,:;"))
+    if not re.fullmatch(r"[א-ת]{1,4}", w) or any(c not in HEB_VAL for c in w):
+        return False
+    vals = [HEB_VAL[c] for c in w]
+    if w.endswith(("טו", "טז")):
+        vals = vals[:-2] + [9, 9]
+    return all(a >= b for a, b in zip(vals, vals[1:])) and not (len(w) > 1 and vals[-1] >= 10 and vals[-2] == vals[-1] and vals[-1] < 100)
+
+
+def other_ref(words):
+    """The words inside round brackets, when they are a reference to a verse or another work
+    ((דברים כ״ה:ה׳), (שם ג), (פי"ב מהל' אישות), (ה"ד), (סי' ב), (תוספתא קידושין ה)): the
+    reference as Oz Vehadar prints it ((דברים כה, ה)), else None."""
+    if not words:
+        return None
+    ws = [w.strip(".,;") for w in words]
+    first = ws[0]
+    # (a masechet of the Bavli is a reference by its amud, set_refs: not first here, only
+    # after the name of a work, (תוספתא קידושין ה))
+    names = {norm(x) for x in TANACH} | {norm(x) for x in MISHNA_ONLY}
+    tract = {norm(x) for n in BAVLI for x in n.split()}
+    refw = {norm(x) for x in REF_WORDS}
+
+    def verse(w):
+        # כ״ה:ה׳ -> כה, ה
+        if re.fullmatch(r"[א-ת״׳'\"]{1,5}:[א-ת״׳'\"]{1,5}(?:-[א-ת״׳'\"]{1,5})?", w):
+            a, b = w.split(":")
+            return re.sub(r"[׳״'\"]", "", a) + ", " + re.sub(r"[׳״'\"]", "", b)
+        return None
+    if norm(first) in {norm(x) for x in TANACH}:
+        rest = ws[1:]
+        if len(rest) <= 3 and all(verse(w) or heb_num(w) or norm(w) in {norm(x) for x in ("השירים", "הימים", "א", "ב")}
+                                  for w in rest):
+            return " ".join(verse(w) or w.replace("׳", "").replace("״", "") for w in ws)
+        return None
+    if norm(first) in ("שמ", "ושמ") and len(ws) <= 3 and all(heb_num(w) or verse(w) for w in ws[1:]):
+        return " ".join(verse(w) or w for w in ws)
+    # a halacha of the Yerushalmi, a perek of the Rambam: ה"ד, פי"ב, פ"ז
+    if len(ws) <= 8 and re.fullmatch(r"(?:ה|פ|פר|ס)[א-ת]?[\"״][א-ת]|הלט[\"״][א-ת]", first.replace("'", "")):
+        return " ".join(ws)
+    if len(ws) <= 9 and (norm(first) in refw or norm(first) in names) and \
+            any(heb_num(w) or norm(w) in refw for w in ws[1:]) and \
+            all(heb_num(w) or norm(w) in refw or norm(w) in names or (k > 0 and norm(w) in tract) or re.fullmatch(r"[א-ת]+[\"״][א-ת]+", w)
+                or k > 0 and norm(ws[k - 1]) in (norm("מהל'"), norm("מהלכות"), norm("הלכות"), norm("אישות"))
+                or norm(w) in {norm(x) for x in ("ד", "דכתובות", "דגיטין", "דפאה", "דיבמות", "בתרא", "חיי", "מלוה",
+                                                  "ולוה", "אישות", "גירושין", "יבום", "וחליצה", "במרדכי", "בגיטין")}
+                for k, w in enumerate(ws)):
+        return " ".join(ws)
+    if norm(first) in (norm("ועיין"), norm("עיין")) and len(ws) <= 6:
+        return " ".join(ws)
+    return None
+
+
+def split_glued(toks):
+    """A bracket stuck to a word ("(יבמות יח.)הלכך", "שנאמר(ויקרא כ״ב:י״ג)"): two tokens."""
+    out = []
+    for t in toks:
+        w = t[0]
+        m = re.fullmatch(r"(.*[)\]][.,:;]?)([א-ת].*)", w) if isinstance(w, str) and ")" in w else None
+        m2 = re.fullmatch(r"([א-ת][^()]*)(\(.*)", w) if isinstance(w, str) else None
+        if m and t[1] in (True, False):
+            out.append([m.group(1)] + list(t[1:]))
+            out.append([m.group(2)] + list(t[1:]))
+        elif m2 and t[1] in (True, False):
+            out.append([m2.group(1)] + list(t[1:]))
+            out.append([m2.group(2)] + list(t[1:]))
+        else:
+            out.append(t)
+    return out
+
+
 def set_refs(toks, start=0, here=None, masechet=None):
     """The Gemara's amudim and references, as printed by Oz Vehadar: an amud of the
     masechet in square brackets, without "דף" ([נה:], "gem"); a reference to another place
@@ -2403,6 +2508,7 @@ def set_refs(toks, start=0, here=None, masechet=None):
     place in this masechet as (לקמן לה:) or (לעיל ה.), by the amud the text is at
     (here: {"n": ...}, kept from one call to the next; None: no such word). Each becomes
     one word. Tokens before start are left as they are (the dibbur hamatchil). -> new list."""
+    toks = list(toks[:start]) + split_glued(toks[start:])
     out, k = list(toks[:start]), start
     names = sorted(((n.split(), n) for n in BAVLI), key=lambda x: -len(x[0]))
     mine = masechet.split() if masechet else None
@@ -2441,8 +2547,12 @@ def set_refs(toks, start=0, here=None, masechet=None):
                 text = " ".join(t[0] for t in toks[k:e + 1])
                 end = text.rindex(close)
                 inner, trail = text[1:end].strip(), text[end + 1:]
+                # ((גיטין (דף סו.)): one pair of brackets)
+                if "(" in inner or ")" in inner:
+                    inner = inner.replace("(", " ").replace(")", " ")
+                    trail = trail[1:] if trail.startswith(")") else trail
                 words = inner.split()
-                rest = [x for x in words if x not in DAF_WORDS]
+                rest = [x for x in words if x not in DAF_WORDS and x not in ("ד'", "ד׳")]
                 lab = amud_label(" ".join(rest)) if rest else None
                 extra = list(toks[k][2:])
                 # (square brackets: the amud the text is at; one far from it is a reference)
@@ -2476,6 +2586,13 @@ def set_refs(toks, start=0, here=None, masechet=None):
                     ref(place, at, trail, extra)
                     k = e + 1
                     continue
+                if close == ")":
+                    # a verse, the Yerushalmi, the Rambam ...: a reference too
+                    r = other_ref(words)
+                    if r:
+                        out.append([f"({r}){trail}", "src"] + extra)
+                        k = e + 1
+                        continue
         # without brackets: (a masechet) (דף) an amud
         nm = name_at(k)
         j = k + (nm[1] if nm else 0)
@@ -2938,11 +3055,10 @@ def check_layout(book, rosh_pages, rif_pages):
     return out
 
 
-def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=None):
-    """The book of masechet m: (pages, report, info). sizes: the Book's sizes (margin,
-    rosh_size, ...). fix(rosh, rif, comm, al, found), if given, checks the bold before the
-    layout and corrects it, and returns what it found. Pages: the Rosh, then (from a
-    left-hand page, after a blank one when needed) the Rif."""
+def prepare_masechet(root, m, fix=None):
+    """The text of masechet m, ready to print, before the layout: the Rosh with the Rif's
+    wording bold, the Rif, the commentary, the amud marks and references as printed.
+    -> (rosh, rif, comm, comm_name, report, issues, al)."""
     found = []
     rosh, rif, comm, comm_name, report = load_masechet(root, m, found)
     al = align(rosh, rif) if rif and rosh else [0] * len(rosh)
@@ -2969,6 +3085,15 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         # amud marks come from comm_gemara_marks)
         here = {"n": rif[e["para"]].get("amud_n") if rif and e.get("para") is not None else None}
         e["tokens"] = daf_before_mishna(set_refs(e["tokens"], e.get("dh_len", 0), here=here, masechet=m))
+    return rosh, rif, comm, comm_name, report, issues, al
+
+
+def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=None):
+    """The book of masechet m: (pages, report, info). sizes: the Book's sizes (margin,
+    rosh_size, ...). fix(rosh, rif, comm, al, found), if given, checks the bold before the
+    layout and corrects it, and returns what it found. Pages: the Rosh, then (from a
+    left-hand page, after a blank one when needed) the Rif."""
+    rosh, rif, comm, comm_name, report, issues, al = prepare_masechet(root, m, fix)
     # the days go by whole pages (after the layout): no marks in the text
     rosh_days, rif_days = {}, {}
     perek_at, perek_end = perek_breaks(rosh, rif, al)

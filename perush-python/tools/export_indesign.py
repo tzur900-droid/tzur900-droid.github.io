@@ -20,8 +20,14 @@ from perush import shas, shas_book, shas_check, textlayout  # noqa: E402
 textlayout.load_bundled_fonts(os.path.join(HERE, "fonts"))
 
 
-def style_name(st, base, part):
-    """A name for a character style, by its font and its size beside the base text's."""
+PART = {"Rosh": "רא\"ש", "Rif": "רי\"ף", "Comm": "מפרש"}
+
+
+def style_name(st, base, part, role=None):
+    """A name for a character style: by the part of the text it is (רא"ש - מראה מקום), so
+    that a part's font is changed in one place; else by its font and size."""
+    if role:
+        return f"{PART.get(part, part)} - {role}"
     k = round(st.size / base.size, 2)
     fam = {"Frank Ruhl Libre": "FrankRuhl", "Frank Ruhl Libre Medium": "FrankRuhlMedium",
            "Frank Ruhl Libre SemiBold": "FrankRuhlSemiBold", "Drugulin CLM": "Drugulin",
@@ -33,7 +39,11 @@ def runs(words, base, styles, part):
     """[Word] -> [{text, style, (note)}], consecutive words of a style joined."""
     out = []
     for w in words:
-        name = style_name(w.style, base, part)
+        name = style_name(w.style, base, part, getattr(w, "role", None))
+        if name in styles and (styles[name]["font"], styles[name]["bold"], styles[name]["size"]) != \
+                (w.style.family, w.style.bold, round(w.style.size, 2)):
+            # (the same part in another size: its own style)
+            name += f" {round(w.style.size / base.size, 2)}"
         styles[name] = {"font": w.style.family, "bold": w.style.bold, "size": round(w.style.size, 2),
                         "of_base": round(w.style.size / base.size, 2)}
         note = w.ref[4:] if isinstance(w.ref, str) and w.ref.startswith("הגה:") else None
