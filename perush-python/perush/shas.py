@@ -2482,6 +2482,159 @@ def other_ref(words):
     return None
 
 
+def drop_stray_closers(toks, back=40):
+    """A closing bracket standing alone ("בתלמוד תורה ) עד", the source's leftover of a mark
+    taken out) with no opening one before it: out, its stop kept. -> new list."""
+    out = []
+    for t in toks:
+        w = t[0]
+        if isinstance(w, str) and t[1] in (True, False) and re.fullmatch(r"[)\]][.,:;]?", w):
+            o, c = ("(", ")") if w[0] == ")" else ("[", "]")
+            opened = sum(x[0].count(o) - x[0].count(c) for x in out[-back:] if isinstance(x[0], str))
+            if opened <= 0:
+                if len(w) > 1 and out:
+                    out[-1] = [out[-1][0] + w[1:]] + list(out[-1][1:])
+                continue
+        out.append(t)
+    return out
+
+
+def stray_marks(seqs, tol=4):
+    """The amud marks of a text that runs in the Gemara's order (the Rif, the commentary),
+    [(list of tokens), ...] in order: a mark far out of that order ("[נז:]" among [ב.], [ב:])
+    is the text quoting another place of the masechet, not where it is: a reference,
+    (לקמן נז:), in place. The order is the longest run of marks that does not go back.
+    -> marks made references."""
+    at = [(toks, k, gem_daf(re.sub(r"[\[\]]", "", t[0]).rstrip(",;")))
+          for toks in seqs for k, t in enumerate(toks) if t[1] == "gem"]
+    at = [x for x in at if x[2] is not None]
+    n = len(at)
+    if n < 3:
+        return 0
+    # longest non-decreasing subsequence (patience, with the way back)
+    import bisect as _b
+    tails, tail_i, prev = [], [], [-1] * n
+    for i, (_, _, v) in enumerate(at):
+        j = _b.bisect_right(tails, v)
+        if j == len(tails):
+            tails.append(v)
+            tail_i.append(i)
+        else:
+            tails[j], tail_i[j] = v, i
+        prev[i] = tail_i[j - 1] if j else -1
+    keep, i = set(), tail_i[-1]
+    while i >= 0:
+        keep.add(i)
+        i = prev[i]
+    count, last = 0, None
+    for i, (toks, k, v) in enumerate(at):
+        if i in keep:
+            last = v
+            continue
+        nxt = next((at[q][2] for q in range(i + 1, n) if q in keep), None)
+        lo = last if last is not None else (nxt if nxt is not None else v)
+        hi = nxt if nxt is not None else lo
+        if lo - tol <= v <= hi + tol:
+            continue
+        lab = re.sub(r"[\[\]]", "", toks[k][0])
+        trail = ""
+        m = re.match(r"(.*?[.:])([,;:]*)$", lab)
+        if m:
+            lab, trail = m.group(1), m.group(2)
+        toks[k] = [f"({'לקמן' if v > lo else 'לעיל'} {lab}){trail}", "src"] + list(toks[k][2:])
+        count += 1
+    return count
+
+
+_PERAKIM = None
+# the last daf of each masechet (a reference past it is to another masechet)
+LAST_DAF = {"ברכות": "סד", "שבת": "קנז", "עירובין": "קה", "פסחים": "קכא", "יומא": "פח", "סוכה": "נו", "ביצה": "מ",
+            "ראש השנה": "לה", "תענית": "לא", "מגילה": "לב", "מועד קטן": "כט", "חגיגה": "כז", "יבמות": "קכב",
+            "כתובות": "קיב", "נדרים": "צא", "נזיר": "סו", "סוטה": "מט", "גיטין": "צ", "קידושין": "פב",
+            "בבא קמא": "קיט", "בבא מציעא": "קיט", "בבא בתרא": "קעו", "סנהדרין": "קיג", "מכות": "כד",
+            "שבועות": "מט", "עבודה זרה": "עו", "הוריות": "יד", "זבחים": "קכ", "מנחות": "קי", "חולין": "קמב",
+            "בכורות": "סא", "ערכין": "לד", "תמורה": "לד", "כריתות": "כח", "מעילה": "כב", "נדה": "עג"}
+
+
+def skel(w):
+    """A word without its ו and י after the first letter (ניזונית, ניזונת), for names."""
+    w = norm(w)
+    return w[:1] + re.sub(r"[וי]", "", w[1:])
+
+
+def perakim():
+    """{the perek's name in loose words (a tuple): {masechtot}} from data/perakim.txt."""
+    global _PERAKIM
+    if _PERAKIM is None:
+        _PERAKIM = {}
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "perakim.txt")
+        for line in open(path, encoding="utf-8"):
+            if ":" not in line or line.startswith("#"):
+                continue
+            m, rest = line.split(":", 1)
+            for name in rest.split("|"):
+                key = tuple(skel(w) for w in name.split())
+                if key:
+                    _PERAKIM.setdefault(key, set()).add(m.strip())
+    return _PERAKIM
+
+
+PEREK_WORDS = {skel(w) for w in ("פרק", "בפרק", "ובפרק", "דפרק", "פ'", "בפ'", "ובפ'", "דפ'", "ריש", "בריש", "סוף", "בסוף", "שלהי", "בשלהי")}
+
+
+def perek_named(out, most=8):
+    """The masechtot of the perek the text names just before a reference ("בפרק יש נוחלין
+    (דף קלא.)", "דאלו נערות (דף לט.)"): a set, or None."""
+    names = perakim()
+    raw = [norm(t[0]) for t in out[-most:] if t[1] in (True, False, "rashi", "dh")]
+    words = [skel(w) for w in raw]
+    best = None
+    for i in range(len(words)):
+        for key, ms in names.items():
+            n = len(key)
+            got = words[i:i + n]
+            if len(got) < n:
+                continue
+            ok = got == list(key) or (raw[i][:1] in "בדוהל" and [skel(raw[i][1:])] + got[1:] == list(key)) \
+                or (raw[i][:2] in ("וב", "וד", "דב", "וה", "בה", "דה") and [skel(raw[i][2:])] + got[1:] == list(key))
+            if not ok:
+                continue
+            # (a name of one word only after "פרק": "פרק המביא")
+            if n == 1 and not (i > 0 and words[i - 1] in PEREK_WORDS) and not (raw[i][:1] in "בד" and got != list(key)):
+                continue
+            if i + n < len(words) - 3:
+                continue
+            if best is None or n > best[0]:
+                best = (n, ms)
+    return best[1] if best else None
+
+
+def self_refs(seqs, masechet):
+    """A reference in a text without its own place in the masechet (the Rif) to an amud of
+    this masechet by name, "(כתובות טו:)" in Ketubot: (לעיל טו:) or (לקמן טו:), by the amud
+    the text is at (its last mark). One pair of brackets. -> references changed."""
+    count, here = 0, None
+    pre = f"({masechet} "
+    for toks in seqs:
+        for k, t in enumerate(toks):
+            if t[1] == "gem":
+                n = gem_daf(re.sub(r"[\[\]]", "", t[0]).rstrip(",;"))
+                here = n if n is not None else here
+            elif t[1] == "src":
+                w = t[0]
+                if w.count("(") == 1 and w.count(")") > 1:
+                    w = w.replace("))", ")")
+                if w.startswith(pre) and here is not None:
+                    m = re.match(r"\((?:%s) ([א-ת]{1,4}[.:])\)(.*)$" % re.escape(masechet), w)
+                    n = gem_daf(m.group(1)) if m else None
+                    if n is not None and n != here:
+                        w = f"({'לקמן' if n > here else 'לעיל'} {m.group(1)}){m.group(2)}"
+                        count += 1
+                if w != t[0]:
+                    toks[k] = [w] + list(t[1:])
+    return count
+
+
 def split_glued(toks):
     """A bracket stuck to a word ("(יבמות יח.)הלכך", "שנאמר(ויקרא כ״ב:י״ג)"): two tokens."""
     out = []
@@ -2500,7 +2653,7 @@ def split_glued(toks):
     return out
 
 
-def set_refs(toks, start=0, here=None, masechet=None):
+def set_refs(toks, start=0, here=None, masechet=None, cues=False):
     """The Gemara's amudim and references, as printed by Oz Vehadar: an amud of the
     masechet in square brackets, without "דף" ([נה:], "gem"); a reference to another place
     in round brackets, small, without "דף" ((גיטין ו.), "src"), also where the text writes
@@ -2508,7 +2661,25 @@ def set_refs(toks, start=0, here=None, masechet=None):
     place in this masechet as (לקמן לה:) or (לעיל ה.), by the amud the text is at
     (here: {"n": ...}, kept from one call to the next; None: no such word). Each becomes
     one word. Tokens before start are left as they are (the dibbur hamatchil). -> new list."""
-    toks = list(toks[:start]) + split_glued(toks[start:])
+    toks = list(toks[:start]) + drop_stray_closers(split_glued(toks[start:]))
+    # (in the dibbur hamatchil too, the amud in square brackets is a mark: "[דף כא:] אמימר")
+    head, q = [], 0
+    while q < start and q < len(toks):
+        w = toks[q][0]
+        if isinstance(w, str) and w.startswith("[") and q + 1 < len(toks) and norm(w[1:]) == "דפ" \
+                and toks[q + 1][0].rstrip(",;:").endswith("]") and amud_label(toks[q + 1][0].rstrip(",;:").rstrip("]")):
+            lab = amud_label(toks[q + 1][0].rstrip(",;:").rstrip("]"))
+            trail = toks[q + 1][0][len(toks[q + 1][0].rstrip(",;:")):]
+            head.append([f"[{lab}]{trail}", "gem"] + list(toks[q][2:]))
+            if here is not None:
+                here["n"] = gem_daf(lab)
+            q += 2
+            start -= 1
+            continue
+        head.append(toks[q])
+        q += 1
+    toks = head + list(toks[q:])
+    set_refs.last_start = start      # (the dibbur's length now)
     out, k = list(toks[:start]), start
     names = sorted(((n.split(), n) for n in BAVLI), key=lambda x: -len(x[0]))
     mine = masechet.split() if masechet else None
@@ -2521,6 +2692,9 @@ def set_refs(toks, start=0, here=None, masechet=None):
         n = gem_daf(lab)
         if here is None or here.get("n") is None or n is None:
             return None
+        end = gem_daf(LAST_DAF[" ".join(mine)] + ":") if mine and " ".join(mine) in LAST_DAF else None
+        if end is not None and n > end:
+            return ""     # (past the end of the masechet: another one's, not לקמן)
         return "לקמן" if n > here["n"] else "לעיל"
 
     def name_at(j):
@@ -2533,6 +2707,28 @@ def set_refs(toks, start=0, here=None, masechet=None):
 
     def ref(place, lab, trail, extra):
         out.append([f"({' '.join(place + [lab])}){trail}", "src"] + extra)
+
+    def elsewhere(lab):
+        """A place for an amud with no masechet of its own, by the perek named before it:
+        [masechet] of another masechet, [] where it is not known, None: this masechet."""
+        ms = perek_named(out)
+        if not ms or (mine and " ".join(mine) in ms):
+            return None
+        return [sorted(ms)[0]] if len(ms) == 1 else []
+
+    def named_before(most=8):
+        """The masechet the text names a few words before ("שלהי נדרים דכיון דאיהו [דף צא.]"):
+        (its name, how far back), or None. Not past a reference already given."""
+        for back in range(1, min(most, len(out)) + 1):
+            t = out[-back]
+            if t[1] in ("src", "gem"):
+                return None
+            for ws, nm in names:
+                got = [norm(x[0]) for x in out[len(out) - back:len(out) - back + len(ws)]]
+                want = [norm(w) for w in ws]
+                if len(got) == len(ws) and (got == want or (got[0][:1] in "בדומלשכ" and [got[0][1:]] + got[1:] == want)):
+                    return ws, back
+        return None
 
     while k < len(toks):
         w = toks[k][0]
@@ -2558,20 +2754,74 @@ def set_refs(toks, start=0, here=None, masechet=None):
                 # (square brackets: the amud the text is at; one far from it is a reference)
                 far_ = (close == "]" and toks[k][1] != "gem" and here is not None and here.get("n") is not None
                         and lab and gem_daf(lab) is not None and abs(gem_daf(lab) - here["n"]) > 3)
-                if far_:
+                if far_ or (close == "]" and toks[k][1] != "gem" and lab and named_before() is not None
+                            and not (mine and [norm(x) for x in named_before()[0]] == [norm(x) for x in mine])):
+                    # (far from the amud, or of a masechet just named: a reference)
+                    far_ = True
                     close = ")"
                     words = ["דף"] + rest
                 if lab and not far_ and (words[0] == "דף" or close == "]") and len(rest) <= 2 and (close == "]" or here is None):
+                    nb = named_before(3)
+                    prev = norm(out[-1][0]) if out and out[-1][1] in (True, False) else ""
+                    if nb is not None and not (mine and [norm(x) for x in nb[0]] == [norm(x) for x in mine]):
+                        # (of another masechet, named just before it: "בגיטין [כו:]")
+                        ref([], lab, trail, extra)
+                        k = e + 1
+                        continue
+                    if elsewhere(lab) is not None:
+                        # (in a perek of another masechet: "בפרק יש נוחלין (דף קלא.)")
+                        ref(elsewhere(lab), lab, trail, extra)
+                        k = e + 1
+                        continue
+                    if prev in ("לעיל", "לקמנ", "כדלעיל", "כדלקמנ", "דלעיל", "דלקמנ", "ולעיל", "ולקמנ"):
+                        # ("לעיל [סד.]": a reference to that amud, not the amud the text is at)
+                        ref([], lab, trail, extra)
+                        k = e + 1
+                        continue
+                    cue = {norm(x[0]) for x in out[-3:] if x[1] in (True, False, "rashi")}
+                    if close == "]" and cues and cue & {norm(x) for x in ("בגמרא", "בגמ'", "דלעיל", "לעיל", "לקמן", "בפרק",
+                                                                          "פרקין", "בפרקין", "בגמרין")}:
+                        # (the commentary sending to the Gemara: "דלעיל בגמרא [כב.]")
+                        rel = where(lab)
+                        ref([rel] if rel and not cue & {"לעיל", "דלעיל", "לקמנ"} else [], lab, trail, extra)
+                        k = e + 1
+                        continue
                     # an amud of this masechet
                     out.append([f"[{lab}]{trail}", "gem"] + extra)
                     if here is not None:
                         here["n"] = gem_daf(lab)
                     k = e + 1
                     continue
+                if close == "]" and lab is None and rest and any(w in DAF_WORDS for w in words):
+                    # an editor's reference in square brackets ([דף צא. ע"ש], [סוף דף כב:]):
+                    # a reference, in round brackets
+                    lab2 = next((amud_label(x) for x in rest if amud_label(x)), None)
+                    if lab2:
+                        nb = named_before()
+                        place = [] if nb is None or nb[1] <= 2 else list(nb[0])
+                        inside = perek_named([[x, False] for x in rest], most=len(rest))
+                        if inside:
+                            nb = None
+                            place = [] if (mine and " ".join(mine) in inside) or len(inside) > 1 else [sorted(inside)[0]]
+                        if nb is None and elsewhere(lab2) is not None and not inside:
+                            place = elsewhere(lab2)
+                        elif nb is None and not inside and here is not None and where(lab2):
+                            place = [where(lab2)]
+                        out.append([f"({' '.join(place + [amud_label(x) or x for x in rest])}){trail}", "src"] + extra)
+                        k = e + 1
+                        continue
                 if close == ")" and len(rest) <= 5 and ("דף" in words or (rest and amud_label(rest[-1]))):
                     if rest and amud_label(rest[-1]):
                         rest[-1] = amud_label(rest[-1])
                     place, at = rest[:-1], rest[-1]
+                    if not place:
+                        # (no masechet of its own: the one the text has just named, not this one)
+                        nb = named_before()
+                        if nb is not None and not (mine and [norm(x) for x in nb[0]] == [norm(x) for x in mine]):
+                            place = [] if nb[1] <= 2 else list(nb[0])
+                            ref(place, at, trail, extra)
+                            k = e + 1
+                            continue
                     if place and norm(place[0]) in ("מכילתינ", "במכילתינ", "דמכילתינ"):
                         place = list(mine or []) + place[1:]     # (מכילתין: this masechet)
                     if mine and [norm(x) for x in place[:len(mine)]] == [norm(x) for x in mine]:
@@ -2579,6 +2829,8 @@ def set_refs(toks, start=0, here=None, masechet=None):
                         rel = where(at)
                         if rel is not None:
                             place = ([rel] if rel else []) + place[len(mine):]
+                    elif not place and elsewhere(at) is not None:
+                        place = elsewhere(at)
                     elif not place and here is not None:
                         rel = where(at)
                         if rel:
@@ -2611,6 +2863,10 @@ def set_refs(toks, start=0, here=None, masechet=None):
                     place = ([rel] if rel else []) if rel is not None else place
                 elif not nm:
                     prev = norm(out[-1][0]) if out else ""
+                    if elsewhere(lab) is not None:
+                        ref(elsewhere(lab), lab, trail, list(toks[k][2:]))
+                        k = j + 1
+                        continue
                     if prev in ("לקמנ", "לעיל") and out[-1][1] in (False, True):
                         place = [out.pop()[0]]
                     elif where(lab) is not None:
@@ -3080,11 +3336,18 @@ def prepare_masechet(root, m, fix=None):
         x["paras"] = [daf_before_mishna(set_refs(p, here=at, masechet=m)) for p in x["paras"]]
     for p in rif:
         p["tokens"] = daf_before_mishna(set_refs(p["tokens"]))
+    report.append(f"ברי\"ף {stray_marks([p['tokens'] for p in rif])} סימני דף שאינם במקומם הפכו להפניה")
+    self_refs([p["tokens"] for p in rif], m)
     for e in comm:
         # (in the commentary every reference in round brackets is a reference; its own
         # amud marks come from comm_gemara_marks)
         here = {"n": rif[e["para"]].get("amud_n") if rif and e.get("para") is not None else None}
-        e["tokens"] = daf_before_mishna(set_refs(e["tokens"], e.get("dh_len", 0), here=here, masechet=m))
+        e["tokens"] = daf_before_mishna(set_refs(e["tokens"], e.get("dh_len", 0), here=here, masechet=m, cues=True))
+        if e.get("dh_len"):
+            e["dh_len"] = set_refs.last_start
+    report.append(f"ב{comm_name} {stray_marks([e['tokens'] for e in comm])} סימני דף שאינם במקומם הפכו להפניה")
+    self_refs([e["tokens"] for e in comm], m)
+    self_refs([p for x in rosh for p in x["paras"]], m)
     return rosh, rif, comm, comm_name, report, issues, al
 
 
