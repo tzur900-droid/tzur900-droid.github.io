@@ -169,6 +169,12 @@
    "bold": true,
    "size": 14.0,
    "of_base": 1.6
+  },
+  "מפרש - הדרן": {
+   "font": "Drugulin CLM",
+   "bold": true,
+   "size": 9.62,
+   "of_base": 1.1
   }
  }
 }

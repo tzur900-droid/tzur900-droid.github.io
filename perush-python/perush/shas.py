@@ -290,6 +290,10 @@ def stem(x):
     return x
 
 
+OPENERS = {norm(w) for w in """קשיא וקשיא אמר כתב והא הא או תנו יש וכל ואם ה"ג אלא שמא פי' פירוש עלה עוד ועוד
+    ומיהו מיהו ואי אי ולענין וכן וכתב ומ"מ מ"מ ואיכא איכא והיכא היכא ואע"ג אע"ג ונראה נראה""".split()}
+
+
 def extend_dibburim(comm, rif, most=6):
     """A dibbur the source marks short (only אע"פ of "אע"פ שבסקילה"): on to the words that
     go on with it in the Rif's passage, to the end of what the Rif says there at most
@@ -310,6 +314,11 @@ def extend_dibburim(comm, rif, most=6):
             while e2 < len(toks) and toks[e2][1] == "dh":
                 e2 += 1
             run = [loose(t[0]) for t in toks[k:e2] if loose(t[0])]
+            # (a word that opens the commentator's own words, bold in the source as the head
+            # of a paragraph, not a dibbur: "קשיא הלכתא אהלכתא ..." is his question)
+            if e2 - k == 1 and norm(toks[k][0]) in OPENERS:
+                k = e2
+                continue
             # (not the commentary's own words: גרסינן, סליקו, אמר המחבר)
             if run and norm(toks[k][0]) not in ("גרסינ", "וגרסינ", "גרסי", "וגרסי", "סליקו", "אמר") \
                     and not re.search(r"[.:]$", toks[e2 - 1][0]):
@@ -1832,8 +1841,35 @@ class Book:
             if k is not None:
                 day_entry[k] = day
         self.comm_days = len(day_entry)
+        # the perakim in the commentary too: "הדרן עלך ..." in the middle on a line of its
+        # own at the end of a perek (the commentator's own, or the Rif's where he has none),
+        # and the next perek on a new line
+        perek_at = getattr(self, "rif_perek", {}) or {}
+        pstarts = sorted(j for j in perek_at if j > 0)
+        hst = Style(RIF_FONT, self.st_comm.size * 1.1, True)
+
+        def centered(words_):
+            out_ = []
+            for w_ in words_:
+                x = Word(w_, hst, width(hst, w_))
+                x.line, x.brk, x.role = "center", False, "הדרן"
+                out_.append(x)
+            return out_
+
+        def perek_name(j):
+            if perek_at.get(j):
+                return perek_at[j]
+            # (the Rif's own הדרן in the passage before)
+            ws_ = [t[0] for t in self.rif[j - 1]["tokens"]] if j > 0 else []
+            q_ = next((i for i, w_ in enumerate(ws_) if norm(w_) in ("הדרנ", "סליקו")), None)
+            return " ".join(ws_[q_:q_ + 6]).split(":")[0].strip(" .") if q_ is not None else None
+        pk, said = 0, False
         for k, e in enumerate(self.comm):
             toks = e["tokens"]
+            new_perek = None
+            while pk < len(pstarts) and e["para"] >= pstarts[pk]:
+                new_perek = pstarts[pk]
+                pk += 1
             # the dibbur hamatchil in its own letters (square, bold), also where it is Rashi's
             # (and a dibbur the comment comes to in its course, bold in the source: the same)
             toks = [[t[0], "dh"] + list(t[2:]) if (q < e.get("dh_len", 0) and t[1] in (True, "rashi", "dh")) or t[1] is True
@@ -1858,6 +1894,23 @@ class Book:
             sp = space(self.st_comm)
             if ws and sum(w.w + sp for w in ws) >= LONG_COMM * self.wide:
                 ws[0].brk = True
+            # the commentator's own הדרן: on its line in the middle (to its end, or to a
+            # stop), the rest on a new line
+            q = next((i for i, w in enumerate(ws) if norm(w.text) == "הדרנ"), None)
+            if q is not None:
+                end = next((i + 1 for i in range(q, min(len(ws), q + 10)) if re.search(r"[.:]$", ws[i].text)), None)
+                end = end or (len(ws) if len(ws) - q <= 10 else q + 4)
+                ws = ws[:q] + centered([w.text.strip(":.") for w in ws[q:end]]) + ws[end:]
+                if end < len(ws):
+                    ws[end].brk = True
+                said = True
+            if new_perek is not None and ws:
+                ws[0].brk = True
+                if not said:
+                    name = perek_name(new_perek)
+                    if name:
+                        ws = centered(name.split()) + ws
+                said = False
             e["c_start"] = len(self.cwords)
             self.cwords.extend(ws)
             self.c_end_of_para[e["para"]] = len(self.cwords)
@@ -1957,12 +2010,23 @@ class Book:
                     break
                 right, w = width_at(y)
                 cur, nat, j = [words[i]], words[i].w, i + 1
-                while j < n and nat + sp + words[j].w <= w + 0.01 and not getattr(words[j], "brk", False):
+                if getattr(words[i], "line", None) == "center":
+                    # "הדרן עלך ...": a line of its own in the middle
+                    while j < n and getattr(words[j], "line", None) == "center" and nat + sp + words[j].w <= w + 0.01:
+                        nat += sp + words[j].w
+                        cur.append(words[j])
+                        j += 1
+                    col.append(Line(cur, right, w, nat, self.lh_comm, self.st_comm, "center", True, y))
+                    y += self.lh_comm
+                    i = j
+                    continue
+                while j < n and nat + sp + words[j].w <= w + 0.01 and not getattr(words[j], "brk", False) \
+                        and getattr(words[j], "line", None) != "center":
                     nat += sp + words[j].w
                     cur.append(words[j])
                     j += 1
                 # a line before a long comment that begins a line of its own: not stretched
-                end = j >= n or getattr(words[j], "brk", False)
+                end = j >= n or getattr(words[j], "brk", False) or getattr(words[j], "line", None) == "center"
                 col.append(Line(cur, right, w, nat, self.lh_comm, self.st_comm, "justify", end, y))
                 y += self.lh_comm
                 i = j
@@ -2761,6 +2825,7 @@ def perakim():
             if ":" not in line or line.startswith("#"):
                 continue
             m, rest = line.split(":", 1)
+            m = m.lstrip("+")
             for name in rest.split("|"):
                 key = tuple(skel(w) for w in name.split())
                 if key:
@@ -2822,6 +2887,127 @@ def self_refs(seqs, masechet):
                 if w != t[0]:
                     toks[k] = [w] + list(t[1:])
     return count
+
+
+def drop_repeated_marks(seqs):
+    """A mark of the amud the text is already at ([יב.] ... [יב.]: the Rif's source marks
+    each Gemara it brings): once. -> marks taken out."""
+    count, last = 0, None
+    for toks in seqs:
+        k = 0
+        while k < len(toks):
+            t = toks[k]
+            if t[1] == "gem":
+                n = gem_daf(re.sub(r"[\[\]]", "", t[0]).rstrip(",;"))
+                if n is not None and n == last:
+                    trail = re.sub(r"^.*\]", "", t[0])
+                    if trail and k > 0:
+                        toks[k - 1] = [toks[k - 1][0] + trail] + list(toks[k - 1][1:])
+                    del toks[k]
+                    count += 1
+                    continue
+                last = n if n is not None else last
+            k += 1
+    return count
+
+
+def rashi_not_rif(comm, rif, share=0.6, log=None):
+    """Rashi's wording in the commentary is bold as his explanation; a stretch the
+    commentator brings that is the Rif's own words there too (the Gemara it quotes, a verse:
+    "שדות בכסף יקנו וכתוב בספר וחתום") is not his: plain. -> words made plain."""
+    count = 0
+    grams = {}
+    for e in comm:
+        j = e.get("para")
+        if j is None:
+            continue
+        if j not in grams:
+            R = [stem2(x) for jj in range(max(0, j - 1), min(len(rif), j + 2))
+                 for x in lseq([t for t in rif[jj]["tokens"] if t[1] not in ("src", "gem")])[0]]
+            grams[j] = {tuple(R[q:q + 3]) for q in range(len(R) - 2)}
+        g = grams[j]
+        toks = e["tokens"]
+        # (after the dibbur hamatchil, which is the Rif's words and stays bold)
+        k = e.get("dh_len", 0)
+        while k < len(toks) and toks[k][1] in ("rashi", True, "dh"):
+            k += 1
+        while k < len(toks):
+            if toks[k][1] != "rashi":
+                k += 1
+                continue
+            a = k
+            while k < len(toks) and toks[k][1] == "rashi":
+                k += 1
+            W = [stem2(x) for x in lseq(toks[a:k])[0]]
+            gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
+            if gs and sum(x in g for x in gs) >= share * len(gs):
+                for q in range(a, k):
+                    toks[q] = [toks[q][0], False] + list(toks[q][2:])
+                    count += 1
+                if log is not None:
+                    log.append(" ".join(t[0] for t in toks[a:k]))
+    return count
+
+
+def rif_own_amudim(rif):
+    """The amud each passage of the Rif is on by its own marks, "(דף מא.)" or "(מכילתין דף
+    מא.)" (not one with another masechet's name): the last mark before its end ... the
+    first in it, carried on to the passages after it. -> [amud number or None]."""
+    marks = []      # (passage, amud)
+    for j, p in enumerate(rif):
+        toks = p["tokens"]
+        for k, t in enumerate(toks):
+            w = t[0]
+            if not isinstance(w, str) or not w.startswith("("):
+                continue
+            grp = " ".join(x[0] for x in toks[k:k + 4])
+            m = re.match(r"\((?:מכילתין |במכילתין )?(?:דף|ד') ([א-ת\"״']{1,5}[.:])", grp)
+            if m:
+                n = gem_daf(amud_label(m.group(1)) or "")
+                if n is not None:
+                    marks.append((j, n))
+    # (only the marks in the Rif's order: one far out of it is a quotation of another place)
+    import bisect as _b
+    tails, tail_i, prev = [], [], [-1] * len(marks)
+    for i, (_, v) in enumerate(marks):
+        q = _b.bisect_right(tails, v)
+        if q == len(tails):
+            tails.append(v)
+            tail_i.append(i)
+        else:
+            tails[q], tail_i[q] = v, i
+        prev[i] = tail_i[q - 1] if q else -1
+    keep, i = set(), tail_i[-1] if tail_i else -1
+    while i >= 0:
+        keep.add(i)
+        i = prev[i]
+    good = [x for i, x in enumerate(marks) if i in keep or
+            any(abs(x[1] - marks[q][1]) <= 4 for q in (i - 1, i + 1) if 0 <= q < len(marks) and q in keep)]
+    firsts = {}
+    for j, n in good:
+        firsts.setdefault(j, n)
+    lasts = {j: n for j, n in good}
+    out, cur = [], None
+    for j in range(len(rif)):
+        out.append(firsts.get(j, cur))
+        cur = lasts.get(j, cur)
+    # (a passage before any mark: the next one's)
+    nxt = None
+    for j in range(len(out) - 1, -1, -1):
+        if out[j] is None:
+            out[j] = nxt
+        else:
+            nxt = out[j]
+    return out
+
+
+def perakim_of(masechet):
+    """The names of the perakim of a masechet in their order (data/perakim.txt), or []."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "perakim.txt")
+    for line in open(path, encoding="utf-8"):
+        if ":" in line and not line.startswith(("#", "+")) and line.split(":", 1)[0].strip() == masechet:
+            return [x.strip() for x in line.split(":", 1)[1].split("|")]
+    return []
 
 
 def split_glued(toks):
@@ -3017,6 +3203,11 @@ def set_refs(toks, start=0, here=None, masechet=None, cues=False):
                             k = e + 1
                             continue
                     if place and norm(place[0]) in ("מכילתינ", "במכילתינ", "דמכילתינ"):
+                        if here is None and len(place) == 1:
+                            # (the Rif's "(מכילתין דף יא:)": where it is in this masechet, a mark)
+                            out.append([f"[{at}]{trail}", "gem"] + extra)
+                            k = e + 1
+                            continue
                         place = list(mine or []) + place[1:]     # (מכילתין: this masechet)
                     if mine and [norm(x) for x in place[:len(mine)]] == [norm(x) for x in mine]:
                         # this masechet: לקמן or לעיל
@@ -3173,6 +3364,16 @@ def load_masechet(root, m, found=None):
                         rashi.append(x)
             gl = read(s["gemara"][0])
             amudim = passage_amudim(rif, gl)
+            # (where the Gemara alignment goes far from the Rif's own marks, "(דף מא.)", the
+            # Rif's marks are right: the passage is on the amud its marks say)
+            own = rif_own_amudim(rif)
+            aligned = list(amudim)
+            fixed_ = 0
+            for j in range(len(rif)):
+                if own[j] is not None and (amudim[j] is None or abs(amudim[j] - own[j]) > 4):
+                    amudim[j] = own[j]
+                    fixed_ += 1
+            report.append(f"ברי\"ף {fixed_} קטעים שדף הגמרא שלהם תוקן לפי סימני הרי\"ף")
             gtoks, gamud = parse_gemara(gl)
             # each passage of the Rif: the amud of the Gemara it is on (for the page's head)
             label = dict(gamud)
@@ -3190,7 +3391,11 @@ def load_masechet(root, m, found=None):
             n = 0
             for e in comm:
                 a = amudim[e["para"]]
-                near = [x for x in rashi if a is not None and a - 2 <= x["amud"] <= a + 2]
+                # (Rashi of the amud the passage is on, by the Rif's marks and by the Gemara
+                # it brings: both, where they differ)
+                b = aligned[e["para"]]
+                near = [x for x in rashi if (a is not None and a - 2 <= x["amud"] <= a + 2)
+                        or (b is not None and b - 2 <= x["amud"] <= b + 2)]
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
                 n += mark_rashi(e["tokens"], near, gem, trace=e["why"], weak=weak)
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
@@ -3357,7 +3562,7 @@ def first_starts(rosh, rif, comm, ndays, al):
     return starts
 
 
-def perek_breaks(rosh, rif, al):
+def perek_breaks(rosh, rif, al, masechet=None):
     """Where the perakim begin in the Rif (it has no headings): at the passage of the first
     siman of each perek of the Rosh, or after the Rif's own הדרן. -> ({passage: the הדרן of
     the perek before it, or None where the Rif has its own}, the last הדרן or None)."""
@@ -3379,7 +3584,15 @@ def perek_breaks(rosh, rif, al):
         if ws[:2] == ["סליק", "פירקא"] and not (len(ws) > 2 and ws[2].startswith("וסליק")):
             slq.add(j if len(ws) > 2 else j + 1)
 
-    def fallback(start):
+    names = perakim_of(masechet)
+
+    def fallback(start, k=None):
+        # (the perek's name as it is called, from data/perakim.txt, by its number)
+        if names and k is not None and 0 <= k < len(names):
+            return "הדרן עלך " + names[k]
+        return fallback_words(start)
+
+    def fallback_words(start):
         # (a perek the Rosh closes with no הדרן of its own: "הדרן עלך" and the first two
         # words of the perek in the Rif, its name)
         ws = [re.sub(r"[^\u05d0-\u05ea\"']", "", t[0]) for t in rif[start]["tokens"]
@@ -3396,9 +3609,9 @@ def perek_breaks(rosh, rif, al):
             j = min(near, key=lambda x: abs(x - j))
         if j <= last or j >= len(rif):
             continue
-        out[j] = None if j in own else hadran.get(order[k - 1]) or fallback(last)
+        out[j] = None if j in own else hadran.get(order[k - 1]) or fallback(last, k - 1)
         last = j
-    end = None if any(norm(t[0]) in ("הדרנ", "סליקו") for t in rif[-1]["tokens"]) else hadran.get(order[-1]) or fallback(last)
+    end = None if any(norm(t[0]) in ("הדרנ", "סליקו") for t in rif[-1]["tokens"]) else hadran.get(order[-1]) or fallback(last, len(order) - 1)
     return out, end
 
 
@@ -3520,6 +3733,8 @@ def prepare_masechet(root, m, fix=None):
     found = []
     rosh, rif, comm, comm_name, report = load_masechet(root, m, found)
     al = align(rosh, rif) if rif and rosh else [0] * len(rosh)
+    if comm and rif:
+        report.append(f"ב{comm_name} {rashi_not_rif(comm, rif)} מילים שהן לשון הרי\"ף ולא לשון רש\"י")
     if rif and rosh:
         report.append(f"ברא\"ש {complete_sentences(rosh, rif, al)} מילים בהשלמת משפטים")
         report.append(f"ברא\"ש {drop_requotes(rosh, rif, al)} מילים בציטוט שחוזר בדברי הרא\"ש (לא מודגשות שוב)")
@@ -3543,6 +3758,8 @@ def prepare_masechet(root, m, fix=None):
     report.append(f"ברי\"ף {stray_marks([p['tokens'] for p in rif])} סימני דף שאינם במקומם הפכו להפניה")
     if gem:
         report.append(f"ברי\"ף {rif_gemara_marks(rif, read(gem[0]))} סימני דף שנוספו לפי הגמרא")
+    drop_repeated_marks([p["tokens"] for p in rif])
+    drop_repeated_marks([p for x in rosh for p in x["paras"]])
     self_refs([p["tokens"] for p in rif], m)
     for e in comm:
         # (in the commentary every reference in round brackets is a reference; its own
@@ -3553,6 +3770,7 @@ def prepare_masechet(root, m, fix=None):
             e["dh_len"] = set_refs.last_start
     report.append(f"ב{comm_name} {stray_marks([e['tokens'] for e in comm])} סימני דף שאינם במקומם הפכו להפניה")
     self_refs([e["tokens"] for e in comm], m)
+    drop_repeated_marks([e["tokens"] for e in comm])
     self_refs([p for x in rosh for p in x["paras"]], m)
     from .shas_check import text_checks
     issues += text_checks(rosh, rif, comm, m)
@@ -3567,7 +3785,7 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     rosh, rif, comm, comm_name, report, issues, al = prepare_masechet(root, m, fix)
     # the days go by whole pages (after the layout): no marks in the text
     rosh_days, rif_days = {}, {}
-    perek_at, perek_end = perek_breaks(rosh, rif, al)
+    perek_at, perek_end = perek_breaks(rosh, rif, al, m)
 
     def new_book():
         b = Book(m, rosh, rif, comm, comm_name, page, **(sizes or {}))
@@ -3633,10 +3851,13 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
                 t = re.split(r"\s+(?:וסליקא|וסליק)", t)[0].strip(" .:")
                 pname.setdefault(x["perek"], t)
 
+    table = perakim_of(m)
+
     def perek_title(k):
         if k is None or k >= len(order):
             return ""
-        nm = pname.get(order[k], "")
+        # (by the Rosh's הדרן, or as the perek is called, data/perakim.txt)
+        nm = pname.get(order[k], "") or (table[k] if k < len(table) else "")
         return (nm + " " if nm else "") + "פרק " + ORDINALS[k] if k < len(ORDINALS) else nm
 
     def amudim(a, b):

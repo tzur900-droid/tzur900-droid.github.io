@@ -244,7 +244,7 @@ def text_checks(rosh, rif, comm, m, path=TEXT_CHECKS):
             w = [norm(x) for x in text.split()]
             seq = [norm(t[0]) for t in toks]
             hits = [k for k in range(len(seq) - len(w) + 1) if seq[k:k + len(w)] == w]
-            ok = bool(hits) and (kind == "word" or all(toks[hits[0] + q][1] is not True for q in range(len(w))))
+            ok = bool(hits) and (kind == "word" or all(toks[hits[0] + q][1] not in (True, "dh", "rashi") for q in range(len(w))))
         if not ok:
             out.append({"kind": "regress", "where": f"{m} {part}", "text": f"{kind}: {text}", "fixed": False})
     return out
