@@ -210,6 +210,44 @@ def marked(rosh, m, path=MARKED):
 
 
 MARKED_COMM = os.path.join(os.path.dirname(MARKED), "comm_bold.txt")
+TEXT_CHECKS = os.path.join(os.path.dirname(MARKED), "text_checks.txt")
+
+
+def text_checks(rosh, rif, comm, m, path=TEXT_CHECKS):
+    """The text's own checks (tests/text_checks.txt), each a mistake once found: a
+    reference that must be one or must not be, an amud mark, the first mark of a part, a
+    stretch that must stay plain. One that fails is reported ("regress")."""
+    out = []
+    if not os.path.exists(path):
+        return out
+    parts = {"rosh": [t for x in rosh for p in x["paras"] for t in p],
+             "rif": [t for p in rif for t in p["tokens"]],
+             "comm": [t for e in comm for t in ([[f"[{e['gem']}]", "gem"]] if e.get("gem") else []) + e["tokens"]]}
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#") or line.count("|") < 3:
+            continue
+        mm, part, kind, text = [x.strip() for x in line.split("|", 3)]
+        if mm != m or part not in parts:
+            continue
+        toks = parts[part]
+        ok = True
+        if kind == "src":
+            ok = any(t[1] == "src" and t[0].rstrip(".,:;") == text.rstrip(".,:;") for t in toks)
+        elif kind == "nosrc":
+            ok = not any(t[1] == "src" and t[0].rstrip(".,:;") == text.rstrip(".,:;") for t in toks)
+        elif kind == "gem":
+            ok = any(t[1] == "gem" and t[0].rstrip(".,:;").rstrip("]") + "]" == text for t in toks)
+        elif kind == "first":
+            g = next((t for t in toks if t[1] == "gem"), None)
+            ok = g is not None and g[0].startswith(text)
+        elif kind in ("plain", "word"):
+            w = [norm(x) for x in text.split()]
+            seq = [norm(t[0]) for t in toks]
+            hits = [k for k in range(len(seq) - len(w) + 1) if seq[k:k + len(w)] == w]
+            ok = bool(hits) and (kind == "word" or all(toks[hits[0] + q][1] is not True for q in range(len(w))))
+        if not ok:
+            out.append({"kind": "regress", "where": f"{m} {part}", "text": f"{kind}: {text}", "fixed": False})
+    return out
 
 
 def marked_comm(comm, m, path=MARKED_COMM):

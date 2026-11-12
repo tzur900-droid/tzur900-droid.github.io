@@ -80,6 +80,12 @@
    "size": 25.3,
    "of_base": 2.2
   },
+  "רי\"ף - דף גמרא": {
+   "font": "Frank Ruhl Libre",
+   "bold": false,
+   "size": 9.2,
+   "of_base": 0.8
+  },
   "רי\"ף - טקסט": {
    "font": "Drugulin CLM",
    "bold": false,
@@ -91,12 +97,6 @@
    "bold": true,
    "size": 18.4,
    "of_base": 1.6
-  },
-  "רי\"ף - דף גמרא": {
-   "font": "Frank Ruhl Libre",
-   "bold": false,
-   "size": 9.2,
-   "of_base": 0.8
   },
   "רי\"ף - מראה מקום": {
    "font": "Frank Ruhl Libre",

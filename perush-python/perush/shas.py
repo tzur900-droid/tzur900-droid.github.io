@@ -743,7 +743,8 @@ def comm_gemara_marks(comm, amudim, gtoks, gamud):
     if comm:
         comm[0]["gem"] = "ב."
         count = 1
-    for e in comm:
+    for e in comm[1:]:
+        # (the first entry stays on ב., though its words, the Mishna's, come again on ג:)
         a = amudim[e["para"]]
         dh = dh_words(e)
         if a is None or len(dh) < 2:
@@ -1103,6 +1104,136 @@ def near_word(a, b):
     return False
 
 
+NUMBER_WORDS = {}
+for _n, _ws in enumerate(["אחד אחת", "שני שתי שנים שתים", "שלשה שלש שלשת שלושה", "ארבע ארבעה ארבעת",
+                          "חמש חמשה חמשת", "שש ששה ששת", "שבע שבעה שבעת", "שמונה שמנה", "תשע תשעה",
+                          "עשר עשרה עשרת"], 1):
+    for _w in _ws.split():
+        NUMBER_WORDS[norm(_w)] = _n
+
+
+def number_of(w):
+    """A number in words or in a letter (שני, ב', שתי) -> its value, or None."""
+    n = norm(w)
+    for pre in ("", "ו", "ב", "ל", "ד", "מ", "וב", "ול"):
+        if n.startswith(pre) and n[len(pre):] in NUMBER_WORDS:
+            return NUMBER_WORDS[n[len(pre):]]
+    m = re.fullmatch(r"[ובלדמ]?([א-י])['׳]", w.strip(".,:;"))
+    if m:
+        return "אבגדהוזחטי".index(m.group(1)) + 1
+    return None
+
+
+def same_word(a, b):
+    """The same word in a quotation: near_word, or the same number (שני and ב')."""
+    if near_word(a, b):
+        return True
+    x, y = number_of(a), number_of(b)
+    return x is not None and x == y
+
+
+def extend_edges(rosh, rif, al, most=6, log=None):
+    """The bold of a quotation on to the words before and after it that are the Rif's words
+    before and after the same place, said a little differently ("היכא דאיכא שני אחין" for the
+    Rif's "דהיכא דאיכא ב' אחין"), word by word, up to most words each way; not over a mark
+    or a reference. -> words made bold."""
+    count = 0
+    for i, s in enumerate(rosh):
+        lo = max(0, al[i] - 2)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
+        R = [x for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]]
+        RS = [stem2(x) for x in R]
+        at3 = {}
+        for q in range(len(RS) - 2):
+            at3.setdefault(tuple(RS[q:q + 3]), []).append(q)
+        for p in s["paras"]:
+            W, src = lseq(p)
+            bold = [p[k][1] is True for k in src]
+            # (not into a reference or a mark: "(דף צא.)", "[יג:]")
+            plain_ok = [p[k][1] is False and not any(c in p[k][0] for c in "()[]") for k in src]
+            runs, q = [], 0
+            while q < len(W):
+                if bold[q]:
+                    e = q
+                    while e < len(W) and bold[e]:
+                        e += 1
+                    if e - q >= 3:
+                        runs.append((q, e))
+                    q = e
+                else:
+                    q += 1
+            for q, e in runs:
+                # back from its start
+                for r0 in at3.get(tuple(stem2(x) for x in W[q:q + 3]), []):
+                    x, r, got = q - 1, r0 - 1, []
+                    while x >= 0 and r >= 0 and len(got) < most and plain_ok[x] and not bold[x] and same_word(W[x], R[r]):
+                        got.append(x)
+                        x, r = x - 1, r - 1
+                    if got:
+                        for y in got:
+                            k = src[y]
+                            if p[k][1] is False:
+                                p[k][1] = True
+                                count += 1
+                            bold[y] = True
+                        if log is not None:
+                            log.append((s["perek"], s["num"], "<", " ".join(W[min(got):e][:10])))
+                        break
+                # on from its end
+                for r0 in at3.get(tuple(stem2(x) for x in W[e - 3:e]), []):
+                    x, r, got = e, r0 + 3, []
+                    while x < len(W) and r < len(R) and len(got) < most and plain_ok[x] and not bold[x] and same_word(W[x], R[r]):
+                        got.append(x)
+                        x, r = x + 1, r + 1
+                    if got:
+                        for y in got:
+                            k = src[y]
+                            if p[k][1] is False:
+                                p[k][1] = True
+                                count += 1
+                            bold[y] = True
+                        if log is not None:
+                            log.append((s["perek"], s["num"], ">", " ".join(W[max(q, e - 4):max(got) + 1])))
+                        break
+    return count
+
+
+NEGATIONS = {norm(w) for w in "לא ולא דלא שלא אין ואין דאין שאין אינו אינה אינן לית ולית ליכא לאו ולאו בלא".split()}
+
+
+def bridge_one(rosh, side=4, log=None):
+    """One word the Rosh adds inside a quotation, between two bold stretches of side words
+    or more each ("ולא נמנעו ב"ש מלישא נשים מב"ה ולא ב"ה מב"ש" for the Rif's "וב"ה מב"ש"):
+    bold, as Oz Vehadar prints a quotation said a little differently. Not a reference, nor
+    a word that changes the meaning (לא, אבל ...) unless it goes on from the same word just
+    before. -> words made bold."""
+    count = 0
+    for s in rosh:
+        for p in s["paras"]:
+            k = 1
+            while k < len(p) - 1:
+                if p[k][1] is False and p[k - 1][1] is True and p[k + 1][1] is True \
+                        and not any(c in p[k][0] for c in "()[]"):
+                    a = k - 1
+                    while a >= 0 and p[a][1] is True:
+                        a -= 1
+                    b = k + 1
+                    while b < len(p) and p[b][1] is True:
+                        b += 1
+                    w = norm(p[k][0])
+                    before = {norm(t[0]).lstrip("ו") for t in p[max(0, k - 8):k]}
+                    # (a small word only: "ולא", "וכן", "נמי"; not the Rosh's own "דמשמע",
+                    # "ובספרים", which say it is his)
+                    if k - 1 - a >= side and b - k - 1 >= side and len(re.sub(r"[\"'׳״]", "", w)) <= 3 and \
+                            (w not in NEGATIONS or w.lstrip("ו") in before):
+                        p[k][1] = True
+                        count += 1
+                        if log is not None:
+                            log.append((s["perek"], s["num"], " ".join(t[0] for t in p[max(0, k - 4):k + 5])))
+                k += 1
+    return count
+
+
 def follow_quote(rosh, rif, al, most=10, share=0.7, log=None):
     """A few words left plain inside a quotation where the Rosh says the Rif's words a
     little differently (דמים for דם, the Rif's misprint שבלו for שכלו) and leaves out a
@@ -1145,7 +1276,7 @@ def follow_quote(rosh, rif, al, most=10, share=0.7, log=None):
                     hits, r, first, last = 0, 0, False, False
                     for g, w in enumerate(gap):
                         for d in range(r, min(len(seg), r + 3)):
-                            if near_word(w, seg[d]):
+                            if same_word(w, seg[d]):
                                 hits += 1
                                 r = d + 1
                                 first = first or g == 0
@@ -1323,6 +1454,64 @@ def gemara_marks(rosh, gem_lines):
         i, pi, ti = flat[a]
         rosh[i]["paras"][pi].insert(ti, [f"[{label}]", "gem"])
     return len(marks)
+
+
+def rif_gemara_marks(rif, gem_lines, log=None):
+    """The amudim the Rif's source does not mark (the Rif of Yevamot from ב. to ג: has
+    none): found as in the Rosh (gemara_marks), by the Gemara the Rif brings, and put in
+    where the Rif has no mark of that amud and the order of its own marks allows it.
+    -> marks added."""
+    import copy
+    tmp = [{"paras": [copy.deepcopy([t for t in p["tokens"] if t[1] != "gem"])]} for p in rif]
+    if not gemara_marks(tmp, gem_lines):
+        return 0
+    have = {gem_daf(re.sub(r"[\[\]]", "", t[0]).rstrip(",;")) for p in rif for t in p["tokens"] if t[1] == "gem"}
+    # (passage, place among its words that are not marks, label)
+    new = []
+    for j, x in enumerate(tmp):
+        q = 0
+        for t in x["paras"][0]:
+            if t[1] == "gem":
+                new.append((j, q, t[0].strip("[]")))
+            else:
+                q += 1
+    # the Rif's own marks in order, by (passage, place)
+    own = []
+    for j, p in enumerate(rif):
+        q = 0
+        for t in p["tokens"]:
+            if t[1] == "gem":
+                own.append(((j, q), gem_daf(re.sub(r"[\[\]]", "", t[0]).rstrip(",;"))))
+            else:
+                q += 1
+    # (the masechet begins on ב.: the Rif's first words too, as in the Rosh)
+    if new and new[0][:2] != (0, 0):
+        new.insert(0, (0, 0, "ב."))
+    elif new:
+        new[0] = (0, 0, "ב.")
+    count = 0
+    for j, q, lab in reversed(new):
+        n = gem_daf(lab)
+        if n is None or n in have:
+            continue
+        before = [v for pos, v in own if pos <= (j, q) and v is not None]
+        after = [v for pos, v in own if pos > (j, q) and v is not None]
+        if (before and before[-1] >= n) or (after and after[0] <= n):
+            continue
+        toks, seen = rif[j]["tokens"], 0
+        for at, t in enumerate(toks):
+            if t[1] != "gem":
+                if seen == q:
+                    break
+                seen += 1
+        else:
+            at = len(toks)
+        toks.insert(at, [f"[{lab}]", "gem"])
+        have.add(n)
+        count += 1
+        if log is not None:
+            log.append((j, lab, " ".join(t[0] for t in toks[at:at + 6])))
+    return count
 
 
 # ---------------------------------------------------------------- units of text
@@ -2684,6 +2873,11 @@ def set_refs(toks, start=0, here=None, masechet=None, cues=False):
     names = sorted(((n.split(), n) for n in BAVLI), key=lambda x: -len(x[0]))
     mine = masechet.split() if masechet else None
 
+    def where_said():
+        """לקמן or לעיל just before: the text sends to another place"""
+        return any(norm(t[0]) in ("לקמנ", "כדלקמנ", "דלקמנ", "ולקמנ", "לעיל", "כדלעיל", "דלעיל", "ולעיל", "התמ", "שמ")
+                   for t in out[-4:])
+
     def where(lab):
         """לקמן or לעיל, for an amud of this masechet (none where the text has just said it)"""
         if any(norm(t[0]) in ("לקמנ", "כדלקמנ", "דלקמנ", "ולקמנ", "לעיל", "כדלעיל", "דלעיל", "ולעיל")
@@ -2831,6 +3025,14 @@ def set_refs(toks, start=0, here=None, masechet=None, cues=False):
                             place = ([rel] if rel else []) + place[len(mine):]
                     elif not place and elsewhere(at) is not None:
                         place = elsewhere(at)
+                    elif not place and here is not None and here.get("n") is not None and gem_daf(at) is not None \
+                            and -1 <= gem_daf(at) - here["n"] <= 2 and not where_said() and named_before() is None:
+                        # (the amud the text is at, or the next: where the Gemara it brings is,
+                        # a mark [י.], not a reference (י.))
+                        out.append([f"[{at}]{trail}", "gem"] + extra)
+                        here["n"] = gem_daf(at)
+                        k = e + 1
+                        continue
                     elif not place and here is not None:
                         rel = where(at)
                         if rel:
@@ -3328,6 +3530,8 @@ def prepare_masechet(root, m, fix=None):
     if rif and rosh:
         report.append(f"ברא\"ש {close_small_holes(rosh, rif, al)} מילים בחורים קטנים בציטוטים")
         report.append(f"ברא\"ש {follow_quote(rosh, rif, al)} מילים בציטוט בשינוי לשון קל")
+        report.append(f"ברא\"ש {extend_edges(rosh, rif, al)} מילים בקצות ציטוטים")
+        report.append(f"ברא\"ש {bridge_one(rosh)} מילים בודדות בתוך ציטוטים")
     from .shas_check import marked, marked_comm
     issues += marked(rosh, m) + marked_comm(comm, m)
     # the amudim and the references as Oz Vehadar prints them ([נה:], (גיטין ו.))
@@ -3337,6 +3541,8 @@ def prepare_masechet(root, m, fix=None):
     for p in rif:
         p["tokens"] = daf_before_mishna(set_refs(p["tokens"]))
     report.append(f"ברי\"ף {stray_marks([p['tokens'] for p in rif])} סימני דף שאינם במקומם הפכו להפניה")
+    if gem:
+        report.append(f"ברי\"ף {rif_gemara_marks(rif, read(gem[0]))} סימני דף שנוספו לפי הגמרא")
     self_refs([p["tokens"] for p in rif], m)
     for e in comm:
         # (in the commentary every reference in round brackets is a reference; its own
@@ -3348,6 +3554,8 @@ def prepare_masechet(root, m, fix=None):
     report.append(f"ב{comm_name} {stray_marks([e['tokens'] for e in comm])} סימני דף שאינם במקומם הפכו להפניה")
     self_refs([e["tokens"] for e in comm], m)
     self_refs([p for x in rosh for p in x["paras"]], m)
+    from .shas_check import text_checks
+    issues += text_checks(rosh, rif, comm, m)
     return rosh, rif, comm, comm_name, report, issues, al
 
 
