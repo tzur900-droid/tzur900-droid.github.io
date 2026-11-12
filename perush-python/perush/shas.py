@@ -3860,8 +3860,13 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         nm = pname.get(order[k], "") or (table[k] if k < len(table) else "")
         return (nm + " " if nm else "") + "פרק " + ORDINALS[k] if k < len(ORDINALS) else nm
 
-    def amudim(a, b):
-        # with the masechet's name, as in Oz Vehadar: [יבמות ב. - ג:]
+    def amudim(a, b, more=()):
+        # from the first amud on the page to the last, in order ([עט: - פ:], not [פ: - עט:]
+        # where a mark on the page goes back a little)
+        labs = [x for x in (a, b, *more) if x and gem_daf(x) is not None]
+        if labs:
+            a = min(labs, key=gem_daf)
+            b = max(labs, key=gem_daf)
         return f"[{a}]" if a == b else f"[{a} - {b}]"
     xref, amud = [], None
     for n, pg in enumerate(rosh_pages):
@@ -3877,7 +3882,7 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
         first = seen[0] if (opens or not amud) and seen else amud
         if seen:
             amud = seen[-1]
-        xref.append((perek, amudim(first, amud) if first else ""))
+        xref.append((perek, amudim(first, amud, seen) if first else ""))
     xref += [("", "")] * len(pad)
     starts_of_perek = sorted(perek_at)
     # the head of a page of the Rif: the dafim of the Gemara it is on (from the first passage
@@ -3895,7 +3900,7 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
             first = "ב."          # the masechet's first page is on its first amud
         last = seen[-1] if seen else prev
         prev = last
-        sub = amudim(first, last) if first else ""
+        sub = amudim(first, last, seen) if first else ""
         j0 = next((j for j in refs if j is not None), None)
         k = bisect.bisect_right(starts_of_perek, j0) if j0 is not None else None
         xref.append(((perek_title(k) + " " + m) if rosh else m, sub))
