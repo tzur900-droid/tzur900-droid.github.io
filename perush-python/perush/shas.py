@@ -600,6 +600,75 @@ def passage_amudim(rif, gem_lines):
     return smooth
 
 
+def rashi_edges(e, entries, most=3):
+    """The ends of each stretch of Rashi's wording on his own words: a word or two at its
+    edge that Rashi has not there ("לא [יוציא כדקתני הכא אין מוציאין]": כדקתני הכא is the
+    commentator's) out, and the words just outside it that go on with Rashi's ("שהרי אין
+    [כאן אלא ספק...]") in, word by word. In place."""
+    toks = e["tokens"]
+    start = e.get("dh_len", 0)
+    k = start
+    while k < len(toks) and toks[k][1] in ("rashi", True, "dh"):
+        k += 1
+    runs = []
+    while k < len(toks):
+        if toks[k][1] == "rashi":
+            a = k
+            while k < len(toks) and toks[k][1] == "rashi":
+                k += 1
+            runs.append((a, k))
+        else:
+            k += 1
+    for a, b in runs:
+        W = [loose(t[0]) for t in toks[a:b]]
+        best = None
+        for r in entries:
+            R = r["words"]
+            RS = [stem2(x) for x in R]
+            for q in range(len(W) - 2):
+                key = [stem2(x) for x in W[q:q + 3]]
+                for p in range(len(R) - 2):
+                    if RS[p:p + 3] == key:
+                        best = (r, q, p)
+                        break
+                if best:
+                    break
+            if best:
+                break
+        if not best:
+            continue
+        r, q, p = best
+        R = r["words"]
+        # where the run begins in Rashi, word by word back from the match
+        x, y = a + q - 1, p - 1
+        while x >= a and y >= 0 and same_word(loose(toks[x][0]), R[y]):
+            x, y = x - 1, y - 1
+        lo = x + 1
+        # on, from the match
+        x, y = a + q + 3, p + 3
+        while x < b and y < len(R) and same_word(loose(toks[x][0]), R[y]):
+            x, y = x + 1, y + 1
+        hi = x
+        # words outside it that go on with Rashi's
+        ry = p - (a + q - lo) - 1
+        x, got = lo - 1, 0
+        while x >= start and ry >= 0 and got < most and toks[x][1] is False and \
+                not any(c in toks[x][0] for c in "()[]") and same_word(loose(toks[x][0]), R[ry]):
+            toks[x] = [toks[x][0], "rashi"] + list(toks[x][2:])
+            x, ry, got = x - 1, ry - 1, got + 1
+        ry = p + 3 + (hi - (a + q + 3))
+        x, got = hi, 0
+        while x < len(toks) and ry < len(R) and got < most and toks[x][1] in (False, "rashi") and \
+                not any(c in toks[x][0] for c in "()[]") and same_word(loose(toks[x][0]), R[ry]):
+            toks[x] = [toks[x][0], "rashi"] + list(toks[x][2:])
+            x, ry, got = x + 1, ry + 1, got + 1
+        # the edges inside the run that are not Rashi's, when what is left is four words or more
+        if hi - lo >= 4 and (lo > a or hi < b) and (b - a) - (hi - lo) <= 3:
+            for z in list(range(a, lo)) + list(range(hi, b)):
+                if not re.search(r"[.:]$", toks[z][0]) or z < lo:
+                    toks[z] = [toks[z][0], False] + list(toks[z][2:])
+
+
 def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozenset()):
     """Make bold in a commentary entry what it takes from Rashi (entries: Rashi's comments
     on the place; gem: loose 3-grams of the Gemara), as the Oz Vehadar Rif does:
@@ -709,9 +778,15 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
     for k in range(len(seq)):
         if not rashi_marker(toks[src[k]][0]) or (k and src[k - 1] == src[k]):
             continue
+        # (not "ולא פירש"י ז"ל כן", nor "וכן פירש"י ז"ל": that says he did not, or that he
+        # said what was said before; nothing of his follows)
+        if any(norm(toks[x][0]) in ("לא", "ולא", "ולאו", "לאו") for x in range(max(0, src[k] - 2), src[k])):
+            continue
         q = src[k] + 1
         while q < len(toks) and norm(toks[q][0]) in ("זל", "זצל"):
             q += 1
+        if q < len(toks) and norm(toks[q][0]).rstrip(".:") in ("כנ", "כך", "הכי", "כדפרישית"):
+            continue
         e = q
         while e < len(toks) and e - q < 30 and not re.search(r"[.:]$", toks[e][0]):
             e += 1
@@ -2940,7 +3015,10 @@ def rashi_not_rif(comm, rif, share=0.6, log=None):
                 k += 1
             W = [stem2(x) for x in lseq(toks[a:k])[0]]
             gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
-            if gs and sum(x in g for x in gs) >= share * len(gs):
+            # (Rashi's wording is four words at least, never a word or two torn from what he
+            # says: "פרק יוצא דופן" before a reference is the commentator's)
+            short = len({x for x in range(a, k)}) < 4
+            if short or (gs and sum(x in g for x in gs) >= share * len(gs)):
                 for q in range(a, k):
                     toks[q] = [toks[q][0], False] + list(toks[q][2:])
                     count += 1
@@ -3008,6 +3086,39 @@ def perakim_of(masechet):
         if ":" in line and not line.startswith(("#", "+")) and line.split(":", 1)[0].strip() == masechet:
             return [x.strip() for x in line.split(":", 1)[1].split("|")]
     return []
+
+
+def rashi_after_ref(comm):
+    """A stretch bold as Rashi's that comes right after a reference ("דכתיב (בראשית ב, ח)
+    ויטע...", "כדתנן בערכין (כא:) מוסיף עוד דינר...") is the verse or the Mishna quoted
+    there, not Rashi's wording: plain. And "בפרק X" at the end of a stretch, before a
+    reference, is the commentator's. -> words made plain."""
+    count = 0
+    for e in comm:
+        toks = e["tokens"]
+        k = e.get("dh_len", 0)
+        while k < len(toks):
+            if toks[k][1] != "rashi":
+                k += 1
+                continue
+            a = k
+            while k < len(toks) and toks[k][1] == "rashi":
+                k += 1
+            if a > 0 and toks[a - 1][1] == "src":
+                for q in range(a, k):
+                    toks[q] = [toks[q][0], False] + list(toks[q][2:])
+                    count += 1
+                continue
+            if k < len(toks) and toks[k][1] == "src":
+                # (the perek named before the reference)
+                q = k - 1
+                while q >= a and k - q <= 5 and skel(toks[q][0]) not in PEREK_WORDS:
+                    q -= 1
+                if q >= a and skel(toks[q][0]) in PEREK_WORDS and q - a >= 4:
+                    for z in range(q, k):
+                        toks[z] = [toks[z][0], False] + list(toks[z][2:])
+                        count += 1
+    return count
 
 
 def split_glued(toks):
@@ -3398,7 +3509,30 @@ def load_masechet(root, m, found=None):
                         or (b is not None and b - 2 <= x["amud"] <= b + 2)]
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
                 n += mark_rashi(e["tokens"], near, gem, trace=e["why"], weak=weak)
+                rashi_edges(e, near)
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
+            # (a stretch most of which is the Gemara's own words, which Rashi brings too:
+            # the commentator quoting the Gemara, not Rashi's wording)
+            gq = 0
+            for e in comm:
+                toks = e["tokens"]
+                k = 0
+                while k < len(toks):
+                    if toks[k][1] != "rashi":
+                        k += 1
+                        continue
+                    a = k
+                    while k < len(toks) and toks[k][1] == "rashi":
+                        k += 1
+                    if a < e.get("dh_len", 0) + 1:
+                        continue
+                    W = lseq(toks[a:k])[0]
+                    gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
+                    if len(gs) >= 2 and sum(x in gem for x in gs) >= 0.75 * len(gs):
+                        for q in range(a, k):
+                            toks[q] = [toks[q][0], False] + list(toks[q][2:])
+                            gq += 1
+            report.append(f"ב{s['comm_name']} {gq} מילים שהן לשון הגמרא ולא לשון רש\"י")
             report.append(f"ב{s['comm_name']} {comm_gemara_marks(comm, amudim, gtoks, gamud)} סימני דפי הגמרא")
         report.append(f"ב{s['comm_name']} {mishna_openers(comm, rif)} פתיחות של משנה")
     for x in rosh:
@@ -3770,6 +3904,7 @@ def prepare_masechet(root, m, fix=None):
             e["dh_len"] = set_refs.last_start
     report.append(f"ב{comm_name} {stray_marks([e['tokens'] for e in comm])} סימני דף שאינם במקומם הפכו להפניה")
     self_refs([e["tokens"] for e in comm], m)
+    report.append(f"ב{comm_name} {rashi_after_ref(comm)} מילים אחרי מראה מקום (פסוק, משנה) שאינן לשון רש\"י")
     drop_repeated_marks([e["tokens"] for e in comm])
     self_refs([p for x in rosh for p in x["paras"]], m)
     from .shas_check import text_checks
