@@ -17,7 +17,8 @@ def draw_line(p, line, x_right, top):
     if n > 1 and total + gap * (n - 1) > line.width:
         gap = (line.width - total) / (n - 1)     # a line set with tighter spaces
     x = x_right
-    if line.align == "center":
+    # the last line of a paragraph in the middle, as in Oz Vehadar
+    if line.align == "center" or (line.align == "justify" and line.last and not justify):
         x = x_right - (line.width - (total + gap * (n - 1))) / 2
     m = metrics(line.base)
     if line.align == "center":

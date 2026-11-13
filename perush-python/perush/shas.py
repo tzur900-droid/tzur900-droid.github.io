@@ -600,6 +600,29 @@ def passage_amudim(rif, gem_lines):
     return smooth
 
 
+def rashi_whole(e, entries):
+    """Three words that are a whole saying of Rashi (his dibbur, or all of what he says on
+    it): bold too, though shorter than four (e['rashi_whole']: their tokens). In place."""
+    toks = e["tokens"]
+    start = e.get("dh_len", 0)
+    W, src = lseq(toks)
+    S = [stem2(x) for x in W]
+    keep = set(e.get("rashi_whole", ()))
+    for r in entries:
+        # (his own words, not his dibbur: that is the Gemara's, which the commentator quotes)
+        for whole in (r["words"],):
+            if len(whole) != 3:
+                continue
+            key = [stem2(x) for x in whole]
+            for q in range(len(S) - 2):
+                if S[q:q + 3] == key and src[q] >= start and all(toks[src[x]][1] in (False, "rashi") for x in range(q, q + 3)):
+                    for x in range(q, q + 3):
+                        k = src[x]
+                        toks[k] = [toks[k][0], "rashi"] + list(toks[k][2:])
+                        keep.add(k)
+    e["rashi_whole"] = keep
+
+
 def rashi_edges(e, entries, most=3):
     """The ends of each stretch of Rashi's wording on his own words: a word or two at its
     edge that Rashi has not there ("לא [יוציא כדקתני הכא אין מוציאין]": כדקתני הכא is the
@@ -1178,6 +1201,8 @@ def drop_requotes(rosh, rif, al, before=6, share=0.6, log=None):
 
 def near_word(a, b):
     """Two loose words the same but for a letter (שכלו and שבלו, דם and דמים, לה and להם)."""
+    if len(a) >= 3 and len(b) >= 3 and skel(a) == skel(b):
+        return True      # (מנצו and מינצו, לדידן and לדידין)
     a, b = stem2(a), stem2(b)
     if a == b:
         return True
@@ -3017,7 +3042,7 @@ def rashi_not_rif(comm, rif, share=0.6, log=None):
             gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
             # (Rashi's wording is four words at least, never a word or two torn from what he
             # says: "פרק יוצא דופן" before a reference is the commentator's)
-            short = len({x for x in range(a, k)}) < 4
+            short = len({x for x in range(a, k)}) < 4 and not set(range(a, k)) <= set(e.get("rashi_whole", ()))
             if short or (gs and sum(x in g for x in gs) >= share * len(gs)):
                 for q in range(a, k):
                     toks[q] = [toks[q][0], False] + list(toks[q][2:])
@@ -3510,6 +3535,7 @@ def load_masechet(root, m, found=None):
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
                 n += mark_rashi(e["tokens"], near, gem, trace=e["why"], weak=weak)
                 rashi_edges(e, near)
+                rashi_whole(e, near)
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
             # (a stretch most of which is the Gemara's own words, which Rashi brings too:
             # the commentator quoting the Gemara, not Rashi's wording)
