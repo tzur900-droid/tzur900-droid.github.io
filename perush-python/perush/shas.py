@@ -1686,7 +1686,7 @@ class Book:
         # the head: the perek great, the amudim under it, a rule, and a little space
         self.head_h = head_size * 1.9 * 0.9 + head_size * 1.15 + 4.5 * PT_PER_MM
         self.H = self.ph - 2 * self.m - self.head_h
-        self.gap = 5 * PT_PER_MM
+        self.gap = float(os.environ.get("COL_GAP_MM", "5")) * PT_PER_MM
         self.vgap = 2.5 * PT_PER_MM
         self.ugap = 1.5 * PT_PER_MM        # between the Rif and the commentary under it
         self.st_rosh = Style("Frank Ruhl Libre", rosh_size)
