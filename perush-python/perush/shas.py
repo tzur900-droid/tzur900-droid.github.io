@@ -1884,6 +1884,12 @@ class Book:
         for u in units:
             if u.kind == "p":
                 ls = break_lines(u.words, st, lh, full_width(w), tight=TEXT_TIGHT)
+                if len(ls) > 1 and len(ls[-1].words) <= 2:
+                    # a word or two alone on the paragraph's last line: the spaces close a
+                    # little more (to 80%, as InDesign's), if that takes them back
+                    ls2 = break_lines(u.words, st, lh, full_width(w), tight=0.8)
+                    if len(ls2) < len(ls):
+                        ls = ls2
             else:
                 hl = lh * getattr(u, "space", 1.35)
                 ls = break_lines(u.words, u.words[0].style, hl, full_width(w), 0.0, "center")
@@ -2370,12 +2376,22 @@ class Book:
                 r["loose"] = True
         return r
 
-    def page_choices(self, a, cptr, min_text):
+    def page_choices(self, a, cptr, min_text, opens=False):
         """The pages that may begin here, all within the rules: as far as the Rif goes, and
         ending a passage or two sooner (less of the Rif now, so that its commentary, which
-        must come with it, sits better on the pages after it)."""
+        must come with it, sits better on the pages after it). On the first page of an
+        opening also the page whose comments may wait for the page facing it (the rule: a
+        comment on the page of its words, or the other page of the same opening)."""
         first = self.page_at(a, cptr, min_text)
         out = [first]
+        if opens and not first["at_end"]:
+            self.strict = False
+            r2 = self.rif_page(a, cptr, min_text)
+            self.strict = True
+            if (r2["b"], r2["cnext"]) != (first["b"], first["cnext"]) and r2["b"] > a:
+                r2["loose"] = True
+                r2["lag_ok"] = True
+                out.append(r2)
         if first["at_end"] or first.get("forced") or first["b"] <= a:
             return out
         seen = {(first["b"], first["cnext"])}
@@ -2432,7 +2448,13 @@ class Book:
                     if sa >= self.total:
                         nxt.append((sa, sc, path))
                         continue
-                    for r in self.page_choices(sa, sc, min_text):
+                    # (the Rif begins on a left-hand page: its pages 1, 3, 5 ... open an
+                    # opening; a page after one whose comments waited must catch up)
+                    n = len(pages) + len(path)
+                    prev_lag = bool(path) and path[-1].get("lag_ok") or (not path and pages and pages[-1].get("lag_ok"))
+                    for r in self.page_choices(sa, sc, min_text, opens=(n % 2 == 1 and not prev_lag)):
+                        if prev_lag and r["cnext"] < self.c_until(r["b"]) and not r["at_end"]:
+                            continue
                         nxt.append((r["b"], r["cnext"], path + [r]))
                 # the furthest on, the fewest holes; the same place once
                 best = {}
