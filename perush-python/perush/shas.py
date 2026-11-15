@@ -685,6 +685,21 @@ def rashi_edges(e, entries, most=3):
                 not any(c in toks[x][0] for c in "()[]") and same_word(loose(toks[x][0]), R[ry]):
             toks[x] = [toks[x][0], "rashi"] + list(toks[x][2:])
             x, ry, got = x + 1, ry + 1, got + 1
+        # words inside the run that Rashi has not, two or more together ("שאינו קשור
+        # [כלובן ביצה] אלא צלול כמים"): plain, the commentator's own
+        rset = set(R)
+        z = lo
+        while z < hi:
+            if not any(same_word(loose(toks[z][0]), y) for y in rset):
+                z2 = z
+                while z2 < hi and not any(same_word(loose(toks[z2][0]), y) for y in rset):
+                    z2 += 1
+                if z2 - z >= 2:
+                    for q in range(z, z2):
+                        toks[q] = [toks[q][0], False] + list(toks[q][2:])
+                z = z2
+            else:
+                z += 1
         # the edges inside the run that are not Rashi's, when what is left is four words or more
         if hi - lo >= 4 and (lo > a or hi < b) and (b - a) - (hi - lo) <= 3:
             for z in list(range(a, lo)) + list(range(hi, b)):
@@ -797,8 +812,10 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
                 if trace is not None:
                     trace.append(("words", src[i0], src[i1], e["id"], sorted({rsrc[p] for _, p in best})))
             i = i1 + 1 if dense and len(best) >= 2 else i + 1
-    # "ופירש"י ז"ל ...": to the end of the sentence
-    for k in range(len(seq)):
+    # "ופירש"י ז"ל ...": not the whole sentence any more (the user: the commentator often
+    # gives Rashi's view in his own words, which stay plain; only Rashi's words are bold,
+    # found above like any other)
+    for k in (range(len(seq)) if SAID_RULE else ()):
         if not rashi_marker(toks[src[k]][0]) or (k and src[k - 1] == src[k]):
             continue
         # (not "ולא פירש"י ז"ל כן", nor "וכן פירש"י ז"ל": that says he did not, or that he
@@ -829,6 +846,7 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
 
 
 SKIP_DH = ("גמ", "גמרא", "מתני", "מתניתין", "וכו", "כו", "פי", "וגו")
+SAID_RULE = False
 
 
 def dh_words(e):
@@ -1233,9 +1251,16 @@ def number_of(w):
     return None
 
 
+SAME_FORMS = [{"לקמנ", "לקמיה", "לקמנה"}, {"עי", "עלידי", "עלידיה"}, {"כלאימ", "הכלאימ"}]
+
+
 def same_word(a, b):
-    """The same word in a quotation: near_word, or the same number (שני and ב')."""
+    """The same word in a quotation: near_word, or the same number (שני and ב'), or
+    another form of it (לקמן and לקמיה)."""
     if near_word(a, b):
+        return True
+    na, nb = norm(a), norm(b)
+    if any(na in f and nb in f for f in SAME_FORMS):
         return True
     x, y = number_of(a), number_of(b)
     return x is not None and x == y
@@ -3959,7 +3984,8 @@ def prepare_masechet(root, m, fix=None):
     report.append(f"ב{comm_name} {rashi_after_ref(comm)} מילים אחרי מראה מקום (פסוק, משנה) שאינן לשון רש\"י")
     drop_repeated_marks([e["tokens"] for e in comm])
     self_refs([p for x in rosh for p in x["paras"]], m)
-    from .shas_check import text_checks
+    from .shas_check import text_checks, apply_decisions
+    issues += apply_decisions(rosh, comm, m)
     issues += text_checks(rosh, rif, comm, m)
     return rosh, rif, comm, comm_name, report, issues, al
 

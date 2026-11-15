@@ -211,6 +211,49 @@ def marked(rosh, m, path=MARKED):
 
 MARKED_COMM = os.path.join(os.path.dirname(MARKED), "comm_bold.txt")
 TEXT_CHECKS = os.path.join(os.path.dirname(MARKED), "text_checks.txt")
+DECISIONS = os.path.join(os.path.dirname(MARKED), "bold_decisions.txt")
+
+
+def apply_decisions(rosh, comm, m, path=DECISIONS):
+    """The user's own decisions on the bold (tests/bold_decisions.txt), from the review
+    page: each stretch made bold or plain as decided ([[...]] the part, the words around it
+    finding the place), last of all; one whose words are not found is reported."""
+    out = []
+    if not os.path.exists(path):
+        return out
+    parts = {"rosh": [p for x in rosh for p in x["paras"]], "comm": [e["tokens"] for e in comm]}
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#") or line.count("|") < 3:
+            continue
+        mm, part, kind, text = [x.strip() for x in line.split("|", 3)]
+        if mm != m or part not in parts:
+            continue
+        a = text.index("[[") if "[[" in text else None
+        whole = text.replace("[[", " ").replace("]]", " ").split()
+        lead = len(text[:a].split()) if a is not None else 0
+        inner = len(text[a:text.index("]]")].replace("[[", " ").split()) if a is not None else len(whole)
+        want = [norm(w) for w in whole]
+        done = False
+        for toks in parts[part]:
+            idx = [k for k, t in enumerate(toks) if t[1] not in ("src", "gem")]
+            seq = [norm(toks[k][0]) for k in idx]
+            for q in range(len(seq) - len(want) + 1):
+                if seq[q:q + len(want)] == want:
+                    for k in idx[q + lead:q + lead + inner]:
+                        if kind == "plain":
+                            if toks[k][1] in (True, "rashi"):
+                                toks[k] = [toks[k][0], False] + list(toks[k][2:])
+                        else:
+                            v = True if part == "rosh" else "rashi"
+                            if toks[k][1] in (False, True, "rashi"):
+                                toks[k] = [toks[k][0], v] + list(toks[k][2:])
+                    done = True
+                    break
+            if done:
+                break
+        if not done:
+            out.append({"kind": "regress", "where": f"{m} {part}", "text": "הכרעה שלא נמצאה: " + text, "fixed": False})
+    return out
 
 
 def text_checks(rosh, rif, comm, m, path=TEXT_CHECKS):
