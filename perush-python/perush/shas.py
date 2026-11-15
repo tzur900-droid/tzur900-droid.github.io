@@ -3537,6 +3537,32 @@ def load_masechet(root, m, found=None):
                 rashi_edges(e, near)
                 rashi_whole(e, near)
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
+            # (a stretch with no saying of Rashi like it anywhere in the masechet is the
+            # commentator's: plain, as the user decided)
+            allr = set()
+            for r in rashi:
+                R_ = [stem2(x) for x in r["words"]] + [None] + [stem2(x) for x in r["dh"]]
+                allr |= {tuple(R_[q:q + 3]) for q in range(len(R_) - 2)}
+            nr = 0
+            for e in comm:
+                toks = e["tokens"]
+                k = e.get("dh_len", 0)
+                while k < len(toks) and toks[k][1] in ("rashi", True, "dh"):
+                    k += 1
+                while k < len(toks):
+                    if toks[k][1] != "rashi":
+                        k += 1
+                        continue
+                    a = k
+                    while k < len(toks) and toks[k][1] == "rashi":
+                        k += 1
+                    W = [stem2(x) for x in lseq(toks[a:k])[0]]
+                    gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
+                    if gs and not any(g in allr for g in gs):
+                        for q in range(a, k):
+                            toks[q] = [toks[q][0], False] + list(toks[q][2:])
+                            nr += 1
+            report.append(f"ב{s['comm_name']} {nr} מילים בלי רש\"י מקביל (לא מודגשות)")
             # (a stretch most of which is the Gemara's own words, which Rashi brings too:
             # the commentator quoting the Gemara, not Rashi's wording)
             gq = 0
