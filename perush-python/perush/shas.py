@@ -1686,7 +1686,7 @@ class Book:
         # the head: the perek great, the amudim under it, a rule, and a little space
         self.head_h = head_size * 1.9 * 0.9 + head_size * 1.15 + 4.5 * PT_PER_MM
         self.H = self.ph - 2 * self.m - self.head_h
-        self.gap = float(os.environ.get("COL_GAP_MM", "5")) * PT_PER_MM
+        self.gap = float(os.environ.get("COL_GAP_MM", "4")) * PT_PER_MM
         self.vgap = 2.5 * PT_PER_MM
         self.ugap = 1.5 * PT_PER_MM        # between the Rif and the commentary under it
         self.st_rosh = Style("Frank Ruhl Libre", rosh_size)
@@ -1694,7 +1694,7 @@ class Book:
         # square letters (Frank Ruhl) with its dibbur hamatchil in the Rif's letters
         self.st_rif = Style(RIF_FONT, rif_size)
         self.st_comm = Style("Frank Ruhl Libre", comm_size)
-        self.lh_rosh = rosh_size * float(os.environ.get("ROSH_LEAD", "1.45"))
+        self.lh_rosh = rosh_size * float(os.environ.get("ROSH_LEAD", "1.2"))
         self.lh_rif = rif_size * rif_lead     # the Rif's lines: its size times rif_lead
         self.lh_comm = comm_size * 1.26
         self.head_style = Style("Frank Ruhl Libre", head_size)

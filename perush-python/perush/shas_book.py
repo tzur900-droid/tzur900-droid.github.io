@@ -188,7 +188,8 @@ def assemble(ms, books, page=B5, margin=SIZES["margin"]):
         # blank page behind it (the blank page the masechet's pages have between them is
         # left out: the Rif's title takes its place)
         rosh, rif = pages[:info["rosh_pages"]], pages[len(pages) - info["rif_pages"]:] if info["rif_pages"] else []
-        for part, ps in (("rosh", rosh), ("rif", rif)):
+        # (the Rif first, then the Rosh, each with its title page)
+        for part, ps in (("rif", rif), ("rosh", rosh)):
             if not ps:
                 continue
             out += [masechet_title(pw, ph, m, info, part), blank(pw, ph)]

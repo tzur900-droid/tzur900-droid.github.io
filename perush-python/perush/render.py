@@ -100,7 +100,12 @@ def draw_oz_head(p, page, h):
             p.drawText(QPointF((a + c) / 2 - ww / 2, base), word)
     if h["box"]:
         # a day begins: the number in a grey box, and right under it, small, the day
-        p.fillRect(QRectF(xn - 3, base - bold.size * 0.95, nw + 6, bold.size * 1.3), QColor("#d6d6d6"))
+        # (the grey box goes on down over the day's name too, one box for both)
+        dwid = width(dst, day) if day else 0.0
+        bw = max(nw, dwid) + 6
+        bx = xn + nw / 2 - bw / 2
+        bh = bold.size * 1.3 + (bold.size * 0.05 + dst.size * 1.25 if day else 0.0)
+        p.fillRect(QRectF(bx, base - bold.size * 0.95, bw, bh), QColor("#d6d6d6"))
         if day:
             p.setPen(QColor("black"))
             p.setFont(qfont(dst))
