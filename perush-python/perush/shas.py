@@ -1694,7 +1694,7 @@ class Book:
         # square letters (Frank Ruhl) with its dibbur hamatchil in the Rif's letters
         self.st_rif = Style(RIF_FONT, rif_size)
         self.st_comm = Style("Frank Ruhl Libre", comm_size)
-        self.lh_rosh = rosh_size * 1.45
+        self.lh_rosh = rosh_size * float(os.environ.get("ROSH_LEAD", "1.45"))
         self.lh_rif = rif_size * rif_lead     # the Rif's lines: its size times rif_lead
         self.lh_comm = comm_size * 1.26
         self.head_style = Style("Frank Ruhl Libre", head_size)
