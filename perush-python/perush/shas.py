@@ -1664,6 +1664,7 @@ COMM_HEAD = {"נימוקי יוסף": ("נמוקי", "יוסף"), 'ר"ן': ("ר�
              "רבינו יהונתן": ("רבינו", "יהונתן")}
 COMM_AHEAD = 12     # words of the Rif after a page whose comments may still come on it
 COMM_TIGHT = 0.8    # how far the commentary's spaces may close
+TEXT_TIGHT = 0.85   # and the Rosh's and the Rif's (as InDesign's word spacing, down to 80%)
 ORDINALS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "ששי", "שביעי", "שמיני", "תשיעי", "עשירי",
             "אחד עשר", "שנים עשר", "שלשה עשר", "ארבעה עשר", "חמשה עשר", "ששה עשר", "שבעה עשר",
             "שמונה עשר", "תשעה עשר", "עשרים", "עשרים ואחד", "עשרים ושנים", "עשרים ושלשה", "עשרים וארבעה"]
@@ -1882,7 +1883,7 @@ class Book:
         out = []
         for u in units:
             if u.kind == "p":
-                ls = break_lines(u.words, st, lh, full_width(w))
+                ls = break_lines(u.words, st, lh, full_width(w), tight=TEXT_TIGHT)
             else:
                 hl = lh * getattr(u, "space", 1.35)
                 ls = break_lines(u.words, u.words[0].style, hl, full_width(w), 0.0, "center")
@@ -2107,7 +2108,7 @@ class Book:
             owner += [k] * max(0, e - s)
         if not words:
             return [], y0
-        out = break_lines(words, self.st_rif, self.lh_rif, width_at, y0)
+        out = break_lines(words, self.st_rif, self.lh_rif, width_at, y0, tight=TEXT_TIGHT)
         i = 0
         for l in out:
             n = len(l.words)
@@ -2354,10 +2355,66 @@ class Book:
         lines = list(r["text"]) + [l for c in r["cols"] for l in c]
         return self.H - max((l.y + l.h for l in lines), default=0.0)
 
-    def layout_rif(self, units):
+    def page_at(self, a, cptr, min_text):
+        """The page the rules give from word a of the Rif and cptr of the commentary (the
+        Rif as far as it goes on it)."""
+        r = self.rif_page(a, cptr, min_text)
+        if not r["at_end"] and self.hole(r) > 3 * self.lh_comm:
+            # the comments on the next words of the Rif are too long for it: rather the
+            # rule of the passages (their comments when they end) than a hole here
+            self.strict = False
+            r2 = self.rif_page(a, cptr, min_text)
+            self.strict = True
+            if self.hole(r2) < self.hole(r):
+                r = r2
+                r["loose"] = True
+        return r
+
+    def page_choices(self, a, cptr, min_text):
+        """The pages that may begin here, all within the rules: as far as the Rif goes, and
+        ending a passage or two sooner (less of the Rif now, so that its commentary, which
+        must come with it, sits better on the pages after it)."""
+        first = self.page_at(a, cptr, min_text)
+        out = [first]
+        if first["at_end"] or first.get("forced") or first["b"] <= a:
+            return out
+        seen = {(first["b"], first["cnext"])}
+        k = self.unit_at(first["b"] - 1)
+        tried = 0
+        while k >= 0 and tried < 2:
+            e = self.off[k] + len(self.units[k].words)
+            k -= 1
+            if e >= first["b"] or self.units[k + 1].kind != "p":
+                continue
+            if e <= a:
+                break
+            q = self.compose(a, e, cptr)
+            tried += 1
+            if not q["fits"] or q["th"] - q.get("t0", 0.0) < min_text or self.hole(q) > 3 * self.lh_comm:
+                continue
+            q = self.end_on_line(q)
+            key = (q["b"], q["cnext"])
+            if key not in seen:
+                seen.add(key)
+                out.append(q)
+        return out
+
+    def progress(self, a, cptr):
+        """How much of the Rif and its commentary is set, by the room they take."""
+        return a * self.rif_unit + cptr * self.comm_unit
+
+    def layout_rif(self, units, window=10, beam=3):
+        """The pages of the Rif, ten at a time: the ways the next ten pages may go within
+        the rules are tried (each page as far as it goes, or ending a passage or two sooner),
+        the one that sets the most of the text in them is kept, and the next ten follow."""
         self.rif_flow(units)
         pages, a, cptr, guard = [], 0, 0, 0
         min_text = 3 * self.lh_rif
+        # the room a word of each takes (its width times its line's height), on average
+        rw = sum(w.w for u in self.units for w in u.words) / max(1, self.total)
+        cwid = sum(w.w for w in self.cwords) / max(1, len(self.cwords))
+        self.rif_unit = rw * self.lh_rif / (self.W - 2 * (self.cw + self.gap))
+        self.comm_unit = cwid * self.lh_comm / self.cw
         while (a < self.total or cptr < len(self.cwords)) and guard < 3000:
             guard += 1
             if a >= self.total:
@@ -2367,18 +2424,29 @@ class Book:
                 pages.append(self.finish(r))
                 cptr = r["cnext"]
                 continue
-            r = self.rif_page(a, cptr, min_text)
-            if not r["at_end"] and self.hole(r) > 3 * self.lh_comm:
-                # the comments on the next words of the Rif are too long for it: rather the
-                # rule of the passages (their comments when they end) than a hole here
-                self.strict = False
-                r2 = self.rif_page(a, cptr, min_text)
-                self.strict = True
-                if self.hole(r2) < self.hole(r):
-                    r = r2
-                    r["loose"] = True
-            pages.append(self.finish(r))
-            a, cptr = r["b"], r["cnext"]
+            # (a, cptr, pages so far in the window)
+            states = [(a, cptr, [])]
+            for _ in range(window):
+                nxt = []
+                for sa, sc, path in states:
+                    if sa >= self.total:
+                        nxt.append((sa, sc, path))
+                        continue
+                    for r in self.page_choices(sa, sc, min_text):
+                        nxt.append((r["b"], r["cnext"], path + [r]))
+                # the furthest on, the fewest holes; the same place once
+                best = {}
+                for st in nxt:
+                    key = (st[0], st[1])
+                    if key not in best or len(st[2]) < len(best[key][2]):
+                        best[key] = st
+                states = sorted(best.values(), key=lambda st: -self.progress(st[0], st[1]))[:beam]
+                if all(st[0] >= self.total for st in states):
+                    break
+            path = states[0][2]
+            for r in path:
+                pages.append(self.finish(r))
+            a, cptr = states[0][0], states[0][1]
         return pages
 
     def fill_below(self, r):

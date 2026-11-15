@@ -35,7 +35,8 @@ def draw_line(p, line, x_right, top):
         sp = space(line.base)
         if gap > 1.8 * sp:
             chars = sum(len(w.text) for w in ws)
-            track = min(line.base.size * 0.1, (line.width - total - (n - 1) * 1.8 * sp) / max(1, chars))
+            # (a little only: letters pulled apart read as stretched words)
+            track = min(line.base.size * 0.04, (line.width - total - (n - 1) * 1.8 * sp) / max(1, chars))
             gap = (line.width - total - track * chars) / (n - 1)
     from .textlayout import width as _wd
     for w in ws:
