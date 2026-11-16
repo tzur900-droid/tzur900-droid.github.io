@@ -1429,6 +1429,39 @@ def bridge_one(rosh, side=4, log=None):
     return count
 
 
+def other_subject(rosh, rif, al, stretches, sim, log=None):
+    """A stretch of the Rosh made bold from the Rif where the Rif says the same words on
+    another subject: in a passage far from the Rosh's place both by the Gemara (more than
+    one daf away) and by the order of the two (more than three passages from the Rif's
+    passages on this siman). Plain: the Rosh bolds the Rif's words only where the Rif
+    speaks of the same thing, as the user decided. (rule_quotes after it bolds them again
+    where the Rif's passage on the place has them.) -> words made plain."""
+    amud, cur = {}, None
+    for x in rosh:
+        for p in x["paras"]:
+            for t in p:
+                if t[1] == "gem":
+                    cur = gem_daf(re.sub(r"[\[\]]", "", t[0]).rstrip(",;"))
+                amud[id(t)] = cur
+    count = 0
+    for toks, j, k in stretches:
+        if not toks:
+            continue
+        a, b = amud.get(id(toks[0])), rif[j].get("amud_n")
+        i = sim[k]
+        lo = al[i]
+        hi = al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]
+        if a is None or b is None or abs(a - b) <= 2 or lo - 3 <= j <= hi + 3:
+            continue
+        for t in toks:
+            if t[1] is True:
+                t[1] = False
+                count += 1
+        if log is not None:
+            log.append(" ".join(t[0] for t in toks))
+    return count
+
+
 def rule_quotes(rosh, rif, al, least=6, log=None):
     """A stretch the Rosh leaves plain that is the Rif's own wording, near the same place,
     when the bold rules count it the same word for word: abbreviations written out (א"נ is
@@ -4238,8 +4271,15 @@ def prepare_masechet(root, m, fix=None):
         report.append(f"ברא\"ש {complete_sentences(rosh, rif, al)} מילים בהשלמת משפטים")
         report.append(f"ברא\"ש {drop_requotes(rosh, rif, al)} מילים בציטוט שחוזר בדברי הרא\"ש (לא מודגשות שוב)")
     gem = sources(root, m)["gemara"]
+    # each stretch bold from the Rif: its words and the Rif's passage it was found in
+    flat = [t for x in rosh for p in x["paras"] for t in p]
+    rpara = [j for j, p in enumerate(rif) for _ in p["tokens"]]
+    stretches = [(flat[f[0]:f[1] + 1], rpara[f[2]], f[0]) for f in found
+                 if f[1] < len(flat) and f[2] < len(rpara)]
+    sim = [i for i, x in enumerate(rosh) for p in x["paras"] for _ in p]
     if rosh and gem:
         report.append(f"ברא\"ש {gemara_marks(rosh, read(gem[0]))} סימני דפי הגמרא")
+        report.append(f"ברא\"ש {other_subject(rosh, rif, al, stretches, sim)} מילים שנמצאו ברי\"ף בנושא אחר (לא מודגשות)")
     issues = fix(rosh, rif, comm, al, found) if fix else []
     if rif and rosh:
         report.append(f"ברא\"ש {close_small_holes(rosh, rif, al)} מילים בחורים קטנים בציטוטים")
