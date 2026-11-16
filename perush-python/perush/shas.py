@@ -1462,6 +1462,32 @@ def other_subject(rosh, rif, al, stretches, sim, log=None):
     return count
 
 
+def said_whole(words, seqs, share=0.75):
+    """Whether words (loose) are, share of them or more in order, one stretch of one of
+    seqs (loose words; None between a dibbur and its comment)."""
+    n = len(words)
+    if n < 4:
+        return False
+    st = [stem2(w) for w in words]
+    for S in seqs:
+        ss = [stem2(w) if w else None for w in S]
+        for s in range(len(S)):
+            if ss[s] is None or not any(ss[s] == x or same_word(S[s], w) for x, w in zip(st[:3], words[:3])):
+                continue
+            seg = S[s:s + n + 4]
+            sg = ss[s:s + n + 4]
+            L = [[0] * (len(seg) + 1) for _ in range(n + 1)]
+            for i in range(n):
+                for j in range(len(seg)):
+                    if seg[j] is not None and (st[i] == sg[j] or same_word(words[i], seg[j])):
+                        L[i + 1][j + 1] = L[i][j] + 1
+                    else:
+                        L[i + 1][j + 1] = max(L[i][j + 1], L[i + 1][j])
+            if L[n][len(seg)] >= share * n:
+                return True
+    return False
+
+
 def whole_comments(seqs):
     """The whole comments of Rashi among seqs (dibbur, None, comment): the comment alone,
     and the dibbur with it."""
@@ -1508,7 +1534,15 @@ def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
     def cnt(toks, a, b):
         return sum(1 for t in toks[a:b] if t[1] not in ("gem", "src"))
     count = 0
-    rif_seq = [[stem2(w) for w in lseq(p["tokens"])[0]] for p in rif] if rif else []
+    rif_loose = [lseq(p["tokens"])[0] for p in rif] if rif else []
+    rif_seq = [[stem2(w) for w in S] for S in rif_loose]
+
+    def rif_near_loose(i):
+        if not rif_loose or al is None:
+            return []
+        lo = max(0, al[i] - 3)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 3
+        return [w for S in rif_loose[lo:hi + 1] for w in S]
 
     def rif_near(i):
         if not rif_seq or al is None:
@@ -1556,6 +1590,13 @@ def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
                 # addition inside one saying of the source: "שמחמת מכה או מעוך נמוקו" for
                 # Rashi's "מחמת מכה נמקו")
                 pieces = [[stem2(w) for w in lseq([t for t in toks[a:b] if t[1] == v])[0]] for a, b in g]
+                # (the whole stretch, the words between the pieces too, the source's words
+                # but for a few (most of them in order): the matching left words out; bold all)
+                span = [t for t in toks[g[0][0]:g[-1][1]] if t[1] not in ("gem", "src")]
+                if said_whole(lseq(span)[0], [rif_near_loose(src)] if v is True else src.get("rashi_loose", [])):
+                    for t in span:
+                        t[1] = v
+                    continue
                 source = [rif_near(src)] if v is True else src.get("rashi_seqs", [])
                 if all(pieces) and joined_in(pieces, source):
                     continue
@@ -3995,6 +4036,7 @@ def load_masechet(root, m, found=None):
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
                 e["near"] = near
                 e["rashi_seqs"] = [[stem2(w) for w in x["dh"]] + [None] + [stem2(w) for w in x["words"]] for x in near]
+                e["rashi_loose"] = [list(x["dh"]) + [None] + list(x["words"]) for x in near]
                 n += mark_rashi(e["tokens"], near, gem, trace=e["why"], weak=weak)
                 rashi_edges(e, near)
                 rashi_whole(e, near)
