@@ -1462,6 +1462,9 @@ def other_subject(rosh, rif, al, stretches, sim, log=None):
     return count
 
 
+EXPLAINS = {norm(w) for w in ("פי'", "פירוש", "פירש", "פי׳", "כלומר")}
+
+
 def joined_in(pieces, seqs, slack=1):
     """Whether the pieces (lists of stems) stand one after another in one of seqs, a word
     or so (slack) between them at most: the source says them as one saying, and what the
@@ -1529,6 +1532,11 @@ def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
                 pieces = [[stem2(w) for w in lseq([t for t in toks[a:b] if t[1] == v])[0]] for a, b in g]
                 source = [rif_near(src)] if v is True else src.get("rashi_seqs", [])
                 if all(pieces) and joined_in(pieces, source):
+                    continue
+                # (or where every stretch between them opens with "פי'", "פירוש": the Rosh
+                # explaining in his own words inside the quotation, as the user said)
+                gaps = [[t for t in toks[g[q][1]:g[q + 1][0]] if t[1] not in ("gem", "src")] for q in range(len(g) - 1)]
+                if all(x and norm(x[0][0]).lstrip("ו") in EXPLAINS for x in gaps):
                     continue
                 for a, b in g:
                     for q in range(a, b):
