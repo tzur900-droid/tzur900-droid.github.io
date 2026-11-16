@@ -1267,6 +1267,31 @@ def core(w):
     return w[:1] + re.sub("[וי]", "", w[1:])
 
 
+INFLECTIONS = ("", "ה", "ו", "י", "ימ", "ינ", "ות", "תה", "תו", "ת", "יה", "הו", "א", "תא")
+
+
+def inflected(a, b):
+    """The same word with another ending (gender, number, his or hers): the rest of the word
+    the same, two letters at least (not לו and לה, ביה and בה)."""
+    a = a.replace("ם", "מ").replace("ן", "נ")
+    b = b.replace("ם", "מ").replace("ן", "נ")
+    if a == b:
+        return False
+    for ea in INFLECTIONS:
+        if ea and not a.endswith(ea):
+            continue
+        ra = a[:len(a) - len(ea)] if ea else a
+        if len(ra) < 2:
+            continue
+        for eb in INFLECTIONS:
+            if eb and not b.endswith(eb):
+                continue
+            rb = b[:len(b) - len(eb)] if eb else b
+            if ra == rb:
+                return True
+    return False
+
+
 SAME_FORMS = [{"לקמנ", "לקמיה", "לקמנה"}, {"עי", "עלידי", "עלידיה"}, {"כלאימ", "הכלאימ"}]
 
 
@@ -1277,9 +1302,14 @@ def same_word(a, b):
     na0, nb0 = norm(a), norm(b)
     if na0 and nb0 and na0[0] != nb0[0] and na0[0] in "בלמכ" and nb0[0] in "בלמכ" and na0[1:] == nb0[1:]:
         return False
-    # (not one ending in א and the other in ה: גברא is the man, גברה may be her man)
-    if na0[:-1] == nb0[:-1] and {na0[-1:], nb0[-1:]} == {"א", "ה"}:
+    # (א and ה at the end are the same word, as the user decided (גופא, גופה; בן בתירא,
+    # בן בתירה), but for names they tell apart: רבה and רבא are two amoraim)
+    if na0[:-1] == nb0[:-1] and {na0[-1:], nb0[-1:]} == {"א", "ה"} and na0.lstrip("ודל") in ("רבה", "רבא"):
         return False
+    # (another inflection of the same word, as the user approved for a quotation: he and she
+    # (אמר, אמרה), one and many (דם, דמים; חדש, חדשים), his or hers (צרה, צרתה; בעל, בעלה))
+    if inflected(na0, nb0):
+        return True
     # (a letter mistaken for another inside the word, not its first: שכלו and שבלו)
     if len(na0) == len(nb0) >= 4 and na0[0] == nb0[0] and sum(x != y for x, y in zip(na0, nb0)) == 1:
         return True
