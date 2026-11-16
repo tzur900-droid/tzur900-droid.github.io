@@ -1737,6 +1737,100 @@ def quoting_words(rosh, rif, al):
     return count
 
 
+def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
+    """The bold of the Rosh read as a text of its own, as the user asked:
+      * a word at the edge of a bold stretch that the Rif has not after (or before) the
+        stretch's own words there ("...כמכחול בשפופרת וכיון", the Rosh's "וכיון"): plain;
+      * a few plain words between two bold stretches, where the whole is the Rif's saying
+        ("כשמואל דאמר במנאפים עד שיראו כדרך מנאפים בכלאים" for "דאמר שמואל במנאפים משיראו
+        כמנאפין ובכלאים"): bold, one quotation;
+      * a short bold stretch (fewer than short words) standing alone in the Rosh's own words,
+        no bold within alone words of it on either side, that is not a whole sentence of the
+        Rif ("ראה דבר מכוער ... דבר מכוער לא מפקינן"): plain, torn from its context.
+    -> words changed."""
+    count = 0
+    for i, s in enumerate(rosh):
+        lo = max(0, al[i] - 5)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
+        F = [x for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]]
+        FS = [stem2(x) for x in F]
+        grams = {}
+        for n in (3, 4):
+            for q in range(len(FS) - n + 1):
+                grams.setdefault(n, set()).add(tuple(FS[q:q + n]))
+        sentences = set()
+        cur = []
+        for p in rif[lo:hi + 1]:
+            for t in p["tokens"]:
+                if t[1] in ("gem", "src"):
+                    continue
+                cur.append(t)
+                if t[0].endswith((":", ".")):
+                    sentences.add(tuple(stem2(w) for w in lseq(cur)[0]))
+                    cur = []
+        for p in s["paras"]:
+            W, src = lseq(p)
+            S_ = [stem2(w) for w in W]
+
+            def runs():
+                out, q = [], 0
+                while q < len(W):
+                    if p[src[q]][1] is True:
+                        e = q
+                        while e < len(W) and (p[src[e]][1] is True or p[src[e]][1] == "gem"):
+                            e += 1
+                        out.append((q, e))
+                        q = e
+                    else:
+                        q += 1
+                return out
+
+            def setv(a, b, v):
+                nonlocal count
+                for k in sorted({src[x] for x in range(a, b)}):
+                    if p[k][1] in (True, False) and p[k][1] != v and not (v and any(c in p[k][0] for c in "()[]")):
+                        p[k][1] = v
+                        count += 1
+            # the edges
+            for a, b in runs():
+                if b - a >= 5:
+                    if tuple(S_[b - 4:b - 1]) in grams.get(3, ()) and tuple(S_[b - 4:b]) not in grams.get(4, ()) \
+                            and not W[b - 1].endswith((":", ".")):
+                        setv(b - 1, b, False)
+                        if log is not None:
+                            log.append(("edge", s["num"], W[b - 1]))
+                    if tuple(S_[a + 1:a + 4]) in grams.get(3, ()) and tuple(S_[a:a + 4]) not in grams.get(4, ()):
+                        setv(a, a + 1, False)
+                        if log is not None:
+                            log.append(("edge", s["num"], W[a]))
+            # the gaps
+            rs = runs()
+            for (a1, b1), (a2, b2) in zip(rs, rs[1:]):
+                between = [x for x in range(b1, a2) if p[src[x]][1] is False]
+                if not between or len(between) > gap or any(any(c in p[src[x]][0] for c in "()[]") for x in between):
+                    continue
+                if said_whole(W[a1:b2], [F]):
+                    setv(b1, a2, True)
+                    if log is not None:
+                        log.append(("gap", s["num"], " ".join(W[b1:a2])))
+            # alone
+            rs = runs()
+            for q, (a, b) in enumerate(rs):
+                n = b - a
+                if n >= short:
+                    continue
+                left = rs[q - 1][1] if q else -10 ** 6
+                right = rs[q + 1][0] if q + 1 < len(rs) else 10 ** 6
+                if a - left <= alone or right - b <= alone:
+                    continue
+                if tuple(S_[a:b]) in sentences:
+                    continue
+                setv(a, b, False)
+                if log is not None:
+                    log.append(("alone", s["num"], " ".join(W[a:b])))
+    return count
+
+
 def rule_quotes(rosh, rif, al, least=6, log=None):
     """A stretch the Rosh leaves plain that is the Rif's own wording, near the same place,
     when the bold rules count it the same word for word: abbreviations written out (א"נ is
@@ -4570,6 +4664,7 @@ def prepare_masechet(root, m, fix=None):
         report.append(f"ברא\"ש {bridge_one(rosh)} מילים בודדות בתוך ציטוטים")
         report.append(f"ברא\"ש {quoting_words(rosh, rif, al)} מילות קישור של הרא\"ש בתוך ציטוט (לא מודגשות)")
         report.append(f"ברא\"ש {drop_requotes(rosh, rif, al)} מילים בציטוט שחוזר (אחרי ההשלמות, לא מודגשות)")
+        report.append(f"ברא\"ש {read_as_text(rosh, rif, al)} מילים שתוקנו כדי שההדגשה תיקרא כטקסט")
         report.append(f"ברא\"ש {rule_quotes(rosh, rif, al)} מילים בלשון הרי\"ף לפי כללי ההטיות וראשי התיבות")
     from .shas_check import marked, marked_comm
     issues += marked(rosh, m) + marked_comm(comm, m)
