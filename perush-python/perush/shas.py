@@ -1547,21 +1547,21 @@ def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
     def rif_near_loose(i):
         if not rif_loose or al is None:
             return []
-        lo = max(0, al[i] - 3)
-        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 3
+        lo = max(0, al[i] - 5)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
         return [w for S in rif_loose[lo:hi + 1] for w in S]
 
     def rif_near(i):
         if not rif_seq or al is None:
             return []
-        lo = max(0, al[i] - 3)
-        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 3
+        lo = max(0, al[i] - 5)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
         return [w for S in rif_seq[lo:hi + 1] for w in S]
     def rif_sentences(i):
         if al is None or not rif:
             return set()
-        lo = max(0, al[i] - 3)
-        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 3
+        lo = max(0, al[i] - 5)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
         out, cur = set(), []
         for p in rif[lo:hi + 1]:
             for t in p["tokens"]:
