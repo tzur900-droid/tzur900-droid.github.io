@@ -3773,6 +3773,65 @@ def load_masechet(root, m, found=None):
                     w = stem(w)
                     freq[w] = freq.get(w, 0) + 1
             weak = frozenset(sorted(freq, key=freq.get, reverse=True)[:120])
+            # the subject of each passage of the Rif: the stretch of the Gemara it brings,
+            # from where the passage before it ends to where the one after it starts (the
+            # lines the Rif leaves out between them are on its subject too). A comment of
+            # Rashi is on the same subject when its dibbur hamatchil is in that stretch, or
+            # is the commentary's own dibbur there; Rashi on other lines of the same daf is
+            # another subject.
+            G_, gsrc_ = lseq(gtoks)
+            GS = [stem2(w) for w in G_]
+            gam = [gamud[gsrc_[q]][0] for q in range(len(G_))]
+            tri = {}
+            for q in range(len(GS) - 2):
+                tri.setdefault((GS[q], GS[q + 1], GS[q + 2]), []).append(q)
+            spans = []
+            for j, p in enumerate(rif):
+                R_ = [stem2(w) for w in lseq(p["tokens"])[0]]
+                at = amudim[j]
+                pos = sorted(q for k in range(len(R_) - 2) for q in tri.get((R_[k], R_[k + 1], R_[k + 2]), ())
+                             if at is None or abs(gam[q] - at) <= 3)
+                if len(pos) < 3:
+                    spans.append(None)
+                    continue
+                cut = len(pos) // 10
+                spans.append((pos[cut], pos[len(pos) - 1 - cut]))
+            region = []
+            for j, sp in enumerate(spans):
+                if sp is None:
+                    region.append(None)
+                    continue
+                prev = next((spans[k][1] for k in range(j - 1, max(-1, j - 4), -1) if spans[k]), sp[0] - 300)
+                nxt = next((spans[k][0] for k in range(j + 1, min(len(spans), j + 4)) if spans[k]), sp[1] + 300)
+                region.append((min(sp[0], max(prev, sp[0] - 600)) - 30, max(sp[1], min(nxt, sp[1] + 600)) + 30))
+            bi = {}
+            for q in range(len(GS) - 1):
+                bi.setdefault((GS[q], GS[q + 1]), []).append(q)
+            one = {}
+            for q, w in enumerate(GS):
+                one.setdefault(w, []).append(q)
+            comm_dh = {}
+            for e in comm:
+                if e.get("para") is not None:
+                    comm_dh.setdefault(e["para"], set()).update(
+                        stem2(w) for w in lseq([t for t in e["tokens"] if t[1] == "dh"])[0])
+
+            def rashi_at(x):
+                d = [stem2(w) for w in x["dh"]]
+                cand = bi.get((d[0], d[1]), []) if len(d) >= 2 else one.get(d[0], []) if d else []
+                return [q for q in cand if abs(gam[q] - x["amud"]) <= 1]
+
+            def on_subject(x, j):
+                d = {stem2(w) for w in x["dh"] if len(w) >= 3}
+                if d and d <= comm_dh.get(j, set()):
+                    return True
+                if region[j] is None:
+                    return True
+                where = rashi_at(x)
+                if not where:
+                    return True
+                return any(region[j][0] <= q <= region[j][1] for q in where)
+            SUBJECT = os.environ.get("RASHI_SUBJECT", "1") == "1"
             n = 0
             for e in comm:
                 a = amudim[e["para"]]
@@ -3781,6 +3840,8 @@ def load_masechet(root, m, found=None):
                 b = aligned[e["para"]]
                 near = [x for x in rashi if (a is not None and a - 2 <= x["amud"] <= a + 2)
                         or (b is not None and b - 2 <= x["amud"] <= b + 2)]
+                if SUBJECT:
+                    near = [x for x in near if on_subject(x, e["para"])]
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
                 e["near"] = near
                 n += mark_rashi(e["tokens"], near, gem, trace=e["why"], weak=weak)
