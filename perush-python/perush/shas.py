@@ -1771,7 +1771,11 @@ def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
     for i, s in enumerate(rosh):
         lo = max(0, al[i] - 5)
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
-        F = [x for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]]
+        F, FR = [], []
+        for p in rif[lo:hi + 1]:
+            seq, at = lseq(p["tokens"])
+            F += seq
+            FR += [p["tokens"][k][0] for k in at]
         FS = [stem2(x) for x in F]
         at3 = {}
         for q in range(len(FS) - 2):
@@ -1816,13 +1820,15 @@ def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
                 hit = False
                 for q in at3.get(three, ()):
                     hit = True
-                    near = F[q + 3:q + 5] if after else F[max(0, q - 2):q]
-                    if any(same_word(w, x) for x in near):
+                    near = FR[q + 3:q + 5] if after else FR[max(0, q - 2):q]
+                    # (by the words as written: וכיון is not וכן, though loosely they are one)
+                    if any(norm(w).lstrip("ו") == norm(x).lstrip("ו") or
+                           (min(len(norm(w)), len(norm(x))) >= 4 and same_word(w, x)) for x in near):
                         return True, True
                 return hit, False
             for a, b in runs():
                 if b - a >= 5:
-                    hit, ok = follows(tuple(S_[b - 4:b - 1]), W[b - 1], True)
+                    hit, ok = follows(tuple(S_[b - 4:b - 1]), p[src[b - 1]][0], True)
                     if hit and not ok and not W[b - 1].endswith((":", ".")):
                         setv(b - 1, b, False)
                         if log is not None:
@@ -1832,7 +1838,7 @@ def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
                     for _ in range(3):
                         if b - a < 5:
                             break
-                        hit, ok = follows(tuple(S_[a + 1:a + 4]), W[a], False)
+                        hit, ok = follows(tuple(S_[a + 1:a + 4]), p[src[a]][0], False)
                         if not hit or ok:
                             break
                         setv(a, a + 1, False)
@@ -4763,8 +4769,8 @@ def prepare_masechet(root, m, fix=None):
         report.append(f"ברא\"ש {bridge_one(rosh)} מילים בודדות בתוך ציטוטים")
         report.append(f"ברא\"ש {quoting_words(rosh, rif, al)} מילות קישור של הרא\"ש בתוך ציטוט (לא מודגשות)")
         report.append(f"ברא\"ש {drop_requotes(rosh, rif, al)} מילים בציטוט שחוזר (אחרי ההשלמות, לא מודגשות)")
-        report.append(f"ברא\"ש {read_as_text(rosh, rif, al)} מילים שתוקנו כדי שההדגשה תיקרא כטקסט")
         report.append(f"ברא\"ש {rule_quotes(rosh, rif, al)} מילים בלשון הרי\"ף לפי כללי ההטיות וראשי התיבות")
+        report.append(f"ברא\"ש {read_as_text(rosh, rif, al)} מילים שתוקנו כדי שההדגשה תיקרא כטקסט")
     from .shas_check import marked, marked_comm
     issues += marked(rosh, m) + marked_comm(comm, m)
     # the amudim and the references as Oz Vehadar prints them ([נה:], (גיטין ו.))
