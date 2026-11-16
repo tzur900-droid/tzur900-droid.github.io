@@ -1462,6 +1462,17 @@ def other_subject(rosh, rif, al, stretches, sim, log=None):
     return count
 
 
+def whole_comments(seqs):
+    """The whole comments of Rashi among seqs (dibbur, None, comment): the comment alone,
+    and the dibbur with it."""
+    out = set()
+    for S in seqs:
+        k = S.index(None) if None in S else 0
+        out.add(tuple(S[k + 1:]))
+        out.add(tuple(S[:k] + S[k + 1:]))
+    return out
+
+
 EXPLAINS = {norm(w) for w in ("פי'", "פירוש", "פירש", "פי׳", "כלומר")}
 
 
@@ -1505,6 +1516,21 @@ def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
         lo = max(0, al[i] - 3)
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 3
         return [w for S in rif_seq[lo:hi + 1] for w in S]
+    def rif_sentences(i):
+        if al is None or not rif:
+            return set()
+        lo = max(0, al[i] - 3)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 3
+        out, cur = set(), []
+        for p in rif[lo:hi + 1]:
+            for t in p["tokens"]:
+                if t[1] in ("gem", "src"):
+                    continue
+                cur.append(t)
+                if t[0].endswith((":", ".")):
+                    out.add(tuple(stem2(w) for w in lseq(cur)[0]))
+                    cur = []
+        return out
     seqs = [(p, 0, True, i) for i, x in enumerate(rosh) for p in x["paras"]] + \
            [(e["tokens"], e.get("dh_len", 0), "rashi", e) for e in comm]
     for toks, start, v, src in seqs:
@@ -1538,7 +1564,12 @@ def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
                 gaps = [[t for t in toks[g[q][1]:g[q + 1][0]] if t[1] not in ("gem", "src")] for q in range(len(g) - 1)]
                 if all(x and norm(x[0][0]).lstrip("ו") in EXPLAINS for x in gaps):
                     continue
-                for a, b in g:
+                # (a piece that is a whole saying of the source, short as it is, stays: a
+                # whole comment of Rashi, a whole sentence of the Rif, as the user said)
+                whole = rif_sentences(src) if v is True else whole_comments(src.get("rashi_seqs", []))
+                for (a, b), pc in zip(g, pieces):
+                    if pc and tuple(pc) in whole:
+                        continue
                     for q in range(a, b):
                         if toks[q][1] == v:
                             toks[q] = [toks[q][0], False] + list(toks[q][2:])
