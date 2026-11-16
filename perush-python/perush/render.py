@@ -70,10 +70,21 @@ def draw_oz_head(p, page, h):
     base = h["base"]
     mid = (m + R) / 2
     p.setPen(QColor("black"))
-    tw = width(big, h["title"]) if h["title"] else 0.0
-    if h["title"]:
+    # the perek in the middle ("פרק תשיעי"), its name on the right of it and the masechet
+    # on the left, each a space away, as the user asked
+    import re as _re
+    title = h["title"] or ""
+    mm = _re.match(r"^(.*?)\s*(פרק \S+)\s*(.*)$", title)
+    pname, center, mas = (mm.group(1), mm.group(2), mm.group(3)) if mm else ("", title, "")
+    tw = width(big, center) if center else 0.0
+    if center:
         p.setFont(qfont(big))
-        p.drawText(QPointF(mid - tw / 2, base), h["title"])
+        p.drawText(QPointF(mid - tw / 2, base), center)
+        gap = big.size * 1.6
+        if pname:
+            p.drawText(QPointF(mid + tw / 2 + gap, base), pname)
+        if mas:
+            p.drawText(QPointF(mid - tw / 2 - gap - width(big, mas), base), mas)
     if h["sub"]:
         p.setFont(qfont(sub))
         p.drawText(QPointF(mid - width(sub, h["sub"]) / 2, h["sub_base"]), h["sub"])
@@ -93,11 +104,8 @@ def draw_oz_head(p, page, h):
     else:
         xn = m
         right_end, left_end = R, m + nw + dw + st.size
-    p.setFont(qfont(st))
-    for word, a, c in ((right_word, mid + tw / 2, right_end), (left_word, left_end, mid - tw / 2)):
-        if word:
-            ww = width(st, word)
-            p.drawText(QPointF((a + c) / 2 - ww / 2, base), word)
+    # (the work's name, רבינו ... אשר, is no longer on the two sides: the perek's name and
+    # the masechet are there)
     if h["box"]:
         # a day begins: the number in a grey box, and right under it, small, the day
         # (the grey box goes on down over the day's name too, one box for both)

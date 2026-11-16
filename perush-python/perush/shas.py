@@ -567,6 +567,9 @@ def parse_rashi(lines):
         if l.startswith("<h") or amud is None or " - " not in l:
             continue
         dh, _, rest = re.sub(r"<[^>]+>", " ", l).partition(" - ")
+        # (a reference in brackets inside Rashi's words, "(דף לח:)": not his words, left
+        # out when comparing, as the user said)
+        rest = re.sub(r"\((?:דף|לקמן|לעיל|שם)[^()]{0,30}\)", " ", rest)
         dh, rest = dh.replace("''", '"').split(), rest.replace("''", '"').split()
         words, src = lseq(rest)
         dw, dsrc = lseq(dh)
@@ -675,8 +678,14 @@ def rashi_edges(e, entries, most=3):
         # words outside it that go on with Rashi's
         ry = p - (a + q - lo) - 1
         x, got = lo - 1, 0
-        while x >= start and ry >= 0 and got < most and toks[x][1] is False and \
-                not any(c in toks[x][0] for c in "()[]") and same_word(loose(toks[x][0]), R[ry]):
+        while x >= start and ry >= 0 and got < most and toks[x][1] in (False, "src"):
+            # (a word of its own in brackets, "והקרן (ופגמה) שלה": over it, not bold)
+            if toks[x][0].startswith("(") and toks[x][0].rstrip(".,:;").endswith(")"):
+                x -= 1
+                continue
+            if toks[x][1] != False or any(c in toks[x][0] for c in "()[]") or \
+                    not same_word(loose(toks[x][0]), R[ry]):
+                break
             toks[x] = [toks[x][0], "rashi"] + list(toks[x][2:])
             x, ry, got = x - 1, ry - 1, got + 1
         ry = p + 3 + (hi - (a + q + 3))
@@ -1307,6 +1316,13 @@ def same_word(a, b):
         if x.rstrip(".,:;").endswith(("'", "׳")) and not y.rstrip(".,:;").endswith(("'", "׳")) \
                 and len(nx) >= 2 and len(ny) > len(nx) and ny.startswith(nx):
             return True
+    # (כשפרעו and משפרעו, "when he paid" and "from when he paid": the same, as the user
+    # decided; ואין and ולא, the same negation)
+    if na0[:2] in ("כש", "מש") and nb0[:2] in ("כש", "מש") and na0[2:] == nb0[2:] and len(na0) > 3:
+        return True
+    if {na0, nb0} == {"לא", "אינ"} or (len(na0) > 1 and len(nb0) > 1 and na0[0] == nb0[0] and
+                                         na0[0] in "ודש" and {na0[1:], nb0[1:]} == {"לא", "אינ"}):
+        return True
     if na0 and nb0 and na0[0] != nb0[0] and na0[0] in "בלמכ" and nb0[0] in "בלמכ" and na0[1:] == nb0[1:]:
         return False
     # (א and ה at the end are the same word, as the user decided (גופא, גופה; בן בתירא,
@@ -1624,6 +1640,28 @@ def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
                             count += 1
                 if log is not None:
                     log.append(" ".join(t[0] for t in toks[g[0][0]:g[-1][1]]))
+    return count
+
+
+QUOTING = {norm(w) for w in ("דייקינן", "ודייקינן", "ודייק", "ופרכינן", "פרכינן", "ומקשינן", "מקשינן",
+                               "ומשנינן", "ומשני", "ופרקינן", "ומסקינן", "מסקינן", "ומוקמינן", "ואוקימנא")}
+
+
+def quoting_words(rosh, rif, al):
+    """A word of the Rosh's own that tells how the Gemara goes on ("ודייקינן", "ופרכינן"),
+    bold inside a quotation of the Rif where the Rif has not got it: plain, the Rosh's link
+    between the pieces, as the user decided. -> words made plain."""
+    count = 0
+    for i, s in enumerate(rosh):
+        lo = max(0, al[i] - 3)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 3
+        have = {norm(t[0]).lstrip("ו") for p in rif[lo:hi + 1] for t in p["tokens"]}
+        for p in s["paras"]:
+            for t in p:
+                w = norm(t[0])
+                if t[1] is True and w in QUOTING and w.lstrip("ו") not in have:
+                    t[1] = False
+                    count += 1
     return count
 
 
@@ -4458,6 +4496,7 @@ def prepare_masechet(root, m, fix=None):
         report.append(f"ברא\"ש {follow_quote(rosh, rif, al)} מילים בציטוט בשינוי לשון קל")
         report.append(f"ברא\"ש {extend_edges(rosh, rif, al)} מילים בקצות ציטוטים")
         report.append(f"ברא\"ש {bridge_one(rosh)} מילים בודדות בתוך ציטוטים")
+        report.append(f"ברא\"ש {quoting_words(rosh, rif, al)} מילות קישור של הרא\"ש בתוך ציטוט (לא מודגשות)")
         report.append(f"ברא\"ש {rule_quotes(rosh, rif, al)} מילים בלשון הרי\"ף לפי כללי ההטיות וראשי התיבות")
     from .shas_check import marked, marked_comm
     issues += marked(rosh, m) + marked_comm(comm, m)
