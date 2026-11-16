@@ -1254,17 +1254,16 @@ def number_of(w):
 def core(w):
     """A word in another spelling or form that says the same (the user: an inflection is the
     same word only where it does not change the meaning): without ו and י of full spelling,
-    a ו, ד, ש or ה before it (and, that, the), the Aramaic plural ין as the Hebrew ים, the
-    Aramaic ending א as the Hebrew ה. Not ב, ל, מ, כ before it (in, to, from, as), nor
-    endings that change who or how many (אמר and אמרה, ביה and בה, בתולה and בתולים)."""
+    a ו, ד, ש or ה before it (and, that, the), the Aramaic plural ין as the Hebrew ים. Not
+    ב, ל, מ, כ before it (in, to, from, as), nor an ending that may change who (גברא and
+    גברה: her man; ביה and בה)."""
     w = w.replace("ך", "כ").replace("ם", "מ").replace("ן", "נ").replace("ף", "פ").replace("ץ", "צ")
     for _ in range(2):
         if len(w) > 3 and w[0] in "ודשה":
             w = w[1:]
     if w.endswith("ינ"):
         w = w[:-2] + "ימ"
-    elif w.endswith("א"):
-        w = w[:-1] + "ה"
+    # (not א as ה at the end: גברא is the man, גברה may be her man)
     return w[:1] + re.sub("[וי]", "", w[1:])
 
 
@@ -1277,6 +1276,9 @@ def same_word(a, b):
     (בבית and לבית): that changes the meaning."""
     na0, nb0 = norm(a), norm(b)
     if na0 and nb0 and na0[0] != nb0[0] and na0[0] in "בלמכ" and nb0[0] in "בלמכ" and na0[1:] == nb0[1:]:
+        return False
+    # (not one ending in א and the other in ה: גברא is the man, גברה may be her man)
+    if na0[:-1] == nb0[:-1] and {na0[-1:], nb0[-1:]} == {"א", "ה"}:
         return False
     # (a letter mistaken for another inside the word, not its first: שכלו and שבלו)
     if len(na0) == len(nb0) >= 4 and na0[0] == nb0[0] and sum(x != y for x, y in zip(na0, nb0)) == 1:
