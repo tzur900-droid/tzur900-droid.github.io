@@ -15,6 +15,7 @@ commentary on both sides of it, and a daily division of the whole Shas into 354 
   * Every page says in its head where the same place is in the other half of the book.
 """
 import bisect
+import functools
 import html
 import os
 import re
@@ -1345,7 +1346,9 @@ def inflected(a, b):
     return False
 
 
-SAME_FORMS = [{"לקמנ", "לקמיה", "לקמנה"}, {"עי", "עלידי", "עלידיה"}, {"כלאימ", "הכלאימ"}]
+SAME_FORMS = [{"לקמנ", "לקמיה", "לקמנה"}, {"עי", "עלידי", "עלידיה"}, {"כלאימ", "הכלאימ"},
+              # (the Rosh's "כתבו רבוואתא" for the Rif's "ופסקו רבואתא", as the user decided)
+              {"פסקו", "ופסקו", "כתבו", "וכתבו"}]
 
 
 def same_word(a, b):
@@ -1473,6 +1476,12 @@ def extend_edges(rosh, rif, al, most=8, log=None):
                         keys = at3.get(tuple(stem2(x) for x in W[q:q + 3]), [])
                     else:
                         keys = at3.get(tuple(stem2(x) for x in W[e - 3:e]), [])
+                    if not keys:
+                        # (the three words said a little differently: "רבוואתא דהלכתא כר'"
+                        # for the Rif's "רבואתא הלכתא כרבי")
+                        three = list(range(q, q + 3)) if side == "<" else list(range(e - 3, e))
+                        keys = [r for r in range(len(R) - 2)
+                                if all(_same_cached(W[x], R[r + z]) for z, x in enumerate(three))][:3]
                     for r0 in keys:
                         got = walk(q - 1, r0 - 1, -1) if side == "<" else walk(e, r0 + 3, 1)
                         if got:
@@ -1557,6 +1566,11 @@ def other_subject(rosh, rif, al, stretches, sim, log=None):
     return count
 
 
+@functools.lru_cache(maxsize=200000)
+def _same_cached(a, b):
+    return same_word(a, b)
+
+
 def said_whole(words, seqs, share=0.75):
     """Whether words (loose) are, share of them or more in order, one stretch of one of
     seqs (loose words; None between a dibbur and its comment)."""
@@ -1566,15 +1580,20 @@ def said_whole(words, seqs, share=0.75):
     st = [stem2(w) for w in words]
     for S in seqs:
         ss = [stem2(w) if w else None for w in S]
+        first = set(st[:3])
+        second = set(st[1:5])
         for s in range(len(S)):
-            if ss[s] is None or not any(ss[s] == x or same_word(S[s], w) for x, w in zip(st[:3], words[:3])):
+            if ss[s] is None or ss[s] not in first:
+                continue
+            # (two of its first words there, near each other: a start worth trying)
+            if not any(x in second for x in ss[s + 1:s + 4]):
                 continue
             seg = S[s:s + n + 4]
             sg = ss[s:s + n + 4]
             L = [[0] * (len(seg) + 1) for _ in range(n + 1)]
             for i in range(n):
                 for j in range(len(seg)):
-                    if seg[j] is not None and (st[i] == sg[j] or same_word(words[i], seg[j])):
+                    if seg[j] is not None and (st[i] == sg[j] or _same_cached(words[i], seg[j])):
                         L[i + 1][j + 1] = L[i][j] + 1
                     else:
                         L[i + 1][j + 1] = max(L[i][j + 1], L[i + 1][j])
@@ -1754,10 +1773,9 @@ def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
         F = [x for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]]
         FS = [stem2(x) for x in F]
-        grams = {}
-        for n in (3, 4):
-            for q in range(len(FS) - n + 1):
-                grams.setdefault(n, set()).add(tuple(FS[q:q + n]))
+        at3 = {}
+        for q in range(len(FS) - 2):
+            at3.setdefault(tuple(FS[q:q + 3]), []).append(q)
         sentences = set()
         cur = []
         for p in rif[lo:hi + 1]:
@@ -1792,17 +1810,35 @@ def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
                         p[k][1] = v
                         count += 1
             # the edges
+            def follows(three, w, after):
+                # whether the Rif has w just after (or before) its words three, said a little
+                # differently or with one word between
+                hit = False
+                for q in at3.get(three, ()):
+                    hit = True
+                    near = F[q + 3:q + 5] if after else F[max(0, q - 2):q]
+                    if any(same_word(w, x) for x in near):
+                        return True, True
+                return hit, False
             for a, b in runs():
                 if b - a >= 5:
-                    if tuple(S_[b - 4:b - 1]) in grams.get(3, ()) and tuple(S_[b - 4:b]) not in grams.get(4, ()) \
-                            and not W[b - 1].endswith((":", ".")):
+                    hit, ok = follows(tuple(S_[b - 4:b - 1]), W[b - 1], True)
+                    if hit and not ok and not W[b - 1].endswith((":", ".")):
                         setv(b - 1, b, False)
                         if log is not None:
-                            log.append(("edge", s["num"], W[b - 1]))
-                    if tuple(S_[a + 1:a + 4]) in grams.get(3, ()) and tuple(S_[a:a + 4]) not in grams.get(4, ()):
+                            log.append(("edge", s["num"], " ".join(W[b - 4:b])))
+                    # (from the start, word by word: "מאחיו הגדול [וחליצת הגדול ...]", the
+                    # end of the Rosh's explanation before the quotation goes on)
+                    for _ in range(3):
+                        if b - a < 5:
+                            break
+                        hit, ok = follows(tuple(S_[a + 1:a + 4]), W[a], False)
+                        if not hit or ok:
+                            break
                         setv(a, a + 1, False)
                         if log is not None:
-                            log.append(("edge", s["num"], W[a]))
+                            log.append(("edge", s["num"], " ".join(W[a:a + 4])))
+                        a += 1
             # the gaps
             rs = runs()
             for (a1, b1), (a2, b2) in zip(rs, rs[1:]):
@@ -1813,6 +1849,51 @@ def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
                     setv(b1, a2, True)
                     if log is not None:
                         log.append(("gap", s["num"], " ".join(W[b1:a2])))
+            # after the Rosh's own explanation inside a quotation ("איתמר ביאת קטן פי' ...
+            # וחליצת הגדול"): the words after it that go on with the Rif's from where the
+            # quotation stopped, bold, as the user decided
+            rs = runs()
+            for (a1, b1), (a2, b2) in zip(rs, rs[1:]):
+                if a2 - b1 > 30 or a2 - b1 < 2:
+                    continue
+                ex = next((x for x in range(b1, a2) if norm(p[src[x]][0]).lstrip("ו") in EXPLAINS), None)
+                if ex is None:
+                    continue
+                # (the last place the Rif's words go on from: what is before it, in the
+                # explanation, plain even where it was bold)
+                for t in range(ex + 1, min(b2 - 3, a2 + 4) + 1):
+                    if said_whole(W[max(a1, b1 - 3):b1] + W[t:t + 3], [F], share=1.0):
+                        # (all of it the Rif's, not the Rosh's own words that begin like it:
+                        # "אבל יבומי לאחד מן השנים קודם..." for the Rif's "אבל יבומי ברישא")
+                        if t < a2 and len(W[t:a2]) >= 4 and not said_whole(W[t:a2], [F], share=0.85):
+                            break
+                        setv(ex, t, False)
+                        if t < a2:
+                            setv(t, a2, True)
+                        if log is not None:
+                            log.append(("resume", s["num"], " ".join(W[t:a2 + 2])))
+                        break
+            # before the Rosh's explanation: the words of the quotation it explains, plain
+            # before "פי'" while the quotation goes on bold after it ("איתמר ביאת קטן פי' ...
+            # וחליצת הגדול"): bold, as the user decided
+            rs = runs()
+            for a2, b2 in rs:
+                ex = None
+                for x in range(a2 - 1, max(-1, a2 - 30), -1):
+                    if p[src[x]][1] is True or W[x].endswith((".", ":")):
+                        break
+                    if norm(p[src[x]][0]).lstrip("ו") in EXPLAINS:
+                        ex = x
+                if ex is None:
+                    continue
+                for t in range(max(0, ex - 8), ex - 1):
+                    if p[src[t]][1] is True or any(W[y].endswith((".", ":")) for y in range(t, ex - 1)):
+                        continue
+                    if said_whole(W[t:ex] + W[a2:min(b2, a2 + 6)], [F]):
+                        setv(t, ex, True)
+                        if log is not None:
+                            log.append(("before", s["num"], " ".join(W[t:ex])))
+                        break
             # alone
             rs = runs()
             for q, (a, b) in enumerate(rs):
@@ -1824,6 +1905,24 @@ def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
                 if a - left <= alone or right - b <= alone:
                     continue
                 if tuple(S_[a:b]) in sentences:
+                    continue
+                # (the quotation explained by the Rosh and going on after: "איתמר ביאת קטן
+                # פי' ... וחליצת הגדול")
+                if q + 1 < len(rs) and any(norm(p[src[x]][0]).lstrip("ו") in EXPLAINS for x in range(b, rs[q + 1][0])) \
+                        and said_whole(W[a:b] + W[rs[q + 1][0]:rs[q + 1][0] + 6], [F], share=0.85):
+                    continue
+                # (far from the bold beside it, but one saying with it, the words between
+                # the Rif's too: read on with it, bold all, as the user said)
+                joined = False
+                spans = ([(rs[q - 1][0], b)] if q else []) + ([(a, rs[q + 1][1])] if q + 1 < len(rs) else [])
+                for c, d in spans:
+                    if d - c <= 30 and said_whole(W[c:d], [F]):
+                        setv(c, d, True)
+                        joined = True
+                        if log is not None:
+                            log.append(("joined", s["num"], " ".join(W[c:d])))
+                        break
+                if joined:
                     continue
                 setv(a, b, False)
                 if log is not None:
