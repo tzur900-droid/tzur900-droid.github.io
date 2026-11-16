@@ -1462,6 +1462,46 @@ def other_subject(rosh, rif, al, stretches, sim, log=None):
     return count
 
 
+def scattered(rosh, comm, short=5, gap=8, log=None):
+    """Bold in pieces: two or more bold stretches close together (gap plain words or fewer
+    between them) none of which is short words or longer, a few phrases scattered with no
+    continuous saying of their own. Plain, as the user decided, even where a decision made
+    them so (the rule holds over a mark on the review page). In the Rosh (the Rif's words)
+    and in the commentary (Rashi's words, after its dibbur hamatchil). -> words made plain."""
+    def cnt(toks, a, b):
+        return sum(1 for t in toks[a:b] if t[1] not in ("gem", "src"))
+    count = 0
+    seqs = [(p, 0, True) for x in rosh for p in x["paras"]] + \
+           [(e["tokens"], e.get("dh_len", 0), "rashi") for e in comm]
+    for toks, start, v in seqs:
+        runs, k = [], start
+        while k < len(toks):
+            if toks[k][1] == v:
+                a = k
+                while k < len(toks) and (toks[k][1] == v or (toks[k][1] in ("gem", "src")
+                                                            and k + 1 < len(toks) and toks[k + 1][1] == v)):
+                    k += 1
+                runs.append((a, k))
+            else:
+                k += 1
+        groups = []
+        for r in runs:
+            if groups and cnt(toks, groups[-1][-1][1], r[0]) <= gap:
+                groups[-1].append(r)
+            else:
+                groups.append([r])
+        for g in groups:
+            if len(g) >= 2 and max(cnt(toks, a, b) for a, b in g) < short:
+                for a, b in g:
+                    for q in range(a, b):
+                        if toks[q][1] == v:
+                            toks[q] = [toks[q][0], False] + list(toks[q][2:])
+                            count += 1
+                if log is not None:
+                    log.append(" ".join(t[0] for t in toks[g[0][0]:g[-1][1]]))
+    return count
+
+
 def rule_quotes(rosh, rif, al, least=6, log=None):
     """A stretch the Rosh leaves plain that is the Rif's own wording, near the same place,
     when the bold rules count it the same word for word: abbreviations written out (א"נ is
@@ -4320,6 +4360,7 @@ def prepare_masechet(root, m, fix=None):
     self_refs([p for x in rosh for p in x["paras"]], m)
     from .shas_check import text_checks, apply_decisions
     issues += apply_decisions(rosh, comm, m)
+    report.append(f"{scattered(rosh, comm)} מילים בהדגשה מקוטעת (לא מודגשות)")
     issues += text_checks(rosh, rif, comm, m)
     return rosh, rif, comm, comm_name, report, issues, al
 
