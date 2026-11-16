@@ -1462,7 +1462,30 @@ def other_subject(rosh, rif, al, stretches, sim, log=None):
     return count
 
 
-def scattered(rosh, comm, short=5, gap=8, log=None):
+def joined_in(pieces, seqs, slack=1):
+    """Whether the pieces (lists of stems) stand one after another in one of seqs, a word
+    or so (slack) between them at most: the source says them as one saying, and what the
+    quoting text has between them is its own addition."""
+    first = pieces[0]
+    for S in seqs:
+        for s in range(len(S) - len(first) + 1):
+            if S[s:s + len(first)] != first:
+                continue
+            q, ok = s + len(first), True
+            for pc in pieces[1:]:
+                for d in range(slack + 1):
+                    if S[q + d:q + d + len(pc)] == pc:
+                        q += d + len(pc)
+                        break
+                else:
+                    ok = False
+                    break
+            if ok:
+                return True
+    return False
+
+
+def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
     """Bold in pieces: two or more bold stretches close together (gap plain words or fewer
     between them) none of which is short words or longer, a few phrases scattered with no
     continuous saying of their own. Plain, as the user decided, even where a decision made
@@ -1471,9 +1494,17 @@ def scattered(rosh, comm, short=5, gap=8, log=None):
     def cnt(toks, a, b):
         return sum(1 for t in toks[a:b] if t[1] not in ("gem", "src"))
     count = 0
-    seqs = [(p, 0, True) for x in rosh for p in x["paras"]] + \
-           [(e["tokens"], e.get("dh_len", 0), "rashi") for e in comm]
-    for toks, start, v in seqs:
+    rif_seq = [[stem2(w) for w in lseq(p["tokens"])[0]] for p in rif] if rif else []
+
+    def rif_near(i):
+        if not rif_seq or al is None:
+            return []
+        lo = max(0, al[i] - 3)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 3
+        return [w for S in rif_seq[lo:hi + 1] for w in S]
+    seqs = [(p, 0, True, i) for i, x in enumerate(rosh) for p in x["paras"]] + \
+           [(e["tokens"], e.get("dh_len", 0), "rashi", e) for e in comm]
+    for toks, start, v, src in seqs:
         runs, k = [], start
         while k < len(toks):
             if toks[k][1] == v:
@@ -1492,6 +1523,13 @@ def scattered(rosh, comm, short=5, gap=8, log=None):
                 groups.append([r])
         for g in groups:
             if len(g) >= 2 and max(cnt(toks, a, b) for a, b in g) < short:
+                # (unless what is between them is the Rosh's or the commentator's own
+                # addition inside one saying of the source: "שמחמת מכה או מעוך נמוקו" for
+                # Rashi's "מחמת מכה נמקו")
+                pieces = [[stem2(w) for w in lseq([t for t in toks[a:b] if t[1] == v])[0]] for a, b in g]
+                source = [rif_near(src)] if v is True else src.get("rashi_seqs", [])
+                if all(pieces) and joined_in(pieces, source):
+                    continue
                 for a, b in g:
                     for q in range(a, b):
                         if toks[q][1] == v:
@@ -3917,6 +3955,7 @@ def load_masechet(root, m, found=None):
                     near = [x for x in near if on_subject(x, e["para"])]
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
                 e["near"] = near
+                e["rashi_seqs"] = [[stem2(w) for w in x["dh"]] + [None] + [stem2(w) for w in x["words"]] for x in near]
                 n += mark_rashi(e["tokens"], near, gem, trace=e["why"], weak=weak)
                 rashi_edges(e, near)
                 rashi_whole(e, near)
@@ -4360,7 +4399,7 @@ def prepare_masechet(root, m, fix=None):
     self_refs([p for x in rosh for p in x["paras"]], m)
     from .shas_check import text_checks, apply_decisions
     issues += apply_decisions(rosh, comm, m)
-    report.append(f"{scattered(rosh, comm)} מילים בהדגשה מקוטעת (לא מודגשות)")
+    report.append(f"{scattered(rosh, comm, rif=rif, al=al)} מילים בהדגשה מקוטעת (לא מודגשות)")
     issues += text_checks(rosh, rif, comm, m)
     return rosh, rif, comm, comm_name, report, issues, al
 
