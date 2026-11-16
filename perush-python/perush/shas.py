@@ -1300,6 +1300,13 @@ def same_word(a, b):
     another form of it (לקמן and לקמיה). Not a word with another preposition before it
     (בבית and לבית): that changes the meaning."""
     na0, nb0 = norm(a), norm(b)
+    # (a word cut short with ' at its end stands for the whole word, as the user said:
+    # פי' is פירוש, גמ' is גמרא, דאמרי' is דאמרינן; two letters at least, so that the
+    # cut word says which word it is)
+    for x, y, nx, ny in ((a, b, na0, nb0), (b, a, nb0, na0)):
+        if x.rstrip(".,:;").endswith(("'", "׳")) and not y.rstrip(".,:;").endswith(("'", "׳")) \
+                and len(nx) >= 2 and len(ny) > len(nx) and ny.startswith(nx):
+            return True
     if na0 and nb0 and na0[0] != nb0[0] and na0[0] in "בלמכ" and nb0[0] in "בלמכ" and na0[1:] == nb0[1:]:
         return False
     # (א and ה at the end are the same word, as the user decided (גופא, גופה; בן בתירא,
