@@ -3782,18 +3782,21 @@ def load_masechet(root, m, found=None):
                 near = [x for x in rashi if (a is not None and a - 2 <= x["amud"] <= a + 2)
                         or (b is not None and b - 2 <= x["amud"] <= b + 2)]
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
+                e["near"] = near
                 n += mark_rashi(e["tokens"], near, gem, trace=e["why"], weak=weak)
                 rashi_edges(e, near)
                 rashi_whole(e, near)
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
-            # (a stretch with no saying of Rashi like it anywhere in the masechet is the
-            # commentator's: plain, as the user decided)
-            allr = set()
+            # (a stretch with no saying of Rashi like it near the place, about the same daf
+            # as the passage, is the commentator's: plain, as the user decided; Rashi on
+            # another daf is another subject, as the Rif's parallel for the Rosh)
+            grams_of = {}
             for r in rashi:
                 R_ = [stem2(x) for x in r["words"]] + [None] + [stem2(x) for x in r["dh"]]
-                allr |= {tuple(R_[q:q + 3]) for q in range(len(R_) - 2)}
+                grams_of[r["id"]] = {tuple(R_[q:q + 3]) for q in range(len(R_) - 2)}
             nr = 0
             for e in comm:
+                allr = set().union(*[grams_of[r["id"]] for r in e.pop("near", [])])
                 toks = e["tokens"]
                 k = e.get("dh_len", 0)
                 while k < len(toks) and toks[k][1] in ("rashi", True, "dh"):
