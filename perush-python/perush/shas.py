@@ -675,25 +675,45 @@ def rashi_edges(e, entries, most=3):
         while x < b and y < len(R) and same_word(loose(toks[x][0]), R[y]):
             x, y = x + 1, y + 1
         hi = x
-        # words outside it that go on with Rashi's
-        ry = p - (a + q - lo) - 1
-        x, got = lo - 1, 0
-        while x >= start and ry >= 0 and got < most and toks[x][1] in (False, "src"):
-            # (a word of its own in brackets, "והקרן (ופגמה) שלה": over it, not bold)
-            if toks[x][0].startswith("(") and toks[x][0].rstrip(".,:;").endswith(")"):
-                x -= 1
-                continue
-            if toks[x][1] != False or any(c in toks[x][0] for c in "()[]") or \
-                    not same_word(loose(toks[x][0]), R[ry]):
+        # words outside it that go on with Rashi's: word by word, over a word of its own in
+        # brackets ("והקרן (ופגמה) שלה"), and over one word of Rashi's or of its own that the
+        # other has not where the words after it go on together (as the user decided: bold
+        # from where Rashi's sentence begins to where it ends)
+        def outward(x, ry, step):
+            got, skipped = [], False
+
+            def ok(k):
+                return 0 <= k < len(toks) and toks[k][1] in (False, "rashi") and \
+                    not any(c in toks[k][0] for c in "()[]")
+
+            def same(k, r):
+                return 0 <= r < len(R) and ok(k) and same_word(loose(toks[k][0]), R[r])
+            while (x >= start if step < 0 else x < len(toks)) and 0 <= ry < len(R) and len(got) < most + 1:
+                t = toks[x][0]
+                if t.startswith("(") and t.rstrip(".,:;").endswith(")"):
+                    x += step
+                    continue
+                if same(x, ry):
+                    got.append(x)
+                    x, ry = x + step, ry + step
+                    continue
+                if skipped:
+                    break
+                if same(x, ry + step) and same(x + step, ry + 2 * step):
+                    ry, skipped = ry + step, True
+                    continue
+                if ok(x) and same(x + step, ry) and same(x + 2 * step, ry + step):
+                    got.append(x)
+                    x, skipped = x + step, True
+                    continue
                 break
-            toks[x] = [toks[x][0], "rashi"] + list(toks[x][2:])
-            x, ry, got = x - 1, ry - 1, got + 1
-        ry = p + 3 + (hi - (a + q + 3))
-        x, got = hi, 0
-        while x < len(toks) and ry < len(R) and got < most and toks[x][1] in (False, "rashi") and \
-                not any(c in toks[x][0] for c in "()[]") and same_word(loose(toks[x][0]), R[ry]):
-            toks[x] = [toks[x][0], "rashi"] + list(toks[x][2:])
-            x, ry, got = x + 1, ry + 1, got + 1
+            return got
+        for x in outward(lo - 1, p - (a + q - lo) - 1, -1):
+            if toks[x][1] is False:
+                toks[x] = [toks[x][0], "rashi"] + list(toks[x][2:])
+        for x in outward(hi, p + 3 + (hi - (a + q + 3)), 1):
+            if toks[x][1] is False:
+                toks[x] = [toks[x][0], "rashi"] + list(toks[x][2:])
         # words inside the run that Rashi has not, two or more together ("שאינו קשור
         # [כלובן ביצה] אלא צלול כמים"): plain, the commentator's own
         rset = set(R)
