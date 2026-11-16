@@ -181,6 +181,25 @@ def _table():
 
 
 TABLE = _table()
+
+
+def _learned():
+    """The abbreviations learned from the texts themselves (data/abbrev_learned.txt, made by
+    tools/learn_abbrev.py): those the table has not, by their commonest meaning."""
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "abbrev_learned.txt")
+    if not os.path.exists(path):
+        return
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.strip().split("=", 1)
+        k = k.replace("״", '"')
+        if k not in TABLE and v:
+            TABLE[k] = v.split("|")[0].split()
+
+
+_learned()
 PREFIX = "ודהבלמשכ"
 
 

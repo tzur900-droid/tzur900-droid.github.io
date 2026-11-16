@@ -1251,16 +1251,45 @@ def number_of(w):
     return None
 
 
+def core(w):
+    """A word in another spelling or form that says the same (the user: an inflection is the
+    same word only where it does not change the meaning): without ו and י of full spelling,
+    a ו, ד, ש or ה before it (and, that, the), the Aramaic plural ין as the Hebrew ים, the
+    Aramaic ending א as the Hebrew ה. Not ב, ל, מ, כ before it (in, to, from, as), nor
+    endings that change who or how many (אמר and אמרה, ביה and בה, בתולה and בתולים)."""
+    w = w.replace("ך", "כ").replace("ם", "מ").replace("ן", "נ").replace("ף", "פ").replace("ץ", "צ")
+    for _ in range(2):
+        if len(w) > 3 and w[0] in "ודשה":
+            w = w[1:]
+    if w.endswith("ינ"):
+        w = w[:-2] + "ימ"
+    elif w.endswith("א"):
+        w = w[:-1] + "ה"
+    return w[:1] + re.sub("[וי]", "", w[1:])
+
+
 SAME_FORMS = [{"לקמנ", "לקמיה", "לקמנה"}, {"עי", "עלידי", "עלידיה"}, {"כלאימ", "הכלאימ"}]
 
 
 def same_word(a, b):
     """The same word in a quotation: near_word, or the same number (שני and ב'), or
-    another form of it (לקמן and לקמיה)."""
+    another form of it (לקמן and לקמיה). Not a word with another preposition before it
+    (בבית and לבית): that changes the meaning."""
+    na0, nb0 = norm(a), norm(b)
+    if na0 and nb0 and na0[0] != nb0[0] and na0[0] in "בלמכ" and nb0[0] in "בלמכ" and na0[1:] == nb0[1:]:
+        return False
+    # (a letter mistaken for another inside the word, not its first: שכלו and שבלו)
+    if len(na0) == len(nb0) >= 4 and na0[0] == nb0[0] and sum(x != y for x, y in zip(na0, nb0)) == 1:
+        return True
     if near_word(a, b):
         return True
     na, nb = norm(a), norm(b)
     if any(na in f and nb in f for f in SAME_FORMS):
+        return True
+    # the same word in another form, Hebrew or Aramaic: its prefixes (ו ד ב ל כ ש ה מ) and
+    # endings (ה/א, ים/ין, יה, הו, ייהו, תא, ות ...) aside, and full and defective spelling
+    ca, cb = core(na), core(nb)
+    if len(ca) >= 3 and ca == cb:
         return True
     x, y = number_of(a), number_of(b)
     return x is not None and x == y
