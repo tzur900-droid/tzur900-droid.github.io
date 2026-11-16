@@ -3890,7 +3890,8 @@ def load_masechet(root, m, found=None):
                 grams_of[r["id"]] = {tuple(R_[q:q + 3]) for q in range(len(R_) - 2)}
             nr = 0
             for e in comm:
-                allr = set().union(*[grams_of[r["id"]] for r in e.pop("near", [])])
+                nears = [grams_of[r["id"]] for r in e.pop("near", [])]
+                allr = set().union(*nears)
                 toks = e["tokens"]
                 k = e.get("dh_len", 0)
                 while k < len(toks) and toks[k][1] in ("rashi", True, "dh"):
@@ -3904,7 +3905,11 @@ def load_masechet(root, m, found=None):
                         k += 1
                     W = [stem2(x) for x in lseq(toks[a:k])[0]]
                     gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
-                    if gs and not any(g in allr for g in gs):
+                    # (and where the closest comment of Rashi on the subject has less than a
+                    # third of it, it is the commentator's words: plain unless the user
+                    # decided otherwise, as the user decided)
+                    best = max((sum(g in r_ for g in gs) for r_ in nears), default=0)
+                    if gs and (not any(g in allr for g in gs) or best < 0.35 * len(gs)):
                         for q in range(a, k):
                             toks[q] = [toks[q][0], False] + list(toks[q][2:])
                             nr += 1
