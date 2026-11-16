@@ -1188,7 +1188,21 @@ def complete_sentences(rosh, rif, al, most=6):
     return count
 
 
-def drop_requotes(rosh, rif, al, before=6, share=0.6, log=None):
+def canon_seq(toks):
+    """The words of toks (as lseq) in one form for comparing a quotation with itself: the
+    stem, and a number by its value (א' and אחד, ב' and שני: the same, as the user showed)."""
+    seq, at = lseq(toks)
+    many = {}
+    for k in at:
+        many[k] = many.get(k, 0) + 1
+    out = []
+    for w, k in zip(seq, at):
+        n = number_of(toks[k][0]) if many[k] == 1 else None
+        out.append(f"#{n}" if n is not None else stem2(w))
+    return out
+
+
+def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
     """A line of the Rif the Rosh brings again in its own words (after it has quoted the
     passage, in the discussion that follows: "ומקשינן ... למה האריך הש"ס לומר אי דקא טעין
     ..."): plain, as Oz Vehadar prints it; bold once, where the Rosh quotes it. Not where
@@ -1197,7 +1211,7 @@ def drop_requotes(rosh, rif, al, before=6, share=0.6, log=None):
     for i, s in enumerate(rosh):
         lo = max(0, al[i] - 2)
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
-        R = [stem2(x) for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]]
+        R = [x for p in rif[lo:hi + 1] for x in canon_seq(p["tokens"])]
         rc = {}
         for q in range(len(R) - 2):
             g = tuple(R[q:q + 3])
@@ -1205,7 +1219,7 @@ def drop_requotes(rosh, rif, al, before=6, share=0.6, log=None):
         W, src = [], []
         for p in s["paras"]:
             seq, at = lseq(p)
-            W += [stem2(x) for x in seq]
+            W += canon_seq(p)
             src += [(p, k) for k in at]
         bold = [p[k][1] is True for p, k in src]
         seen = {}
@@ -1226,8 +1240,18 @@ def drop_requotes(rosh, rif, al, before=6, share=0.6, log=None):
             # within it; not a quotation as long as the one before, which may be the real one)
             again = [g for g in grams if seen.get(g, 0) >= 2 * (e - q)]
             twice = [g for g in grams if rc.get(g, 0) >= 2]
+            # (in the Rosh's own explanation, "פי' ...", a line brought again is his words,
+            # even where the Rif has the line twice, as the user showed)
+            explain = False
+            for x in range(q - 1, max(-1, q - 25), -1):
+                tk = src[x][0][src[x][1]][0]
+                if bold[x] or tk.rstrip().endswith((".", ":")):
+                    break
+                if norm(tk).lstrip("ו") in EXPLAINS:
+                    explain = True
+                    break
             if plain >= before and e - q <= 15 and grams and len(again) >= share * len(grams) \
-                    and len(twice) < share * len(grams):
+                    and (explain or len(twice) < share * len(grams)):
                 toks = {(id(p), k): (p, k) for p, k in src[q:e]}
                 for p, k in toks.values():
                     if p[k][1] is True:
@@ -4545,6 +4569,7 @@ def prepare_masechet(root, m, fix=None):
         report.append(f"ברא\"ש {extend_edges(rosh, rif, al)} מילים בקצות ציטוטים")
         report.append(f"ברא\"ש {bridge_one(rosh)} מילים בודדות בתוך ציטוטים")
         report.append(f"ברא\"ש {quoting_words(rosh, rif, al)} מילות קישור של הרא\"ש בתוך ציטוט (לא מודגשות)")
+        report.append(f"ברא\"ש {drop_requotes(rosh, rif, al)} מילים בציטוט שחוזר (אחרי ההשלמות, לא מודגשות)")
         report.append(f"ברא\"ש {rule_quotes(rosh, rif, al)} מילים בלשון הרי\"ף לפי כללי ההטיות וראשי התיבות")
     from .shas_check import marked, marked_comm
     issues += marked(rosh, m) + marked_comm(comm, m)
