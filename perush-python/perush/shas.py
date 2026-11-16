@@ -1320,6 +1320,10 @@ def same_word(a, b):
     # decided; ואין and ולא, the same negation)
     if na0[:2] in ("כש", "מש") and nb0[:2] in ("כש", "מש") and na0[2:] == nb0[2:] and len(na0) > 3:
         return True
+    # (אהא is "on this", the הא with א for על before it: אהא דתנן, הא דתנן)
+    for x, y in ((na0, nb0), (nb0, na0)):
+        if len(x) > 2 and x[0] == "א" and x[1:] == y and y[0] == "ה":
+            return True
     if {na0, nb0} == {"לא", "אינ"} or (len(na0) > 1 and len(nb0) > 1 and na0[0] == nb0[0] and
                                          na0[0] in "ודש" and {na0[1:], nb0[1:]} == {"לא", "אינ"}):
         return True
@@ -1350,16 +1354,20 @@ def same_word(a, b):
     return x is not None and x == y
 
 
-def extend_edges(rosh, rif, al, most=6, log=None):
+def extend_edges(rosh, rif, al, most=8, log=None):
     """The bold of a quotation on to the words before and after it that are the Rif's words
     before and after the same place, said a little differently ("היכא דאיכא שני אחין" for the
-    Rif's "דהיכא דאיכא ב' אחין"), word by word, up to most words each way; not over a mark
-    or a reference. -> words made bold."""
+    Rif's "דהיכא דאיכא ב' אחין"; "ומקשינן אהא דתנן" for "מקשינן הא דתנן"), word by word, up
+    to most words each way: over a mark of the Gemara's amud ([יד.]), and over one word of
+    the Rosh's or of the Rif's that the other has not, where the words after it go on
+    together (as the user decided: bold from where the Rif's sentence begins, to where it
+    ends); not into a reference. -> words made bold."""
     count = 0
     for i, s in enumerate(rosh):
         lo = max(0, al[i] - 2)
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
-        R = [x for p in rif[lo:hi + 1] for x in lseq(p["tokens"])[0]]
+        rtoks = [t for p in rif[lo:hi + 1] for t in p["tokens"]]
+        R, rsrc = lseq(rtoks)
         RS = [stem2(x) for x in R]
         at3 = {}
         for q in range(len(RS) - 2):
@@ -1367,13 +1375,48 @@ def extend_edges(rosh, rif, al, most=6, log=None):
         for p in s["paras"]:
             W, src = lseq(p)
             bold = [p[k][1] is True for k in src]
-            # (not into a reference or a mark: "(דף צא.)", "[יג:]")
+            gem = [p[k][1] == "gem" for k in src]
             plain_ok = [p[k][1] is False and not any(c in p[k][0] for c in "()[]") for k in src]
+
+            def same(x, r):
+                return same_word(W[x], R[r]) or same_word(p[src[x]][0], rtoks[rsrc[r]][0])
+
+            def walk(x, r, step):
+                """From Rosh word x and Rif word r outward (step -1 or 1): the Rosh words that
+                go on with the Rif's."""
+                got, skipped, last = [], False, []
+                while 0 <= x < len(W) and 0 <= r < len(R) and len(got) < most:
+                    if gem[x]:
+                        x += step
+                        continue
+                    if not plain_ok[x] or bold[x]:
+                        break
+                    if same(x, r):
+                        got.append(x)
+                        last = list(got)
+                        x, r = x + step, r + step
+                        continue
+                    if skipped:
+                        break
+                    x2, r2 = x + step, r + step
+                    # one word of the Rif's the Rosh has not, or one of the Rosh's own
+                    if 0 <= r2 < len(R) and same(x, r2) and 0 <= x + step < len(W) and \
+                            0 <= r2 + step < len(R) and plain_ok[x + step] and same(x + step, r2 + step):
+                        r, skipped = r2, True
+                        continue
+                    if 0 <= x2 < len(W) and plain_ok[x2] and not bold[x2] and same(x2, r) and \
+                            0 <= x2 + step < len(W) and 0 <= r + step < len(R) and plain_ok[x2 + step] and \
+                            same(x2 + step, r + step):
+                        got.append(x)
+                        x, skipped = x2, True
+                        continue
+                    break
+                return last
             runs, q = [], 0
             while q < len(W):
                 if bold[q]:
                     e = q
-                    while e < len(W) and bold[e]:
+                    while e < len(W) and (bold[e] or gem[e]):
                         e += 1
                     if e - q >= 3:
                         runs.append((q, e))
@@ -1381,38 +1424,23 @@ def extend_edges(rosh, rif, al, most=6, log=None):
                 else:
                     q += 1
             for q, e in runs:
-                # back from its start
-                for r0 in at3.get(tuple(stem2(x) for x in W[q:q + 3]), []):
-                    x, r, got = q - 1, r0 - 1, []
-                    while x >= 0 and r >= 0 and len(got) < most and plain_ok[x] and not bold[x] and same_word(W[x], R[r]):
-                        got.append(x)
-                        x, r = x - 1, r - 1
-                    if got:
-                        for y in got:
-                            k = src[y]
-                            if p[k][1] is False:
-                                p[k][1] = True
-                                count += 1
-                            bold[y] = True
-                        if log is not None:
-                            log.append((s["perek"], s["num"], "<", " ".join(W[min(got):e][:10])))
-                        break
-                # on from its end
-                for r0 in at3.get(tuple(stem2(x) for x in W[e - 3:e]), []):
-                    x, r, got = e, r0 + 3, []
-                    while x < len(W) and r < len(R) and len(got) < most and plain_ok[x] and not bold[x] and same_word(W[x], R[r]):
-                        got.append(x)
-                        x, r = x + 1, r + 1
-                    if got:
-                        for y in got:
-                            k = src[y]
-                            if p[k][1] is False:
-                                p[k][1] = True
-                                count += 1
-                            bold[y] = True
-                        if log is not None:
-                            log.append((s["perek"], s["num"], ">", " ".join(W[max(q, e - 4):max(got) + 1])))
-                        break
+                for side in ("<", ">"):
+                    if side == "<":
+                        keys = at3.get(tuple(stem2(x) for x in W[q:q + 3]), [])
+                    else:
+                        keys = at3.get(tuple(stem2(x) for x in W[e - 3:e]), [])
+                    for r0 in keys:
+                        got = walk(q - 1, r0 - 1, -1) if side == "<" else walk(e, r0 + 3, 1)
+                        if got:
+                            for y in range(min(got), max(got) + 1):
+                                k = src[y]
+                                if p[k][1] is False and not any(c in p[k][0] for c in "()[]"):
+                                    p[k][1] = True
+                                    count += 1
+                                bold[y] = True
+                            if log is not None:
+                                log.append((s["perek"], s["num"], side, " ".join(W[min(got):max(got) + 1])))
+                            break
     return count
 
 

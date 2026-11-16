@@ -77,14 +77,17 @@ def draw_oz_head(p, page, h):
     mm = _re.match(r"^(.*?)\s*(פרק \S+)\s*(.*)$", title)
     pname, center, mas = (mm.group(1), mm.group(2), mm.group(3)) if mm else ("", title, "")
     tw = width(big, center) if center else 0.0
+    inner_r, inner_l = mid + tw / 2, mid - tw / 2       # how far the head's middle reaches
     if center:
         p.setFont(qfont(big))
         p.drawText(QPointF(mid - tw / 2, base), center)
         gap = big.size * 1.6
         if pname:
             p.drawText(QPointF(mid + tw / 2 + gap, base), pname)
+            inner_r = mid + tw / 2 + gap + width(big, pname)
         if mas:
             p.drawText(QPointF(mid - tw / 2 - gap - width(big, mas), base), mas)
+            inner_l = mid - tw / 2 - gap - width(big, mas)
     if h["sub"]:
         p.setFont(qfont(sub))
         p.drawText(QPointF(mid - width(sub, h["sub"]) / 2, h["sub_base"]), h["sub"])
@@ -104,8 +107,11 @@ def draw_oz_head(p, page, h):
     else:
         xn = m
         right_end, left_end = R, m + nw + dw + st.size
-    # (the work's name, רבינו ... אשר, is no longer on the two sides: the perek's name and
-    # the masechet are there)
+    p.setFont(qfont(st))
+    for word, a, c in ((right_word, inner_r, right_end), (left_word, left_end, inner_l)):
+        if word:
+            ww = width(st, word)
+            p.drawText(QPointF((a + c) / 2 - ww / 2, base), word)
     if h["box"]:
         # a day begins: the number in a grey box, and right under it, small, the day
         # (the grey box goes on down over the day's name too, one box for both)
