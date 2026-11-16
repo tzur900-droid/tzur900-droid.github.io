@@ -1429,6 +1429,79 @@ def bridge_one(rosh, side=4, log=None):
     return count
 
 
+def rule_quotes(rosh, rif, al, least=6, log=None):
+    """A stretch the Rosh leaves plain that is the Rif's own wording, near the same place,
+    when the bold rules count it the same word for word: abbreviations written out (א"נ is
+    אי נמי, דא"ל is דאמר ליה), the same word inflected (שטרו/שטריה, יהבינן/יהבינא,
+    נכסיה/נכסי), and at most one small word of the Rif left out. least words or more, four
+    printed words or more; not a quotation the Rosh already brought bold in this siman.
+    -> words made bold."""
+    def words(toks, ok):
+        out = []
+        for k, t in enumerate(toks):
+            if not ok(t) or any(c in t[0] for c in "()[]"):
+                out.append((None, k))
+                continue
+            for w in (expand(t[0]) or [t[0].strip(".,:;")]):
+                out.append((w, k))
+        return out
+    count = 0
+    for i, s in enumerate(rosh):
+        lo = max(0, al[i] - 2)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
+        F = [w for p in rif[lo:hi + 1] for w, _ in words(p["tokens"], lambda t: t[1] not in ("src", "gem"))]
+        idx = {}
+        for j, w in enumerate(F):
+            if w:
+                idx.setdefault(stem2(w), []).append(j)
+        seen = []
+        for p in s["paras"]:
+            R = words(p, lambda t: t[1] is False)
+            a = 0
+            while a < len(R):
+                w, k = R[a]
+                if w is None or (a and R[a - 1][1] == k) or stem2(w) not in idx:
+                    a += 1
+                    continue
+                best = None
+                for j in idx[stem2(w)]:
+                    ra, rj, skip = a, j, 0
+                    while ra < len(R) and R[ra][0] is not None and rj < len(F) and F[rj] is not None:
+                        if same_word(R[ra][0], F[rj]):
+                            ra, rj = ra + 1, rj + 1
+                        elif not skip and rj + 1 < len(F) and F[rj + 1] and ra > a and \
+                                same_word(R[ra][0], F[rj + 1]):
+                            ra, rj, skip = ra + 1, rj + 2, 1
+                        else:
+                            break
+                    # (whole printed words only)
+                    while ra > a and ra < len(R) and R[ra][1] == R[ra - 1][1]:
+                        ra -= 1
+                    if best is None or ra > best:
+                        best = ra
+                ks = sorted({R[q][1] for q in range(a, best)}) if best else []
+                if best and best - a >= least and len(ks) >= 4:
+                    span = [stem2(w) for w in lseq(p[ks[0]:ks[-1] + 1])[0]]
+                    gs = [tuple(span[q:q + 3]) for q in range(len(span) - 2)]
+                    before = set()
+                    for pp in seen + [p[:ks[0]]]:
+                        W, src = lseq(pp)
+                        for q in range(len(W) - 2):
+                            if all(pp[src[q + z]][1] is True for z in range(3)):
+                                before.add(tuple(stem2(x) for x in W[q:q + 3]))
+                    if not (gs and sum(g in before for g in gs) >= 0.5 * len(gs)):
+                        for k2 in ks:
+                            p[k2][1] = True
+                        count += len(ks)
+                        if log is not None:
+                            log.append((s["perek"], s["num"], " ".join(p[k2][0] for k2 in ks)))
+                    a = best
+                    continue
+                a += 1
+            seen.append(p)
+    return count
+
+
 def follow_quote(rosh, rif, al, most=10, share=0.7, log=None):
     """A few words left plain inside a quotation where the Rosh says the Rif's words a
     little differently (דמים for דם, the Rif's misprint שבלו for שכלו) and leaves out a
@@ -4109,6 +4182,7 @@ def prepare_masechet(root, m, fix=None):
         report.append(f"ברא\"ש {follow_quote(rosh, rif, al)} מילים בציטוט בשינוי לשון קל")
         report.append(f"ברא\"ש {extend_edges(rosh, rif, al)} מילים בקצות ציטוטים")
         report.append(f"ברא\"ש {bridge_one(rosh)} מילים בודדות בתוך ציטוטים")
+        report.append(f"ברא\"ש {rule_quotes(rosh, rif, al)} מילים בלשון הרי\"ף לפי כללי ההטיות וראשי התיבות")
     from .shas_check import marked, marked_comm
     issues += marked(rosh, m) + marked_comm(comm, m)
     # the amudim and the references as Oz Vehadar prints them ([נה:], (גיטין ו.))
