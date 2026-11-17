@@ -1229,10 +1229,12 @@ def first_quote(rosh, short=12, log=None, masechet=None):
     count = 0
     decided = plain_decided(masechet)
     for s in rosh:
-        W, src = [], []
+        W, src, L = [], [], []
         for p in s["paras"]:
             W += canon_seq(p)
-            src += [(p, k) for k in lseq(p)[1]]
+            seq, at = lseq(p)
+            L += seq
+            src += [(p, k) for k in at]
         bold = [p[k][1] is True for p, k in src]
         q = 0
         while q < len(W):
@@ -1247,7 +1249,8 @@ def first_quote(rosh, short=12, log=None, masechet=None):
                 key = W[q:e]
                 grams = {tuple(key[z:z + 3]) for z in range(n - 2)}
                 for x in range(0, q - n + 1):
-                    if W[x:x + n] != key or any(bold[x:x + n]):
+                    if any(bold[x:x + n]) or not all(W[x + z] == key[z] or _same_cached(L[x + z], L[q + z])
+                                                     for z in range(n)):
                         continue
                     # (not where the line was bold before that, the first time: then both are
                     # brought again)
@@ -1511,7 +1514,8 @@ def extend_edges(rosh, rif, al, most=8, log=None):
     for i, s in enumerate(rosh):
         lo = max(0, al[i] - 2)
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
-        rtoks = [t for p in rif[lo:hi + 1] for t in p["tokens"]]
+        # (not the Rif's marks of the Gemara's pages: "האלמנה [מא:] מפני האיבול")
+        rtoks = [t for p in rif[lo:hi + 1] for t in p["tokens"] if t[1] not in ("gem", "src")]
         R, rsrc = lseq(rtoks)
         RS = [stem2(x) for x in R]
         at3 = {}
@@ -1875,9 +1879,10 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
         F, FR = [], []
         for p in rif[lo:hi + 1]:
-            seq, at = lseq(p["tokens"])
+            tk = [t for t in p["tokens"] if t[1] not in ("gem", "src")]
+            seq, at = lseq(tk)
             F += seq
-            FR += [p["tokens"][k][0] for k in at]
+            FR += [tk[k][0] for k in at]
         FS = [stem2(x) for x in F]
         at3 = {}
         for q in range(len(FS) - 2):
@@ -1920,12 +1925,17 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                 # whether the Rif has w just after (or before) its words three, said a little
                 # differently or with one word between
                 hit = False
+                # (an abbreviation by its words: כ"ש is כל שכן, ר"א is רבי אלעזר)
+                ws = expand(w) or [w]
+                w1 = ws[0] if after else ws[-1]
                 for q in at3.get(three, ()):
                     hit = True
                     near = FR[q + 3:q + 5] if after else FR[max(0, q - 2):q]
+                    near = [y for x in near for y in (expand(x) or [x])]
                     # (by the words as written: וכיון is not וכן, though loosely they are one)
-                    if any(norm(w).lstrip("ו") == norm(x).lstrip("ו") or
-                           (min(len(norm(w)), len(norm(x))) >= 4 and same_word(w, x)) for x in near):
+                    if any(norm(v).lstrip("ו") == norm(x).lstrip("ו") or
+                           (min(len(norm(v)), len(norm(x))) >= 4 and same_word(v, x))
+                           for v in (w, w1) for x in near):
                         return True, True
                 return hit, False
             for a, b in runs():
