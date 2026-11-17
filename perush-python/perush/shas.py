@@ -266,6 +266,28 @@ def lseq(toks):
                 seq.append(x)
                 src.append(i)
             continue
+        # (a gentile as the censors wrote him: עובד כוכבים, עכו"ם, גוי, נכרי for כותי: one
+        # word, the same, as the Rif and the Rosh have them each in another way)
+        nw = norm(w)
+        pre = ""
+        for k2 in range(0, 3):
+            if nw[k2:] in ("עובד", "עבד") and i + 1 < len(toks) and \
+                    norm(toks[i + 1][0] if isinstance(toks[i + 1], list) else toks[i + 1]) in ("כוכבימ", "כוכבים"):
+                pre = nw[:k2]
+                seq.append(loose(pre + "כותי"))
+                src.append(i)
+                break
+        else:
+            pre = None
+        if pre is not None:
+            continue
+        if nw in ("כוכבימ", "כוכבים") and i and norm(toks[i - 1][0] if isinstance(toks[i - 1], list) else toks[i - 1]).endswith(("עובד", "עבד")):
+            continue
+        if nw.lstrip("ולדשבמהכ") in ("עכומ", "גוי", "נכרי", "עכום") and len(nw) - len(nw.lstrip("ולדשבמהכ")) <= 2:
+            k2 = len(nw) - len(nw.lstrip("ולדשבמהכ"))
+            seq.append(loose(nw[:k2] + "כותי"))
+            src.append(i)
+            continue
         for x in lwords(w):
             seq.append(x)
             src.append(i)
