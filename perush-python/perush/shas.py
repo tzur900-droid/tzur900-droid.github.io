@@ -1353,6 +1353,9 @@ SAME_FORMS = [{"לקמנ", "לקמיה", "לקמנה"}, {"עי", "עלידי", "
               {"פסקו", "ופסקו", "כתבו", "וכתבו"}]
 
 
+LOOKALIKE = {frozenset(x) for x in ("בכ", "דר", "הח", "וז", "וי", "זי", "סמ", "טמ", "גנ", "כנ")}
+
+
 def same_word(a, b):
     """The same word in a quotation: near_word, or the same number (שני and ב'), or
     another form of it (לקמן and לקמיה). Not a word with another preposition before it
@@ -1376,6 +1379,9 @@ def same_word(a, b):
     if {na0, nb0} == {"לא", "אינ"} or (len(na0) > 1 and len(nb0) > 1 and na0[0] == nb0[0] and
                                          na0[0] in "ודש" and {na0[1:], nb0[1:]} == {"לא", "אינ"}):
         return True
+    # (ב for כ at the head of a long word is a misprint, as the user decided: כערוה, בערוה)
+    if len(na0) >= 5 and na0[1:] == nb0[1:] and {na0[0], nb0[0]} == {"ב", "כ"}:
+        return True
     if na0 and nb0 and na0[0] != nb0[0] and na0[0] in "בלמכ" and nb0[0] in "בלמכ" and na0[1:] == nb0[1:]:
         return False
     # (א and ה at the end are the same word, as the user decided (גופא, גופה; בן בתירא,
@@ -1386,6 +1392,12 @@ def same_word(a, b):
     # (אמר, אמרה), one and many (דם, דמים; חדש, חדשים), his or hers (צרה, צרתה; בעל, בעלה))
     if inflected(na0, nb0):
         return True
+    # (a misprint: one letter for one that looks like it, the first too, in a word of four
+    # letters or more: כערוה for the Rif's בערוה, as the user decided)
+    if len(na0) == len(nb0) >= 4:
+        diff = [(x, y) for x, y in zip(na0, nb0) if x != y]
+        if len(diff) == 1 and frozenset(diff[0]) in LOOKALIKE:
+            return True
     # (a letter mistaken for another inside the word, not its first: שכלו and שבלו)
     if len(na0) == len(nb0) >= 4 and na0[0] == nb0[0] and sum(x != y for x, y in zip(na0, nb0)) == 1:
         return True
@@ -1841,6 +1853,12 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                         if c < b and src[c] == src[c - 1]:
                             continue            # (inside one printed word)
                         if tuple(S_[c - 3:c]) not in at3:
+                            continue
+                        # (the last of them as written, too: וכיון is not the Rif's וכן)
+                        lastw = p[src[c - 1]][0]
+                        if not any(norm(lastw).lstrip("ו") == norm(FR[q + 2]).lstrip("ו") or
+                                   (min(len(norm(lastw)), len(norm(FR[q + 2]))) >= 4 and same_word(lastw, FR[q + 2]))
+                                   for q in at3[tuple(S_[c - 3:c])]):
                             continue
                         if c < b and not p[src[c - 1]][0].endswith((":", ".")):
                             hit, ok = follows(tuple(S_[c - 3:c]), p[src[c]][0], True)
@@ -4820,7 +4838,14 @@ def prepare_masechet(root, m, fix=None):
     self_refs([p for x in rosh for p in x["paras"]], m)
     from .shas_check import text_checks, apply_decisions
     issues += apply_decisions(rosh, comm, m)
+    if rif and rosh:
+        # (a line brought again after one the decisions made bold; the decisions themselves stay)
+        drop_requotes(rosh, rif, al)
+        apply_decisions(rosh, comm, m)
     report.append(f"{scattered(rosh, comm, rif=rif, al=al)} מילים בהדגשה מקוטעת (לא מודגשות)")
+    for e in comm:
+        e.pop("rashi_seqs", None)
+        e.pop("rashi_loose", None)
     issues += text_checks(rosh, rif, comm, m)
     return rosh, rif, comm, comm_name, report, issues, al
 
