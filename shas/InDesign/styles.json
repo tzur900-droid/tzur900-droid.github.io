@@ -154,7 +154,7 @@
   },
   "מפרש - לשון רשי": {
    "font": "Noto Rashi Hebrew",
-   "bold": false,
+   "bold": true,
    "size": 8.75,
    "of_base": 1.0
   },
