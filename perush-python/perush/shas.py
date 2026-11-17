@@ -652,7 +652,12 @@ def rashi_whole(e, entries):
                 continue
             key = [stem2(x) for x in whole]
             for q in range(len(S) - 2):
-                if S[q:q + 3] == key and src[q] >= start and all(toks[src[x]][1] in (False, "rashi") for x in range(q, q + 3)):
+                # (where it opens what is said on a dibbur, as Rashi says it: right after the
+                # dibbur or a sentence's end; not his three words again inside the
+                # commentator's own discussion, "וכנסה סתם ונמצאו עליה נדרים" ...)
+                opens = src[q] == start or (src[q] > 0 and str(toks[src[q] - 1][0]).rstrip().endswith((".", ":")))
+                if S[q:q + 3] == key and src[q] >= start and opens and \
+                        all(toks[src[x]][1] in (False, "rashi") for x in range(q, q + 3)):
                     for x in range(q, q + 3):
                         k = src[x]
                         toks[k] = [toks[k][0], "rashi"] + list(toks[k][2:])
@@ -2141,7 +2146,7 @@ def quoting_words(rosh, rif, al):
     return count
 
 
-def in_order(words, F, slack=2):
+def in_order(words, F, slack=2, strict=False):
     """Whether words (loose) are all in F in their order, close together (slack more words
     between them at most, in all): the Rif says them too."""
     st = [stem2(w) for w in words]
@@ -2153,7 +2158,7 @@ def in_order(words, F, slack=2):
             continue
         k, r = 1, q + 1
         while k < len(st) and r < len(fs) and r - q < len(st) + slack:
-            if fs[r] == st[k] or _same_cached(words[k], F[r]):
+            if fs[r] == st[k] or (not strict and _same_cached(words[k], F[r])):
                 k += 1
             r += 1
         if k == len(st):
@@ -2288,7 +2293,8 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                             # (the rest the Rif's all the same, with את that the Rosh adds:
                             # "מסריח את הפה ומשרביט את השפתים" for the Rif's "מסריח הפה
                             # ומשרביט השפתים")
-                            if hit and not ok and in_order([w for w in W[c - 3:b] if w not in ("את", "ית")], F):
+                            if hit and not ok and any(w in ("את", "ית") for w in W[c:b]) and \
+                                    in_order([w for w in W[c - 3:b] if w not in ("את", "ית")], F, strict=True):
                                 ok = True
                             if hit and not ok:
                                 setv(c, b, False)
@@ -5367,6 +5373,22 @@ def prepare_masechet(root, m, fix=None):
     report.append(f"ב{comm_name} {stray_marks([e['tokens'] for e in comm])} סימני דף שאינם במקומם הפכו להפניה")
     self_refs([e["tokens"] for e in comm], m)
     report.append(f"ב{comm_name} {rashi_after_ref(comm)} מילים אחרי מראה מקום (פסוק, משנה) שאינן לשון רש\"י")
+    # ("עובד כוכבים" one word in the commentary too: never half of it Rashi's bold)
+    _pairs = 0
+    for e in comm:
+        p = e["tokens"]
+        for k in range(len(p) - 1):
+            a, b = p[k], p[k + 1]
+            if isinstance(a[0], str) and PAIR_FIRST.match(a[0]) and PAIR_SECOND.match(str(b[0])) and \
+                    {a[1], b[1]} == {"rashi", False}:
+                # (bold only inside a stretch of Rashi's that goes on on both sides of it:
+                # "דפסלי לה עובד כוכבים ועבד" for Rashi's "דפסיל לה עבד" is the commentator's)
+                on = k > 0 and p[k - 1][1] == "rashi" and k + 2 < len(p) and p[k + 2][1] == "rashi"
+                v = "rashi" if on else False
+                p[k] = [a[0], v] + list(a[2:])
+                p[k + 1] = [b[0], v] + list(b[2:])
+                _pairs += 1
+    report.append(f"ב{comm_name} {_pairs} צמדים של עובד כוכבים שהושלמו")
     drop_repeated_marks([e["tokens"] for e in comm])
     self_refs([p for x in rosh for p in x["paras"]], m)
     from .shas_check import text_checks, apply_decisions
