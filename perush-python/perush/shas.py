@@ -2636,8 +2636,8 @@ class Book:
         dh = Style(RIF_FONT, st.size * 1.25, True)
         # Rashi's wording in the commentary: a little heavier than the text (not the bold
         # of the dibbur); מתני' that opens a Mishna great, as in the Rif
-        # (for checking, in Rashi's script, as the user asked: RASHI_SCRIPT=0 for the square)
-        rashi = Style("Noto Rashi Hebrew", st.size) if os.environ.get("RASHI_SCRIPT", "1") == "1" \
+        # (for checking, in Rashi's script bold, as the user asked: RASHI_SCRIPT=0 for the square)
+        rashi = Style("Noto Rashi Hebrew", st.size, True) if os.environ.get("RASHI_SCRIPT", "1") == "1" \
             else Style("Frank Ruhl Libre Medium", st.size)
         clab = Style(RIF_FONT, st.size * 1.6, True)
         out = []
