@@ -1534,6 +1534,20 @@ def same_word(a, b):
     return x is not None and x == y
 
 
+def subject_passages(rif, al, i, n_rosh, wide):
+    """The Rif's passages on a siman's subject: those by its place in the order (wide either
+    side) and those on the same daf of the Gemara (two amudim either side)."""
+    lo = max(0, al[i] - wide)
+    hi = (al[i + 1] if i + 1 < n_rosh and al[i + 1] > al[i] else al[i]) + wide
+    js = set(range(lo, min(len(rif), hi + 1)))
+    here = [rif[j].get("amud_n") for j in range(max(0, al[i]), min(len(rif), (al[i + 1] if i + 1 < n_rosh else al[i]) + 1))]
+    here = [a for a in here if a is not None]
+    if here:
+        a0, a1 = min(here) - 2, max(here) + 2
+        js |= {j for j, p in enumerate(rif) if p.get("amud_n") is not None and a0 <= p["amud_n"] <= a1}
+    return [rif[j] for j in sorted(js)]
+
+
 # (a mark of the Gemara's page in the Rif's text before it is typed one: "[מא:]")
 RIF_MARK = re.compile(r"^\[[^\]]{1,8}[.:]\]$")
 
@@ -1572,10 +1586,8 @@ def extend_edges(rosh, rif, al, most=8, log=None):
     ends); not into a reference. -> words made bold."""
     count = 0
     for i, s in enumerate(rosh):
-        lo = max(0, al[i] - 6)
-        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 6
         # (not the Rif's marks of the Gemara's pages: "האלמנה [מא:] מפני האיבול")
-        rtoks = [t for p in rif[lo:hi + 1] for t in rif_words_only(p["tokens"])]
+        rtoks = [t for p in subject_passages(rif, al, i, len(rosh), 6) for t in rif_words_only(p["tokens"])]
         R, rsrc = lseq(rtoks)
         RS = [stem2(x) for x in R]
         at3 = {}
@@ -1956,10 +1968,8 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
     -> words changed."""
     count = 0
     for i, s in enumerate(rosh):
-        lo = max(0, al[i] - 8)
-        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 8
         F, FR = [], []
-        for p in rif[lo:hi + 1]:
+        for p in subject_passages(rif, al, i, len(rosh), 8):
             tk = rif_words_only(p["tokens"])
             seq, at = lseq(tk)
             F += seq
