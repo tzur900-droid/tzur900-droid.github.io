@@ -249,11 +249,24 @@ def lwords(w):
     return [x] if x else []
 
 
+# (an abbreviation read by the word before it: בב"ח after רבה is בר בר חנה, else בבעל חוב)
+NAMED = {"רבה", "ורבה", "דרבה", "לרבה", "כרבה", "מרבה", "רב", "ורב", "דרב", "לרב"}
+
+
 def lseq(toks):
     """-> (loose words, index of the token each comes from)"""
     seq, src = [], []
     for i, t in enumerate(toks):
-        for x in lwords(t[0] if isinstance(t, list) else t):
+        w = t[0] if isinstance(t, list) else t
+        if norm(w) == norm('בב"ח'):
+            prev = toks[i - 1] if i else ""
+            prev = prev[0] if isinstance(prev, list) else prev
+            words = ["בר", "בר", "חנה"] if norm(prev) in {norm(x) for x in NAMED} else ["בבעל", "חוב"]
+            for x in (loose(e) for e in words):
+                seq.append(x)
+                src.append(i)
+            continue
+        for x in lwords(w):
             seq.append(x)
             src.append(i)
     return seq, src
@@ -2030,7 +2043,15 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                     continue
                 around = [x for x in range(max(a1, b1 - 6), min(b2, a2 + 6))
                           if not any(c in p[src[x]][0] for c in "()[]")]
-                if said_whole([W[x] for x in around], [F]):
+                # (or the stretch with the words after it alone, or before it alone: the start
+                # of the Rif's sentence the right one quotes, "...הישנים [נפלו לה משנשאת] אלו
+                # ואלו מודים", where the Rif begins a new mishna)
+                gapw = [W[x] for x in range(b1, a2) if not any(c in p[src[x]][0] for c in "()[]")]
+                right = gapw + [W[x] for x in range(a2, min(b2, a2 + 6))]
+                left = [W[x] for x in range(max(a1, b1 - 6), b1)] + gapw
+                if said_whole([W[x] for x in around], [F]) or \
+                        (len(right) >= 5 and said_whole(right, [F], share=0.8)) or \
+                        (len(left) >= 5 and said_whole(left, [F], share=0.8)):
                     setv(b1, a2, True)
                     if log is not None:
                         log.append(("gap", s["num"], " ".join(W[b1:a2])))
