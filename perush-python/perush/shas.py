@@ -4477,12 +4477,42 @@ def plain_refs(toks):
                 toks[q][1] = False
 
 
+TYPOS = os.path.join(os.path.dirname(__file__), "..", "data", "typos.txt")
+
+
+def fix_typos(m, rosh, rif, comm, path=TYPOS):
+    """Misprints in the source's text the user found ("דמשמום" for "דמשום"), one per line
+    of data/typos.txt: masechet | rosh/rif/comm | the word as printed | as it should be.
+    -> words corrected."""
+    if not os.path.exists(path):
+        return 0
+    fixes = {}
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#") or line.count("|") < 3:
+            continue
+        mm, part, wrong, right = [x.strip() for x in line.split("|", 3)]
+        if mm == m:
+            fixes.setdefault(part, {})[wrong] = right
+    n = 0
+    seqs = {"rosh": [p for x in rosh for p in x["paras"]], "rif": [p["tokens"] for p in rif],
+            "comm": [e["tokens"] for e in comm]}
+    for part, table in fixes.items():
+        for toks in seqs.get(part, []):
+            for t in toks:
+                core_ = t[0].rstrip(".,:;")
+                if core_ in table:
+                    t[0] = table[core_] + t[0][len(core_):]
+                    n += 1
+    return n
+
+
 def load_masechet(root, m, found=None):
     s = sources(root, m)
     rosh = parse_rosh(read(s["rosh"])) if s["rosh"] else []
     rif = parse_rif(read(s["rif"])) if s["rif"] else []
     comm = parse_comm(read(s["comm"])) if s["comm"] else []
     report = []
+    report.append(f"{fix_typos(m, rosh, rif, comm)} טעויות דפוס בטקסט שתוקנו (data/typos.txt)")
     if comm and comm[0]["tokens"] and norm(comm[0]["tokens"][0][0]) == "רנ":
         # the title at the head of the commentary ("ר"ן מגילה")
         k = 1 + len(m.split())
