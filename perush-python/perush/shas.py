@@ -1488,7 +1488,9 @@ def inflected(a, b):
 
 SAME_FORMS = [{"לקמנ", "לקמיה", "לקמנה"}, {"עי", "עלידי", "עלידיה"}, {"כלאימ", "הכלאימ"},
               # (the Rosh's "כתבו רבוואתא" for the Rif's "ופסקו רבואתא", as the user decided)
-              {"פסקו", "ופסקו", "כתבו", "וכתבו"}]
+              {"פסקו", "ופסקו", "כתבו", "וכתבו"},
+              # (רבן שמעון בן גמליאל, written ר' שמעון בן גמליאל)
+              {"רב", "רבי", "רבנ"}]
 
 
 LOOKALIKE = {frozenset(x) for x in ("בכ", "דר", "הח", "וז", "וי", "זי", "סמ", "טמ", "גנ", "כנ")}
@@ -1801,8 +1803,8 @@ def other_subject(rosh, rif, al, stretches, sim, log=None):
         if a is None or b is None or abs(a - b) <= 2 or lo - 3 <= j <= hi + 3:
             continue
         # (the same words in the Rif of the place too: the same subject, they stay)
-        near = [w for p in rif[max(0, lo - 4):hi + 5] for w in lseq(p["tokens"])[0]]
-        if said_whole(lseq(toks)[0], [near], share=0.85):
+        near = [w for p in subject_passages(rif, al, i, len(rosh), 6) for w in lseq(rif_words_only(p["tokens"]))[0]]
+        if said_whole(lseq(toks)[0], [near], share=0.85) or any(p is rif[j] for p in subject_passages(rif, al, i, len(rosh), 6)):
             continue
         for t in toks:
             if t[1] is True:
@@ -2079,7 +2081,11 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                     near = FR[q + 3:q + 5] if after else FR[max(0, q - 2):q]
                     nearl = lseq([[x, False] for x in near])[0]
                     near = [y for x in near for y in (expand(x) or [x])]
-                    if any(loose(v) in nearl for v in ws):
+                    # (an abbreviation or a censor's word, by the words it reads as: כוכבים
+                    # in מעובד כוכבים for the Rif's מכותי; not a plain word loosely like
+                    # another, וכיון and וכן)
+                    wl = lseq([[w, False]])[0]
+                    if wl != [loose(w)] and any(x in nearl for x in wl):
                         return True, True
                     # (by the words as written: וכיון is not וכן, though loosely they are one)
                     # (an abbreviation's word by its loose form: א"ר's רבי is the Rif's רב)
@@ -2103,7 +2109,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                         lastw = p[src[c - 1]][0]
                         lw = (expand(lastw) or [lastw])[-1]
                         if not any(norm(v).lstrip("ו") == norm(x).lstrip("ו") or
-                                   W[c - 1] in lseq([[FR[q + 2], False]])[0] or
+                                   (lseq([[lastw, False]])[0] != [loose(lastw)] and W[c - 1] in lseq([[FR[q + 2], False]])[0]) or
                                    (min(len(norm(v)), len(norm(x))) >= 4 and same_word(v, x))
                                    for q in at3[tuple(S_[c - 3:c])]
                                    for x in [(expand(FR[q + 2]) or [FR[q + 2]])[-1], FR[q + 2]] for v in (lastw, lw)):

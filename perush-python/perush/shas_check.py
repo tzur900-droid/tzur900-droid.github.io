@@ -64,8 +64,11 @@ def check_rosh(rosh, rif, al, found):
         # (the same words in the Rif of the place too, a little further than the window: the
         # same subject, as the user decided; they stay bold, the rule of a quotation brought
         # again decides on a repeat)
-        nlo, nhi = lo - 6, hi + 6
-        near = [w for p in rif[max(0, nlo):nhi + 1] for w in lseq(p["tokens"])[0]]
+        from .shas import subject_passages, rif_words_only
+        sp = subject_passages(rif, al, i, len(rosh), 6)
+        if any(p is rif[j] for p in sp):
+            continue
+        near = [w for p in sp for w in lseq(rif_words_only(p["tokens"]))[0]]
         if said_whole(lseq(flat[a:b + 1])[0], [near], share=0.85):
             continue
         if n < LONG:
