@@ -1317,9 +1317,13 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
                 # (what the Rosh says before in its own words, plain, is not a quotation)
                 q += 1
                 continue
+            # (a sentence at a time: a line brought again and the next one, quoted for the
+            # first time, are judged each by itself: "...קודמת למצות ייבום. אמר רב אין כופין")
             e = q
             while e < len(W) and bold[e]:
                 e += 1
+                if src[e - 1][0][src[e - 1][1]][0].endswith((".", ":")) and (e >= len(W) or src[e][1] != src[e - 1][1]):
+                    break
             plain = 0
             while q - plain - 1 >= 0 and not bold[q - plain - 1]:
                 plain += 1
