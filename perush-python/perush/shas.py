@@ -1326,7 +1326,7 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
             grams = [tuple(W[x:x + 3]) for x in range(q, e - 2)]
             # (a line brought again, short, beside a quotation of the passage that has it
             # within it; not a quotation as long as the one before, which may be the real one)
-            again = [g for g in grams if seen.get(g, 0) >= e - q]
+            again = [g for g in grams if seen.get(g, 0) >= min(e - q, 5)]
             twice = [g for g in grams if rc.get(g, 0) >= 2]
             # (in the Rosh's own explanation, "פי' ...", a line brought again is his words,
             # even where the Rif has the line twice, as the user showed)
@@ -1502,6 +1502,10 @@ def same_word(a, b):
     return x is not None and x == y
 
 
+# (a mark of the Gemara's page in the Rif's text before it is typed one: "[מא:]")
+RIF_MARK = re.compile(r"^\[[^\]]{1,8}[.:]\]$")
+
+
 def extend_edges(rosh, rif, al, most=8, log=None):
     """The bold of a quotation on to the words before and after it that are the Rif's words
     before and after the same place, said a little differently ("היכא דאיכא שני אחין" for the
@@ -1515,7 +1519,7 @@ def extend_edges(rosh, rif, al, most=8, log=None):
         lo = max(0, al[i] - 2)
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
         # (not the Rif's marks of the Gemara's pages: "האלמנה [מא:] מפני האיבול")
-        rtoks = [t for p in rif[lo:hi + 1] for t in p["tokens"] if t[1] not in ("gem", "src")]
+        rtoks = [t for p in rif[lo:hi + 1] for t in p["tokens"] if t[1] not in ("gem", "src") and not RIF_MARK.match(t[0])]
         R, rsrc = lseq(rtoks)
         RS = [stem2(x) for x in R]
         at3 = {}
@@ -1879,7 +1883,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
         F, FR = [], []
         for p in rif[lo:hi + 1]:
-            tk = [t for t in p["tokens"] if t[1] not in ("gem", "src")]
+            tk = [t for t in p["tokens"] if t[1] not in ("gem", "src") and not RIF_MARK.match(t[0])]
             seq, at = lseq(tk)
             F += seq
             FR += [tk[k][0] for k in at]
