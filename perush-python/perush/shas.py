@@ -1756,7 +1756,7 @@ def quoting_words(rosh, rif, al):
     return count
 
 
-def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
+def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
     """The bold of the Rosh read as a text of its own, as the user asked:
       * a word at the edge of a bold stretch that the Rif has not after (or before) the
         stretch's own words there ("...כמכחול בשפופרת וכיון", the Rosh's "וכיון"): plain;
@@ -1848,10 +1848,14 @@ def read_as_text(rosh, rif, al, gap=4, short=5, alone=8, log=None):
             # the gaps
             rs = runs()
             for (a1, b1), (a2, b2) in zip(rs, rs[1:]):
-                between = [x for x in range(b1, a2) if p[src[x]][1] is False]
-                if not between or len(between) > gap or any(any(c in p[src[x]][0] for c in "()[]") for x in between):
+                # (a reference in it, "(נדרים עח.)", is not counted and stays as it is)
+                between = [x for x in range(b1, a2) if p[src[x]][1] is False
+                           and not any(c in p[src[x]][0] for c in "()[]")]
+                if not between or len(between) > gap:
                     continue
-                if said_whole(W[a1:b2], [F]):
+                around = [x for x in range(max(a1, b1 - 6), min(b2, a2 + 6))
+                          if not any(c in p[src[x]][0] for c in "()[]")]
+                if said_whole([W[x] for x in around], [F]):
                     setv(b1, a2, True)
                     if log is not None:
                         log.append(("gap", s["num"], " ".join(W[b1:a2])))
