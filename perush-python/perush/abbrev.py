@@ -226,4 +226,11 @@ def expand(word):
             words = NUMBERS[bare].split()
             words[0] = pre + words[0]
             return words
+        # (a name with אומר after it in one: רשבג"א is רשב"ג אומר, as the Rif writes it)
+        if rest.endswith('"א') and rest.count('"') == 1 and len(rest) >= 5:
+            base = rest[:-3] + '"' + rest[-3]
+            if base in TABLE:
+                words = list(TABLE[base]) + ["אומר"]
+                words[0] = pre + words[0]
+                return words
     return None

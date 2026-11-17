@@ -254,11 +254,26 @@ def apply_decisions(rosh, comm, m, path=DECISIONS):
         inner = len(text[a:text.index("]]")].replace("[[", " ").split()) if a is not None else len(whole)
         want = [norm(w) for w in whole]
         done = False
+        hits = []
         for toks in parts[part]:
             idx = [k for k, t in enumerate(toks) if t[1] not in ("src", "gem")]
             seq = [norm(toks[k][0]) for k in idx]
             for q in range(len(seq) - len(want) + 1):
                 if seq[q:q + len(want)] == want:
+                    hits.append((toks, idx, q))
+        # (a stretch to be plain, with no words around it to find the place: the line brought
+        # again, not the quotation itself that goes on bold on both sides of it, "מכניסין את
+        # [המת לחדר ... ופורש] ונוהג" in the Rosh's quotation of the baraita)
+        if kind == "plain" and a is None and len(hits) > 1:
+            def inside(h):
+                toks, idx, q = h
+                b0 = idx[q - 1] if q > 0 else None
+                b1 = idx[q + len(want)] if q + len(want) < len(idx) else None
+                return b0 is not None and b1 is not None and toks[b0][1] in (True, "rashi") and toks[b1][1] in (True, "rashi")
+            hits = [h for h in hits if not inside(h)] or hits
+        for toks, idx, q in hits[:1]:
+            if True:
+                if True:
                     for k in idx[q + lead:q + lead + inner]:
                         if kind == "plain":
                             if toks[k][1] in (True, "rashi"):
@@ -268,9 +283,6 @@ def apply_decisions(rosh, comm, m, path=DECISIONS):
                             if toks[k][1] in (False, True, "rashi"):
                                 toks[k] = [toks[k][0], v] + list(toks[k][2:])
                     done = True
-                    break
-            if done:
-                break
         if not done:
             out.append({"kind": "regress", "where": f"{m} {part}", "text": "הכרעה שלא נמצאה: " + text, "fixed": False})
     return out

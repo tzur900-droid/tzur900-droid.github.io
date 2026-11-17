@@ -1906,7 +1906,10 @@ def _same_cached(a, b):
 
 def said_whole(words, seqs, share=0.75):
     """Whether words (loose) are, share of them or more in order, one stretch of one of
-    seqs (loose words; None between a dibbur and its comment)."""
+    seqs (loose words; None between a dibbur and its comment). (את, which the Rosh adds to
+    the Rif's words, "מסריח את הפה" for "מסריח הפה", is not counted.)"""
+    if any(w in ("את", "ית") for w in words) and len(words) > 4:
+        words = [w for w in words if w not in ("את", "ית")]
     n = len(words)
     if n < 4:
         return False
@@ -1995,7 +1998,30 @@ def whole_pairs(rosh):
                     on = k > 0 and p[k - 1][1] is True
                 a[1] = b[1] = on
                 count += 1
+    # (the Rosh's own voice at the edge of a bold stretch, "ה"ג", "כתבתי", "מפרשים", a name
+    # of an author: never the Rif's; word by word from the edge)
+    for s in rosh:
+        for p in s["paras"]:
+            changed = True
+            while changed:
+                changed = False
+                for k, t in enumerate(p):
+                    if t[1] is not True or not isinstance(t[0], str):
+                        continue
+                    n = norm(t[0]).rstrip(".,:;")
+                    if not (n in OWN_VOICE or rashi_marker(t[0])):
+                        continue
+                    edge = (k == 0 or p[k - 1][1] is not True) or (k + 1 == len(p) or p[k + 1][1] is not True)
+                    if edge:
+                        t[1] = False
+                        count += 1
+                        changed = True
     return count
+
+
+OWN_VOICE = {norm(w) for w in ("ה\"ג", "וה\"ג", "גרסינן", "וגרסינן", "כתבתי", "וכתבתי", "פירשתי", "כדפירשתי",
+                               "מפרשים", "ומפרשים", "מפרש", "ומפרש", "ז\"ל", "זצ\"ל",
+                               "ונראה", "ויראה", "יראה")}
 
 
 def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
@@ -2113,6 +2139,26 @@ def quoting_words(rosh, rif, al):
                     t[1] = False
                     count += 1
     return count
+
+
+def in_order(words, F, slack=2):
+    """Whether words (loose) are all in F in their order, close together (slack more words
+    between them at most, in all): the Rif says them too."""
+    st = [stem2(w) for w in words]
+    fs = [stem2(w) for w in F]
+    if not st:
+        return False
+    for q, x in enumerate(fs):
+        if x != st[0]:
+            continue
+        k, r = 1, q + 1
+        while k < len(st) and r < len(fs) and r - q < len(st) + slack:
+            if fs[r] == st[k] or _same_cached(words[k], F[r]):
+                k += 1
+            r += 1
+        if k == len(st):
+            return True
+    return False
 
 
 def ah_same(a, b):
@@ -2239,6 +2285,11 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                             continue
                         if c < b and not p[src[c - 1]][0].endswith((":", ".")):
                             hit, ok = follows(tuple(S_[c - 3:c]), p[src[c]][0], True)
+                            # (the rest the Rif's all the same, with את that the Rosh adds:
+                            # "מסריח את הפה ומשרביט את השפתים" for the Rif's "מסריח הפה
+                            # ומשרביט השפתים")
+                            if hit and not ok and in_order([w for w in W[c - 3:b] if w not in ("את", "ית")], F):
+                                ok = True
                             if hit and not ok:
                                 setv(c, b, False)
                                 if log is not None:
@@ -2325,7 +2376,9 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                 for t in range(max(0, ex - 8), ex - 1):
                     if p[src[t]][1] is True or any(W[y].endswith((".", ":")) for y in range(t, ex - 1)):
                         continue
-                    if said_whole(W[t:ex] + W[a2:min(b2, a2 + 6)], [F]):
+                    # (the words themselves the Rif's too, not only with the quotation after
+                    # them: "הלכה כרב אחא מטעמי קמאי. פי' רב אלפס הא דאמר..." stays plain)
+                    if said_whole(W[t:ex] + W[a2:min(b2, a2 + 6)], [F]) and in_order(W[t:ex], F):
                         setv(t, ex, True)
                         if log is not None:
                             log.append(("before", s["num"], " ".join(W[t:ex])))
@@ -5325,7 +5378,7 @@ def prepare_masechet(root, m, fix=None):
         read_as_text(rosh, rif, al)
         apply_decisions(rosh, comm, m)
     report.append(f"{scattered(rosh, comm, rif=rif, al=al)} מילים בהדגשה מקוטעת (לא מודגשות)")
-    report.append(f"ברא\"ש {whole_pairs(rosh)} מילים בצמדים שהם מילה אחת (עובד כוכבים)")
+    report.append(f"ברא\"ש {whole_pairs(rosh)} מילים בצמדים שהם מילה אחת (עובד כוכבים) ובלשון הרא\"ש עצמו בקצה הדגשה")
     for e in comm:
         e.pop("rashi_seqs", None)
         e.pop("rashi_loose", None)
