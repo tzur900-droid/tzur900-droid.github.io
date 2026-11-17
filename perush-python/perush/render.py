@@ -107,17 +107,15 @@ def draw_oz_head(p, page, h):
     else:
         xn = m
         right_end, left_end = R, m + nw + dw + st.size
-    # the author's name, whole, a little under the head's line on its inner side (רבינו
-    # אשר, נימוקי יוסף, רבינו ניסים), as the user asked
-    author = " ".join(w for w in (right_word, left_word) if w)
-    if author:
-        ast = st.__class__(st.family, st.size * 0.85, False)
-        p.setFont(qfont(ast))
-        ab = h["sub_base"]
-        if h["outer"] == "right":
-            p.drawText(QPointF(m, ab), author)
-        else:
-            p.drawText(QPointF(R - width(ast, author), ab), author)
+    # the author's name in two, one word on each side (רבנו ... אשר, נימוקי ... יוסף), each
+    # midway between the perek's name or the masechet and the edge, a little lower than the
+    # head's line, as the user asked
+    p.setFont(qfont(st))
+    low = base + st.size * 0.55
+    for word, a, c in ((right_word, inner_r, right_end), (left_word, left_end, inner_l)):
+        if word:
+            ww = width(st, word)
+            p.drawText(QPointF((a + c) / 2 - ww / 2, low), word)
     if h["box"]:
         # a day begins: the number in a grey box, and right under it, small, the day
         # (the grey box goes on down over the day's name too, one box for both)
