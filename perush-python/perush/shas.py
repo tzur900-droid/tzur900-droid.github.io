@@ -1465,6 +1465,9 @@ def same_word(a, b):
     another form of it (לקמן and לקמיה). Not a word with another preposition before it
     (בבית and לבית): that changes the meaning."""
     na0, nb0 = norm(a), norm(b)
+    # (ר of an abbreviation is רב or רבי)
+    if {na0, nb0} & {"ר"} and (na0 in ("ר", "רב", "רבי") and nb0 in ("ר", "רב", "רבי")):
+        return True
     # (a word cut short with ' at its end stands for the whole word, as the user said:
     # פי' is פירוש, גמ' is גמרא, דאמרי' is דאמרינן; two letters at least, so that the
     # cut word says which word it is)
@@ -1984,7 +1987,9 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                     near = FR[q + 3:q + 5] if after else FR[max(0, q - 2):q]
                     near = [y for x in near for y in (expand(x) or [x])]
                     # (by the words as written: וכיון is not וכן, though loosely they are one)
+                    # (an abbreviation's word by its loose form: א"ר's רבי is the Rif's רב)
                     if any(norm(v).lstrip("ו") == norm(x).lstrip("ו") or
+                           (v == w1 and w1 != w and loose(v) == loose(x)) or
                            (min(len(norm(v)), len(norm(x))) >= 4 and same_word(v, x))
                            for v in (w, w1) for x in near):
                         return True, True
