@@ -1309,7 +1309,10 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
     ..."): plain, as Oz Vehadar prints it; bold once, where the Rosh quotes it. Not where
     the Rif has it again too. -> words made plain."""
     count = 0
+    carry, carry_prev, carry_perek = [], [], None   # (bold in the two simanim before, same perek)
     for i, s in enumerate(rosh):
+        if s["perek"] != carry_perek:
+            carry, carry_prev, carry_perek = [], [], s["perek"]
         lo = max(0, al[i] - 2)
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
         R = [x for p in rif[lo:hi + 1] for x in canon_seq(p["tokens"])]
@@ -1323,7 +1326,12 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
             W += canon_seq(p)
             src += [(p, k) for k in at]
         bold = [p[k][1] is True for p, k in src]
+        # (a line bold in the two simanim before, brought again in this one's discussion:
+        # "שאם היה הוא חולה או היא חולה", as the user showed)
         seen = {}
+        for g, n in carry:
+            seen[g] = max(seen.get(g, 0), n)
+        own_carry = set(seen)
         q = 0
         while q < len(W):
             if not bold[q]:
@@ -1374,6 +1382,10 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
                     # (the length of the bold stretch it stands in)
                     seen[g] = max(seen.get(g, 0), e - q)
             q = e
+        # (only this siman's own, for the next two)
+        mine = [(g, n) for g, n in seen.items() if g not in own_carry]
+        carry = carry_prev + mine
+        carry_prev = mine
     return count
 
 
@@ -1560,8 +1572,8 @@ def extend_edges(rosh, rif, al, most=8, log=None):
     ends); not into a reference. -> words made bold."""
     count = 0
     for i, s in enumerate(rosh):
-        lo = max(0, al[i] - 2)
-        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
+        lo = max(0, al[i] - 6)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 6
         # (not the Rif's marks of the Gemara's pages: "האלמנה [מא:] מפני האיבול")
         rtoks = [t for p in rif[lo:hi + 1] for t in rif_words_only(p["tokens"])]
         R, rsrc = lseq(rtoks)
@@ -1944,8 +1956,8 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
     -> words changed."""
     count = 0
     for i, s in enumerate(rosh):
-        lo = max(0, al[i] - 5)
-        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
+        lo = max(0, al[i] - 8)
+        hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 8
         F, FR = [], []
         for p in rif[lo:hi + 1]:
             tk = rif_words_only(p["tokens"])
