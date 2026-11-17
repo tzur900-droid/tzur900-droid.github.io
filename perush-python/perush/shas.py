@@ -1950,9 +1950,11 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                             continue
                         # (the last of them as written, too: וכיון is not the Rif's וכן)
                         lastw = p[src[c - 1]][0]
-                        if not any(norm(lastw).lstrip("ו") == norm(FR[q + 2]).lstrip("ו") or
-                                   (min(len(norm(lastw)), len(norm(FR[q + 2]))) >= 4 and same_word(lastw, FR[q + 2]))
-                                   for q in at3[tuple(S_[c - 3:c])]):
+                        lw = (expand(lastw) or [lastw])[-1]
+                        if not any(norm(v).lstrip("ו") == norm(x).lstrip("ו") or
+                                   (min(len(norm(v)), len(norm(x))) >= 4 and same_word(v, x))
+                                   for q in at3[tuple(S_[c - 3:c])]
+                                   for x in [(expand(FR[q + 2]) or [FR[q + 2]])[-1], FR[q + 2]] for v in (lastw, lw)):
                             continue
                         if c < b and not p[src[c - 1]][0].endswith((":", ".")):
                             hit, ok = follows(tuple(S_[c - 3:c]), p[src[c]][0], True)
@@ -1967,13 +1969,19 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                     for _ in range(3):
                         if b - a < 5:
                             break
-                        hit, ok = follows(tuple(S_[a + 1:a + 4]), p[src[a]][0], False)
+                        # (the printed word whole: ר"א is two words of the text)
+                        a2 = a
+                        while a2 < b and src[a2] == src[a]:
+                            a2 += 1
+                        if b - a2 < 3:
+                            break
+                        hit, ok = follows(tuple(S_[a2:a2 + 3]), p[src[a]][0], False)
                         if not hit or ok:
                             break
-                        setv(a, a + 1, False)
+                        setv(a, a2, False)
                         if log is not None:
-                            log.append(("edge", s["num"], " ".join(W[a:a + 4])))
-                        a += 1
+                            log.append(("edge", s["num"], " ".join(W[a:a2 + 3])))
+                        a = a2
             # the gaps
             rs = runs()
             for (a1, b1), (a2, b2) in zip(rs, rs[1:]):
