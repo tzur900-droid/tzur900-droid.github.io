@@ -2078,7 +2078,9 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
             # alone
             rs = runs()
             for q, (a, b) in enumerate(rs):
-                n = b - a
+                # (by printed words: "ור"ת מפרשים ניתנו ליכתב" is four, though the
+                # abbreviation is two words of the text)
+                n = len({src[x] for x in range(a, b) if p[src[x]][1] is True})
                 if n >= short:
                     continue
                 left = rs[q - 1][1] if q else -10 ** 6
