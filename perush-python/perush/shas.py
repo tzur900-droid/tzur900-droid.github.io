@@ -1506,6 +1506,30 @@ def same_word(a, b):
 RIF_MARK = re.compile(r"^\[[^\]]{1,8}[.:]\]$")
 
 
+def rif_words_only(toks):
+    """toks without the marks and references in them, before they are typed: "[מא:]",
+    "(דף מא:)" (a reference of a few words in round brackets)."""
+    out, k = [], 0
+    while k < len(toks):
+        t = toks[k]
+        if t[1] in ("gem", "src") or RIF_MARK.match(t[0]):
+            k += 1
+            continue
+        if t[0].startswith("(") and not t[0].rstrip(".,:;").endswith(")"):
+            e = k + 1
+            while e < len(toks) and e - k < 5 and not toks[e][0].rstrip(".,:;").endswith(")"):
+                e += 1
+            if e < len(toks) and e - k < 5:
+                k = e + 1
+                continue
+        if t[0].startswith("(") and t[0].rstrip(".,:;").endswith(")") and len(t[0]) <= 12:
+            k += 1
+            continue
+        out.append(t)
+        k += 1
+    return out
+
+
 def extend_edges(rosh, rif, al, most=8, log=None):
     """The bold of a quotation on to the words before and after it that are the Rif's words
     before and after the same place, said a little differently ("היכא דאיכא שני אחין" for the
@@ -1519,7 +1543,7 @@ def extend_edges(rosh, rif, al, most=8, log=None):
         lo = max(0, al[i] - 2)
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 2
         # (not the Rif's marks of the Gemara's pages: "האלמנה [מא:] מפני האיבול")
-        rtoks = [t for p in rif[lo:hi + 1] for t in p["tokens"] if t[1] not in ("gem", "src") and not RIF_MARK.match(t[0])]
+        rtoks = [t for p in rif[lo:hi + 1] for t in rif_words_only(p["tokens"])]
         R, rsrc = lseq(rtoks)
         RS = [stem2(x) for x in R]
         at3 = {}
@@ -1883,7 +1907,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
         hi = (al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]) + 5
         F, FR = [], []
         for p in rif[lo:hi + 1]:
-            tk = [t for t in p["tokens"] if t[1] not in ("gem", "src") and not RIF_MARK.match(t[0])]
+            tk = rif_words_only(p["tokens"])
             seq, at = lseq(tk)
             F += seq
             FR += [tk[k][0] for k in at]
