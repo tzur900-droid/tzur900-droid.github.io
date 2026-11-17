@@ -1239,7 +1239,7 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
             grams = [tuple(W[x:x + 3]) for x in range(q, e - 2)]
             # (a line brought again, short, beside a quotation of the passage that has it
             # within it; not a quotation as long as the one before, which may be the real one)
-            again = [g for g in grams if seen.get(g, 0) >= 2 * (e - q)]
+            again = [g for g in grams if seen.get(g, 0) >= e - q]
             twice = [g for g in grams if rc.get(g, 0) >= 2]
             # (in the Rosh's own explanation, "פי' ...", a line brought again is his words,
             # even where the Rif has the line twice, as the user showed)
@@ -1251,8 +1251,10 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
                 if norm(tk).lstrip("ו") in EXPLAINS:
                     explain = True
                     break
+            # (where the Rif has the line twice, the Rosh may quote it twice: a long
+            # quotation, not a line brought again in his own discussion)
             if plain >= before and e - q <= 15 and grams and len(again) >= share * len(grams) \
-                    and (explain or len(twice) < share * len(grams)):
+                    and (explain or e - q < 12 or len(twice) < share * len(grams)):
                 toks = {(id(p), k): (p, k) for p, k in src[q:e]}
                 for p, k in toks.values():
                     if p[k][1] is True:
@@ -1557,6 +1559,10 @@ def other_subject(rosh, rif, al, stretches, sim, log=None):
         hi = al[i + 1] if i + 1 < len(rosh) and al[i + 1] > al[i] else al[i]
         if a is None or b is None or abs(a - b) <= 2 or lo - 3 <= j <= hi + 3:
             continue
+        # (the same words in the Rif of the place too: the same subject, they stay)
+        near = [w for p in rif[max(0, lo - 4):hi + 5] for w in lseq(p["tokens"])[0]]
+        if said_whole(lseq(toks)[0], [near], share=0.85):
+            continue
         for t in toks:
             if t[1] is True:
                 t[1] = False
@@ -1828,11 +1834,22 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                 return hit, False
             for a, b in runs():
                 if b - a >= 5:
-                    hit, ok = follows(tuple(S_[b - 4:b - 1]), p[src[b - 1]][0], True)
-                    if hit and not ok and not W[b - 1].endswith((":", ".")):
-                        setv(b - 1, b, False)
-                        if log is not None:
-                            log.append(("edge", s["num"], " ".join(W[b - 4:b])))
+                    # (from the end: back to the last three words the Rif has together,
+                    # what is after them, if the Rif has not that after them, is the Rosh's
+                    # own: "...על כל האחין דהכי קי"ל", up to four words)
+                    for c in range(b, max(a + 3, b - 5) - 1, -1):
+                        if c < b and src[c] == src[c - 1]:
+                            continue            # (inside one printed word)
+                        if tuple(S_[c - 3:c]) not in at3:
+                            continue
+                        if c < b and not p[src[c - 1]][0].endswith((":", ".")):
+                            hit, ok = follows(tuple(S_[c - 3:c]), p[src[c]][0], True)
+                            if hit and not ok:
+                                setv(c, b, False)
+                                if log is not None:
+                                    log.append(("edge", s["num"], " ".join(W[c - 3:b])))
+                                b = c
+                        break
                     # (from the start, word by word: "מאחיו הגדול [וחליצת הגדול ...]", the
                     # end of the Rosh's explanation before the quotation goes on)
                     for _ in range(3):
