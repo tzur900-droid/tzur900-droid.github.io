@@ -66,7 +66,8 @@ def check_rosh(rosh, rif, al, found):
         # again decides on a repeat)
         from .shas import subject_passages, rif_words_only
         sp = subject_passages(rif, al, i, len(rosh), 6)
-        if any(p is rif[j] for p in sp):
+        nlo, nhi = lo - 6, hi + 6
+        if nlo <= j <= nhi or any(p is rif[j] for p in sp):
             continue
         near = [w for p in sp for w in lseq(rif_words_only(p["tokens"]))[0]]
         if said_whole(lseq(flat[a:b + 1])[0], [near], share=0.85):

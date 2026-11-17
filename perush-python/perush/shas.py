@@ -370,7 +370,10 @@ def extend_dibburim(comm, rif, most=6):
 
 def stem2(x):
     """A loose word without up to two letters of prefix and a final ו, ה, א or י, for a
-    quotation said a little differently (להכות and להכותו, את אביו and לאביו)."""
+    quotation said a little differently (להכות and להכותו, את אביו and לאביו).
+    (רב, רבי and רבן are one: the Rosh's ר' for the Rif's רבן)"""
+    if x in ("רבי", "רבנ"):
+        return "רב"
     for _ in range(2):
         if len(x) > 3 and x[0] in "ודהבלמשכ":
             x = x[1:]
@@ -1615,7 +1618,19 @@ def extend_edges(rosh, rif, al, most=8, log=None):
     to most words each way: over a mark of the Gemara's amud ([יד.]), and over one word of
     the Rosh's or of the Rif's that the other has not, where the words after it go on
     together (as the user decided: bold from where the Rif's sentence begins, to where it
-    ends); not into a reference. -> words made bold."""
+    ends); not into a reference. -> words made bold.
+    (again, up to three times, while it goes on: a quotation longer than most words is bold
+    to its start, "והיכא דשהה עמה עשר שנים ולא ילדה ...")"""
+    total = 0
+    for _ in range(3):
+        n = _extend_edges_once(rosh, rif, al, most, log)
+        total += n
+        if not n:
+            break
+    return total
+
+
+def _extend_edges_once(rosh, rif, al, most, log):
     count = 0
     for i, s in enumerate(rosh):
         # (not the Rif's marks of the Gemara's pages: "האלמנה [מא:] מפני האיבול")
@@ -2085,7 +2100,9 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                     # in מעובד כוכבים for the Rif's מכותי; not a plain word loosely like
                     # another, וכיון and וכן)
                     wl = lseq([[w, False]])[0]
-                    if wl != [loose(w)] and any(x in nearl for x in wl):
+                    if any(x in nearl for x in wl) and (wl != [loose(w)] or any(
+                            lseq([[r, False]])[0] != [loose(r)] for r in FR[q + 3:q + 5] if after) or any(
+                            lseq([[r, False]])[0] != [loose(r)] for r in FR[max(0, q - 2):q] if not after)):
                         return True, True
                     # (by the words as written: וכיון is not וכן, though loosely they are one)
                     # (an abbreviation's word by its loose form: א"ר's רבי is the Rif's רב)
@@ -2109,7 +2126,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                         lastw = p[src[c - 1]][0]
                         lw = (expand(lastw) or [lastw])[-1]
                         if not any(norm(v).lstrip("ו") == norm(x).lstrip("ו") or
-                                   (lseq([[lastw, False]])[0] != [loose(lastw)] and W[c - 1] in lseq([[FR[q + 2], False]])[0]) or
+                                   ((lseq([[lastw, False]])[0] != [loose(lastw)] or lseq([[FR[q + 2], False]])[0] != [loose(FR[q + 2])]) and W[c - 1] in lseq([[FR[q + 2], False]])[0]) or
                                    (min(len(norm(v)), len(norm(x))) >= 4 and same_word(v, x))
                                    for q in at3[tuple(S_[c - 3:c])]
                                    for x in [(expand(FR[q + 2]) or [FR[q + 2]])[-1], FR[q + 2]] for v in (lastw, lw)):
