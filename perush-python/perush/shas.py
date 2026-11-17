@@ -1203,6 +1203,90 @@ def canon_seq(toks):
     return out
 
 
+def plain_decided(m):
+    """The stretches the user decided plain in masechet m (tests/bold_decisions.txt): the
+    words of each, normalized."""
+    from .shas_check import DECISIONS
+    out = []
+    if m and os.path.exists(DECISIONS):
+        for line in open(DECISIONS, encoding="utf-8"):
+            if line.startswith("#") or line.count("|") < 3:
+                continue
+            mm, part, kind, text = [x.strip() for x in line.split("|", 3)]
+            if mm == m and part == "rosh" and kind == "plain":
+                t = text
+                if "[[" in t:
+                    t = t[t.index("[[") + 2:t.index("]]")]
+                out.append([norm(w) for w in t.split()])
+    return out
+
+
+def first_quote(rosh, short=12, log=None, masechet=None):
+    """A line bold where the Rosh brings it again in his discussion, plain where he first
+    quotes it ("אמר רב אין כופין אותו" after the mishna, and again in ר"ת's explanation):
+    bold the first time, plain the second, as the user decided. Not where the first is
+    inside an explanation of his (פי'). -> stretches moved."""
+    count = 0
+    decided = plain_decided(masechet)
+    for s in rosh:
+        W, src = [], []
+        for p in s["paras"]:
+            W += canon_seq(p)
+            src += [(p, k) for k in lseq(p)[1]]
+        bold = [p[k][1] is True for p, k in src]
+        q = 0
+        while q < len(W):
+            if not bold[q]:
+                q += 1
+                continue
+            e = q
+            while e < len(W) and bold[e]:
+                e += 1
+            n = e - q
+            if 3 <= n < short:
+                key = W[q:e]
+                grams = {tuple(key[z:z + 3]) for z in range(n - 2)}
+                for x in range(0, q - n + 1):
+                    if W[x:x + n] != key or any(bold[x:x + n]):
+                        continue
+                    # (not where the line was bold before that, the first time: then both are
+                    # brought again)
+                    if any(bold[y] and bold[y + 1] and bold[y + 2] and tuple(W[y:y + 3]) in grams
+                           for y in range(0, x - 2)):
+                        break
+                    # (not where the user decided the first plain)
+                    words = [norm(src[y][0][src[y][1]][0]) for y in range(x, x + n)]
+                    if any(all(w in d for w in words) or all(w in words for w in d) for d in decided):
+                        break
+                    # (not in an explanation of his, nor a reference)
+                    explain = False
+                    for y in range(x - 1, max(-1, x - 20), -1):
+                        tk = src[y][0][src[y][1]][0]
+                        if bold[y] or tk.rstrip().endswith((".", ":")):
+                            break
+                        if norm(tk).lstrip("ו") in EXPLAINS:
+                            explain = True
+                            break
+                    if explain or any(any(c in src[y][0][src[y][1]][0] for c in "()[]") for y in range(x, x + n)):
+                        continue
+                    for y in range(x, x + n):
+                        p, k = src[y]
+                        if p[k][1] is False:
+                            p[k][1] = True
+                        bold[y] = True
+                    for y in range(q, e):
+                        p, k = src[y]
+                        if p[k][1] is True:
+                            p[k][1] = False
+                        bold[y] = False
+                    count += 1
+                    if log is not None:
+                        log.append((s["perek"], s["num"], " ".join(src[y][0][src[y][1]][0] for y in range(x, x + n))))
+                    break
+            q = e
+    return count
+
+
 def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
     """A line of the Rif the Rosh brings again in its own words (after it has quoted the
     passage, in the discussion that follows: "ומקשינן ... למה האריך הש"ס לומר אי דקא טעין
@@ -4807,6 +4891,7 @@ def prepare_masechet(root, m, fix=None):
         report.append(f"ברא\"ש {extend_edges(rosh, rif, al)} מילים בקצות ציטוטים")
         report.append(f"ברא\"ש {bridge_one(rosh)} מילים בודדות בתוך ציטוטים")
         report.append(f"ברא\"ש {quoting_words(rosh, rif, al)} מילות קישור של הרא\"ש בתוך ציטוט (לא מודגשות)")
+        report.append(f"ברא\"ש {first_quote(rosh, masechet=m)} שורות שהודגשו בפעם הראשונה שהרא\"ש מביא אותן ולא בחזרה")
         report.append(f"ברא\"ש {drop_requotes(rosh, rif, al)} מילים בציטוט שחוזר (אחרי ההשלמות, לא מודגשות)")
         report.append(f"ברא\"ש {rule_quotes(rosh, rif, al)} מילים בלשון הרי\"ף לפי כללי ההטיות וראשי התיבות")
         report.append(f"ברא\"ש {read_as_text(rosh, rif, al)} מילים שתוקנו כדי שההדגשה תיקרא כטקסט")
