@@ -18,7 +18,7 @@ Each finding: {'kind', 'where', 'text', 'fixed'}; kinds:
 """
 import os
 
-from .shas import loose, lseq, norm, stem
+from .shas import loose, lseq, norm, stem, said_whole, EXPLAINS
 
 LONG = 8          # a far quotation this long or longer is reported, not corrected
 MISSED = 6
@@ -61,6 +61,13 @@ def check_rosh(rosh, rif, al, found):
             continue
         n = b - a + 1
         where = f"סימן {rosh[i]['num']} ({rosh[i]['perek']})"
+        # (the same words in the Rif of the place too, a little further than the window: the
+        # same subject, as the user decided; they stay bold, the rule of a quotation brought
+        # again decides on a repeat)
+        nlo, nhi = lo - 2, hi + 2
+        near = [w for p in rif[max(0, nlo):nhi + 1] for w in lseq(p["tokens"])[0]]
+        if said_whole(lseq(flat[a:b + 1])[0], [near], share=0.85):
+            continue
         if n < LONG:
             for k in range(a, b + 1):
                 if flat[k][1] is True:
@@ -116,7 +123,16 @@ def check_rosh(rosh, rif, al, found):
                     toks = sorted(set(src[q:e]))
                     grams = [tuple(seq[x:x + 3]) for x in range(q, e - 2)]
                     again = grams and sum(g in bold for g in grams) * 2 >= len(grams)
-                    if len(toks) >= MISSED and not again:
+                    # (not inside the Rosh's own explanation, "פי' ...", "כלומר ...": his
+                    # words, though the Rif's words are in them, as the user decided)
+                    explain = False
+                    for x in range(toks[0] - 1, max(-1, toks[0] - 20), -1):
+                        if p[x][1] is True or p[x][0].rstrip().endswith((".", ":")):
+                            break
+                        if norm(p[x][0]).lstrip("ו") in EXPLAINS:
+                            explain = True
+                            break
+                    if len(toks) >= MISSED and not again and not explain:
                         for x in range(toks[0], toks[-1] + 1):
                             if p[x][1] is False:
                                 p[x][1] = True
