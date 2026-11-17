@@ -1545,6 +1545,14 @@ def subject_passages(rif, al, i, n_rosh, wide):
     if here:
         a0, a1 = min(here) - 2, max(here) + 2
         js |= {j for j, p in enumerate(rif) if p.get("amud_n") is not None and a0 <= p["amud_n"] <= a1}
+        # (and a passage that brings this daf from elsewhere, "(לקמן סד.) נשא אשה...": the
+        # same words on the same subject)
+        for j, p in enumerate(rif):
+            t = " ".join(x[0] for x in p["tokens"][:60])
+            for mm in re.finditer(r"\((?:לקמן|לעיל|דף)\s+([א-ת\"']+[.:])\)", t):
+                n = gem_daf(mm.group(1))
+                if n is not None and a0 <= n <= a1:
+                    js.add(j)
     return [rif[j] for j in sorted(js)]
 
 
