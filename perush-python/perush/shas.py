@@ -1969,7 +1969,8 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
     count = 0
     for i, s in enumerate(rosh):
         F, FR = [], []
-        for p in subject_passages(rif, al, i, len(rosh), 8):
+        passages = subject_passages(rif, al, i, len(rosh), 8)
+        for p in passages:
             tk = rif_words_only(p["tokens"])
             seq, at = lseq(tk)
             F += seq
@@ -1980,7 +1981,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
             at3.setdefault(tuple(FS[q:q + 3]), []).append(q)
         sentences = set()
         cur = []
-        for p in rif[lo:hi + 1]:
+        for p in passages:
             for t in p["tokens"]:
                 if t[1] in ("gem", "src"):
                     continue
