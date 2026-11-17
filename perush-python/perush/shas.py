@@ -1942,10 +1942,16 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                         q += 1
                 return out
 
+            def variant(w):
+                # (a word of another reading in brackets, "(עליו)", "(זו)": the text's, not a
+                # reference, "(דף מא:)")
+                return bool(re.fullmatch(r"\([^()\[\].:\d ]{1,12}\)[.,:;]?", w))
+
             def setv(a, b, v):
                 nonlocal count
                 for k in sorted({src[x] for x in range(a, b)}):
-                    if p[k][1] in (True, False) and p[k][1] != v and not (v and any(c in p[k][0] for c in "()[]")):
+                    if p[k][1] in (True, False) and p[k][1] != v and \
+                            not (v and any(c in p[k][0] for c in "()[]") and not variant(p[k][0])):
                         p[k][1] = v
                         count += 1
             # the edges
@@ -2015,7 +2021,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
             for (a1, b1), (a2, b2) in zip(rs, rs[1:]):
                 # (a reference in it, "(נדרים עח.)", is not counted and stays as it is)
                 between = [x for x in range(b1, a2) if p[src[x]][1] is False
-                           and not any(c in p[src[x]][0] for c in "()[]")]
+                           and (variant(p[src[x]][0]) or not any(c in p[src[x]][0] for c in "()[]"))]
                 if not between or len(between) > gap:
                     continue
                 around = [x for x in range(max(a1, b1 - 6), min(b2, a2 + 6))
@@ -4972,6 +4978,8 @@ def prepare_masechet(root, m, fix=None):
     if rif and rosh:
         # (a line brought again after one the decisions made bold; the decisions themselves stay)
         drop_requotes(rosh, rif, al)
+        # (and the bold read as a text once more, all the passes done)
+        read_as_text(rosh, rif, al)
         apply_decisions(rosh, comm, m)
     report.append(f"{scattered(rosh, comm, rif=rif, al=al)} מילים בהדגשה מקוטעת (לא מודגשות)")
     for e in comm:
