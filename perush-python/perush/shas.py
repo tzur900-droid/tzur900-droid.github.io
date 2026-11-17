@@ -657,6 +657,9 @@ def rashi_whole(e, entries):
                         k = src[x]
                         toks[k] = [toks[k][0], "rashi"] + list(toks[k][2:])
                         keep.add(k)
+                    # (by its words too: the indices move when references become one word)
+                    e.setdefault("rashi_whole_text", set()).add(
+                        tuple(toks[k][0] for k in sorted({src[x] for x in range(q, q + 3)})))
     e["rashi_whole"] = keep
 
 
@@ -699,14 +702,19 @@ def rashi_edges(e, entries, most=3):
             continue
         r, q, p = best
         R = r["words"]
+
+        def rw(k, y):
+            # (by the loose words, or as written: שתי and ב', שהיה and היה)
+            return same_word(loose(toks[k][0]), R[y]) or \
+                (y < len(r["src"]) and same_word(toks[k][0], r["text"][r["src"][y]]))
         # where the run begins in Rashi, word by word back from the match
         x, y = a + q - 1, p - 1
-        while x >= a and y >= 0 and same_word(loose(toks[x][0]), R[y]):
+        while x >= a and y >= 0 and rw(x, y):
             x, y = x - 1, y - 1
         lo = x + 1
         # on, from the match
         x, y = a + q + 3, p + 3
-        while x < b and y < len(R) and same_word(loose(toks[x][0]), R[y]):
+        while x < b and y < len(R) and rw(x, y):
             x, y = x + 1, y + 1
         hi = x
         # words outside it that go on with Rashi's: word by word, over a word of its own in
@@ -721,7 +729,7 @@ def rashi_edges(e, entries, most=3):
                     not any(c in toks[k][0] for c in "()[]")
 
             def same(k, r):
-                return 0 <= r < len(R) and ok(k) and same_word(loose(toks[k][0]), R[r])
+                return 0 <= r < len(R) and ok(k) and rw(k, r)
             while (x >= start if step < 0 else x < len(toks)) and 0 <= ry < len(R) and len(got) < most + 1:
                 t = toks[x][0]
                 if t.startswith("(") and t.rstrip(".,:;").endswith(")"):
@@ -906,6 +914,64 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
             t[1] = value
             count += 1
     return count
+
+
+REF_IN = re.compile(r"(?:^|\s)(?:[א-ת]{1,3}[.:]|דף|ס'|סי'|סימן|\d+)(?=\s|$|[,;)])")
+
+
+def ref_groups(toks, start=0):
+    """The indices of the tokens of each reference in round brackets in toks from start:
+    "(נ:)", "(קדושין נג. ודף צד:)", "(ס' ב)" (a word of another reading, "(צרתה)", is not
+    one)."""
+    out, k = [], start
+    while k < len(toks):
+        w = toks[k][0]
+        if isinstance(w, str) and w.startswith("("):
+            e = next((q for q in range(k, min(len(toks), k + 7))
+                      if str(toks[q][0]).rstrip(".,:;").endswith(")")), None)
+            if e is not None:
+                inner = re.sub(r"\)[.,:;]*$", "", " ".join(str(toks[q][0]) for q in range(k, e + 1)))[1:]
+                if REF_IN.search(" " + inner + " "):
+                    out.append(list(range(k, e + 1)))
+                    k = e + 1
+                    continue
+        k += 1
+    return out
+
+
+def mark_rashi_through_refs(e, near, gem, weak):
+    """Rashi's wording in a commentary entry (mark_rashi, rashi_edges, rashi_whole), with the
+    references in round brackets left out while comparing: a reference never stops the bold
+    ("ואמרינן לקמן בהבא על יבמתו (נ:) דבאחי אביו ...", as the user decided); a reference
+    between two stretches of Rashi's wording is inside the one stretch. -> words made bold."""
+    toks = e["tokens"]
+    groups = ref_groups(toks, e.get("dh_len", 0))
+    inref = {k for g in groups for k in g}
+    keep = [k for k in range(len(toks)) if k not in inref]
+    view = dict(e)
+    view["tokens"] = [toks[k] for k in keep]
+    view["dh_len"] = sum(1 for k in keep if k < e.get("dh_len", 0))
+    view["rashi_whole"] = {keep.index(k) for k in e.get("rashi_whole", ()) if k in keep}
+    view["rashi_whole_text"] = e.setdefault("rashi_whole_text", set())
+    why = [] if e.get("why") is not None else None
+    n = mark_rashi(view["tokens"], near, gem, trace=why, weak=weak)
+    rashi_edges(view, near)
+    rashi_whole(view, near)
+    for i, k in enumerate(keep):
+        toks[k] = view["tokens"][i]
+    e["rashi_whole"] = {keep[i] for i in view["rashi_whole"]}
+    if why is not None:
+        e["why"] = [(t[0], keep[t[1]] if isinstance(t[1], int) and t[1] < len(keep) else t[1],
+                     keep[t[2]] if isinstance(t[2], int) and t[2] < len(keep) else t[2]) + tuple(t[3:])
+                    for t in why]
+    for g in groups:
+        before = next((toks[k] for k in range(g[0] - 1, -1, -1) if k not in inref), None)
+        after = next((toks[k] for k in range(g[-1] + 1, len(toks)) if k not in inref), None)
+        if before is not None and after is not None and before[1] == "rashi" and after[1] == "rashi":
+            for k in g:
+                if toks[k][1] is False:
+                    toks[k] = [toks[k][0], "rashi"] + list(toks[k][2:])
+    return n
 
 
 SKIP_DH = ("גמ", "גמרא", "מתני", "מתניתין", "וכו", "כו", "פי", "וגו")
@@ -4139,15 +4205,16 @@ def rashi_not_rif(comm, rif, share=0.6, log=None):
                 k += 1
                 continue
             a = k
-            while k < len(toks) and toks[k][1] == "rashi":
+            while k < len(toks) and (toks[k][1] == "rashi" or (k > a and toks[k][1] == "src" and k + 1 < len(toks) and toks[k + 1][1] == "rashi")):
                 k += 1
-            W = [stem2(x) for x in lseq(toks[a:k])[0]]
+            W = [stem2(x) for x in lseq(rif_words_only(toks[a:k]))[0]]
             gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
             # (Rashi's wording is four words at least, never a word or two torn from what he
             # says: "פרק יוצא דופן" before a reference is the commentator's)
-            short = len({x for x in range(a, k)}) < 4 and not set(range(a, k)) <= set(e.get("rashi_whole", ()))
+            short = len({x for x in range(a, k)}) < 4 and \
+                tuple(toks[x][0] for x in range(a, k) if toks[x][1] == "rashi") not in e.get("rashi_whole_text", ())
             if short or (gs and sum(x in g for x in gs) >= share * len(gs)):
-                for q in range(a, k):
+                for q in (x for x in range(a, k) if toks[x][1] != "src"):
                     toks[q] = [toks[q][0], False] + list(toks[q][2:])
                     count += 1
                 if log is not None:
@@ -4232,7 +4299,9 @@ def rashi_after_ref(comm):
             a = k
             while k < len(toks) and toks[k][1] == "rashi":
                 k += 1
-            if a > 0 and toks[a - 1][1] == "src":
+            # (not where the stretch goes on from Rashi's wording before the reference:
+            # "ואמרינן לקמן בהבא על יבמתו (נ:) דבאחי אביו", a reference never stops the bold)
+            if a > 0 and toks[a - 1][1] == "src" and not (a > 1 and toks[a - 2][1] == "rashi"):
                 for q in range(a, k):
                     toks[q] = [toks[q][0], False] + list(toks[q][2:])
                     count += 1
@@ -4246,6 +4315,24 @@ def rashi_after_ref(comm):
                     for z in range(q, k):
                         toks[z] = [toks[z][0], False] + list(toks[z][2:])
                         count += 1
+        # (what is left of a stretch, fewer than four words alone, "דאמר" before a reference
+        # whose words after it were the Mishna's: torn from Rashi's saying, plain)
+        k = e.get("dh_len", 0)
+        while k < len(toks) and toks[k][1] in ("rashi", True, "dh"):
+            k += 1
+        while k < len(toks):
+            if toks[k][1] != "rashi":
+                k += 1
+                continue
+            a = k
+            while k < len(toks) and (toks[k][1] == "rashi" or (k > a and toks[k][1] == "src" and k + 1 < len(toks)
+                                                               and toks[k + 1][1] == "rashi")):
+                k += 1
+            words = [x for x in range(a, k) if toks[x][1] == "rashi"]
+            if len(words) < 4 and tuple(toks[x][0] for x in words) not in e.get("rashi_whole_text", ()):
+                for z in words:
+                    toks[z] = [toks[z][0], False] + list(toks[z][2:])
+                    count += 1
     return count
 
 
@@ -4740,9 +4827,7 @@ def load_masechet(root, m, found=None):
                 e["near"] = near
                 e["rashi_seqs"] = [[stem2(w) for w in x["dh"]] + [None] + [stem2(w) for w in x["words"]] for x in near]
                 e["rashi_loose"] = [list(x["dh"]) + [None] + list(x["words"]) for x in near]
-                n += mark_rashi(e["tokens"], near, gem, trace=e["why"], weak=weak)
-                rashi_edges(e, near)
-                rashi_whole(e, near)
+                n += mark_rashi_through_refs(e, near, gem, weak)
             report.append(f"ב{s['comm_name']} הודגשו {n} מילים מרש\"י")
             # (a stretch with no saying of Rashi like it near the place, about the same daf
             # as the passage, is the commentator's: plain, as the user decided; Rashi on
@@ -4766,7 +4851,7 @@ def load_masechet(root, m, found=None):
                     a = k
                     while k < len(toks) and toks[k][1] == "rashi":
                         k += 1
-                    W = [stem2(x) for x in lseq(toks[a:k])[0]]
+                    W = [stem2(x) for x in lseq(rif_words_only(toks[a:k]))[0]]
                     gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
                     # (and where the closest comment of Rashi on the subject has less than a
                     # third of it, it is the commentator's words: plain unless the user
@@ -4792,7 +4877,7 @@ def load_masechet(root, m, found=None):
                         k += 1
                     if a < e.get("dh_len", 0) + 1:
                         continue
-                    W = lseq(toks[a:k])[0]
+                    W = lseq(rif_words_only(toks[a:k]))[0]
                     gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
                     if len(gs) >= 2 and sum(x in gem for x in gs) >= 0.75 * len(gs):
                         for q in range(a, k):
