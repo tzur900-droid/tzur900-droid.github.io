@@ -4283,6 +4283,9 @@ def perakim_of(masechet):
     return []
 
 
+CITES = {norm(p + w) for w in ("כתיב", "שנאמר", "נאמר", "תנן", "תניא", "תנא", "תנינא") for p in ("", "ו", "ד", "כד", "וכד", "דה")}
+
+
 def rashi_after_ref(comm):
     """A stretch bold as Rashi's that comes right after a reference ("דכתיב (בראשית ב, ח)
     ויטע...", "כדתנן בערכין (כא:) מוסיף עוד דינר...") is the verse or the Mishna quoted
@@ -4301,7 +4304,9 @@ def rashi_after_ref(comm):
                 k += 1
             # (not where the stretch goes on from Rashi's wording before the reference:
             # "ואמרינן לקמן בהבא על יבמתו (נ:) דבאחי אביו", a reference never stops the bold)
-            if a > 0 and toks[a - 1][1] == "src" and not (a > 1 and toks[a - 2][1] == "rashi"):
+            # (but a verse or a Mishna after "דכתיב (...)", "כדתנן בערכין (...)" is that one's)
+            cites = a > 1 and any(norm(toks[z][0]) in CITES for z in range(max(0, a - 4), a - 1))
+            if a > 0 and toks[a - 1][1] == "src" and (cites or not (a > 1 and toks[a - 2][1] == "rashi")):
                 for q in range(a, k):
                     toks[q] = [toks[q][0], False] + list(toks[q][2:])
                     count += 1
