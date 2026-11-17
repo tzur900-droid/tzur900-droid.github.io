@@ -4513,6 +4513,15 @@ def load_masechet(root, m, found=None):
     comm = parse_comm(read(s["comm"])) if s["comm"] else []
     report = []
     report.append(f"{fix_typos(m, rosh, rif, comm)} טעויות דפוס בטקסט שתוקנו (data/typos.txt)")
+    # (a passage of the Rif whose words are strewn with quotation marks in the middle,
+    # "דמ"אן דאיפ"סיקא רג"ליה": marks of the source's, not abbreviations; left out)
+    for p_ in rif:
+        odd = [t for t in p_["tokens"] if re.search(r'[א-ת]"[א-ת]{2,}', t[0])]
+        if len(odd) >= 5:
+            for t in p_["tokens"]:
+                letters = re.sub(r"[^א-ת]", "", t[0])
+                if '"' in t[0] and (len(letters) >= 4 or not expand(t[0])):
+                    t[0] = t[0].replace('"', "")
     if comm and comm[0]["tokens"] and norm(comm[0]["tokens"][0][0]) == "רנ":
         # the title at the head of the commentary ("ר"ן מגילה")
         k = 1 + len(m.split())
