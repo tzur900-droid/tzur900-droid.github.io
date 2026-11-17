@@ -1607,6 +1607,27 @@ def extend_edges(rosh, rif, al, most=8, log=None):
                         got.append(x)
                         x, skipped = x2, True
                         continue
+                    # (a few words said otherwise, up to three on each side, where three words
+                    # after them go on together: "הלכה [כרב אחא לקולא] וכבר ברירנא לה" for the
+                    # Rif's "הלכה [כדברי המיקל] וכבר ברירנא לה": one sentence, bold through)
+                    found = None
+                    for dx in range(0, 4):
+                        for dr in range(0, 4):
+                            if dx + dr < 2:
+                                continue
+                            xx, rr = x + dx * step, r + dr * step
+                            if all(0 <= xx + z * step < len(W) and 0 <= rr + z * step < len(R) and
+                                   plain_ok[xx + z * step] and not bold[xx + z * step] and same(xx + z * step, rr + z * step)
+                                   for z in range(3)) and all(plain_ok[x + z * step] for z in range(dx)):
+                                found = (dx, dr)
+                                break
+                        if found:
+                            break
+                    if found:
+                        dx, dr = found
+                        got += [x + z * step for z in range(dx)]
+                        x, r, skipped = x + dx * step, r + dr * step, True
+                        continue
                     break
                 return last
             runs, q = [], 0

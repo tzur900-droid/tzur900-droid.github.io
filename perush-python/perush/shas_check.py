@@ -64,7 +64,7 @@ def check_rosh(rosh, rif, al, found):
         # (the same words in the Rif of the place too, a little further than the window: the
         # same subject, as the user decided; they stay bold, the rule of a quotation brought
         # again decides on a repeat)
-        nlo, nhi = lo - 2, hi + 2
+        nlo, nhi = lo - 6, hi + 6
         near = [w for p in rif[max(0, nlo):nhi + 1] for w in lseq(p["tokens"])[0]]
         if said_whole(lseq(flat[a:b + 1])[0], [near], share=0.85):
             continue
