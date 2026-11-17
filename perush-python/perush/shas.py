@@ -1383,7 +1383,8 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
             # (where the Rif has the line twice, the Rosh may quote it twice: a long
             # quotation, not a line brought again in his own discussion)
             if plain >= before and e - q <= 15 and grams and len(again) >= share * len(grams) \
-                    and (explain or e - q < 12 or len(twice) < share * len(grams)):
+                    and (explain or len({(id(src[x][0]), src[x][1]) for x in range(q, e)}) < 12
+                         or len(twice) < share * len(grams)):
                 toks = {(id(p), k): (p, k) for p, k in src[q:e]}
                 for p, k in toks.values():
                     if p[k][1] is True:
