@@ -2443,7 +2443,8 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                 setv(a, b, False)
                 if log is not None:
                     log.append(("alone", s["num"], " ".join(W[a:b])))
-    return count
+    # (and the pairs that are one word, and the Rosh's own voice at an edge: after each pass)
+    return count + whole_pairs(rosh)
 
 
 def rule_quotes(rosh, rif, al, least=6, log=None):
