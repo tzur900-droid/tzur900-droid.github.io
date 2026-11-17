@@ -253,10 +253,15 @@ def lwords(w):
 NAMED = {"רבה", "ורבה", "דרבה", "לרבה", "כרבה", "מרבה", "רב", "ורב", "דרב", "לרב"}
 
 
-def lseq(toks, gentile=True):
+GENTILE = [True]       # (off while the commentary is set against Rashi and the Gemara)
+
+
+def lseq(toks, gentile=None):
     """-> (loose words, index of the token each comes from). gentile: the censors' words for
     a gentile read as one (for the Rosh against the Rif; not for the commentary against the
     Gemara, where the user's marks keep them apart)."""
+    if gentile is None:
+        gentile = GENTILE[0]
     seq, src = [], []
     for i, t in enumerate(toks):
         w = t[0] if isinstance(t, list) else t
@@ -4508,6 +4513,7 @@ def load_masechet(root, m, found=None):
         if found is not None:
             found.extend(here)
         report.append(f"ברא\"ש הודגשו {n} מילים מהרי\"ף")
+    GENTILE[0] = False
     if comm:
         # the commentary's own dibbur hamatchil in plain type (as in the Oz Vehadar Rif);
         # bold is what it takes from Rashi on the Gemara of the place
@@ -4687,6 +4693,7 @@ def load_masechet(root, m, found=None):
             report.append(f"ב{s['comm_name']} {gq} מילים שהן לשון הגמרא ולא לשון רש\"י")
             report.append(f"ב{s['comm_name']} {comm_gemara_marks(comm, amudim, gtoks, gamud)} סימני דפי הגמרא")
         report.append(f"ב{s['comm_name']} {mishna_openers(comm, rif)} פתיחות של משנה")
+    GENTILE[0] = True
     for x in rosh:
         for p in x["paras"]:
             plain_refs(p)
