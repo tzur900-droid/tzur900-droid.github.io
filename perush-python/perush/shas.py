@@ -1365,6 +1365,10 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
             plain = 0
             while q - plain - 1 >= 0 and not bold[q - plain - 1]:
                 plain += 1
+            # (the Rosh's quotation of the mishna or the Gemara at its place, right after
+            # "מתני'" or "גמ'": the quotation itself, not a line brought again)
+            if q and src[q - 1][0][src[q - 1][1]][1] == "label":
+                plain = 0
             grams = [tuple(W[x:x + 3]) for x in range(q, e - 2)]
             # (a line brought again, short, beside a quotation of the passage that has it
             # within it; not a quotation as long as the one before, which may be the real one)
@@ -1496,7 +1500,7 @@ def same_word(a, b):
     (בבית and לבית): that changes the meaning."""
     na0, nb0 = norm(a), norm(b)
     # (ר of an abbreviation is רב or רבי)
-    if {na0, nb0} & {"ר"} and (na0 in ("ר", "רב", "רבי") and nb0 in ("ר", "רב", "רבי")):
+    if {na0, nb0} & {"ר"} and (na0 in ("ר", "רב", "רבי", "רבנ") and nb0 in ("ר", "רב", "רבי", "רבנ")):
         return True
     # (a word cut short with ' at its end stands for the whole word, as the user said:
     # פי' is פירוש, גמ' is גמרא, דאמרי' is דאמרינן; two letters at least, so that the
@@ -2073,7 +2077,10 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                 for q in at3.get(three, ()):
                     hit = True
                     near = FR[q + 3:q + 5] if after else FR[max(0, q - 2):q]
+                    nearl = lseq([[x, False] for x in near])[0]
                     near = [y for x in near for y in (expand(x) or [x])]
+                    if any(loose(v) in nearl for v in ws):
+                        return True, True
                     # (by the words as written: וכיון is not וכן, though loosely they are one)
                     # (an abbreviation's word by its loose form: א"ר's רבי is the Rif's רב)
                     if any(norm(v).lstrip("ו") == norm(x).lstrip("ו") or
@@ -2096,6 +2103,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                         lastw = p[src[c - 1]][0]
                         lw = (expand(lastw) or [lastw])[-1]
                         if not any(norm(v).lstrip("ו") == norm(x).lstrip("ו") or
+                                   W[c - 1] in lseq([[FR[q + 2], False]])[0] or
                                    (min(len(norm(v)), len(norm(x))) >= 4 and same_word(v, x))
                                    for q in at3[tuple(S_[c - 3:c])]
                                    for x in [(expand(FR[q + 2]) or [FR[q + 2]])[-1], FR[q + 2]] for v in (lastw, lw)):
