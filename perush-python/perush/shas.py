@@ -725,8 +725,11 @@ def rashi_edges(e, entries, most=3):
             got, skipped = [], False
 
             def ok(k):
+                # (a word of the text in square brackets, "[אבי אביו ואם אם]", is the text's:
+                # it does not stop the bold, as the user decided; a reference in round ones is
+                # not here at all)
                 return 0 <= k < len(toks) and toks[k][1] in (False, "rashi") and \
-                    not any(c in toks[k][0] for c in "()[]")
+                    not any(c in toks[k][0] for c in "()")
 
             def same(k, r):
                 return 0 <= r < len(R) and ok(k) and rw(k, r)
@@ -1969,6 +1972,32 @@ def joined_in(pieces, seqs, slack=1):
     return False
 
 
+PAIR_FIRST = re.compile(r"^[ודלבמשכה]{0,3}עובד(?:י|ת|ות)?$")
+PAIR_SECOND = re.compile(r"^כוכבים[.,:;]?$")
+
+
+def whole_pairs(rosh):
+    """"עובד כוכבים" is one word (the censor's for the Rif's גוי, כותי): never half of it
+    bold ("דעובד *כוכבים מסיח לפי תומו"). Both bold where the bold half goes on with the
+    bold beyond it, else both plain. -> words changed."""
+    count = 0
+    for s in rosh:
+        for p in s["paras"]:
+            for k in range(len(p) - 1):
+                a, b = p[k], p[k + 1]
+                if not (isinstance(a[0], str) and PAIR_FIRST.match(a[0]) and PAIR_SECOND.match(str(b[0]))):
+                    continue
+                if a[1] not in (True, False) or b[1] not in (True, False) or a[1] == b[1]:
+                    continue
+                if b[1] is True:
+                    on = k + 2 < len(p) and p[k + 2][1] is True
+                else:
+                    on = k > 0 and p[k - 1][1] is True
+                a[1] = b[1] = on
+                count += 1
+    return count
+
+
 def scattered(rosh, comm, short=5, gap=8, log=None, rif=None, al=None):
     """Bold in pieces: two or more bold stretches close together (gap plain words or fewer
     between them) none of which is short words or longer, a few phrases scattered with no
@@ -2086,6 +2115,14 @@ def quoting_words(rosh, rif, al):
     return count
 
 
+def ah_same(a, b):
+    """The same word with א or ה at its end (אבה, the Rif's אבא), three letters at least; not
+    רבה and רבא, two amoraim."""
+    na, nb = norm(a).rstrip(".,:;"), norm(b).rstrip(".,:;")
+    return len(na) >= 3 and na[:-1] == nb[:-1] and {na[-1:], nb[-1:]} == {"א", "ה"} and \
+        na.lstrip("ודל") not in ("רבה", "רבא")
+
+
 def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
     """The bold of the Rosh read as a text of its own, as the user asked:
       * a word at the edge of a bold stretch that the Rif has not after (or before) the
@@ -2146,7 +2183,8 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                 nonlocal count
                 for k in sorted({src[x] for x in range(a, b)}):
                     if p[k][1] in (True, False) and p[k][1] != v and \
-                            not (v and any(c in p[k][0] for c in "()[]") and not variant(p[k][0])):
+                            not (v and any(c in p[k][0] for c in "()[]") and not variant(p[k][0])) and \
+                            not (v and (rashi_marker(p[k][0]) or norm(p[k][0]) in ("זל", "זצל", "רת", "ורת"))):
                         p[k][1] = v
                         count += 1
             # the edges
@@ -2173,6 +2211,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                     # (by the words as written: וכיון is not וכן, though loosely they are one)
                     # (an abbreviation's word by its loose form: א"ר's רבי is the Rif's רב)
                     if any(norm(v).lstrip("ו") == norm(x).lstrip("ו") or
+                           (number_of(v) is not None and number_of(v) == number_of(x)) or ah_same(v, x) or
                            (v == w1 and w1 != w and loose(v) == loose(x)) or
                            (min(len(norm(v)), len(norm(x))) >= 4 and same_word(v, x))
                            for v in (w, w1) for x in near):
@@ -2192,6 +2231,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                         lastw = p[src[c - 1]][0]
                         lw = (expand(lastw) or [lastw])[-1]
                         if not any(norm(v).lstrip("ו") == norm(x).lstrip("ו") or
+                                   (number_of(v) is not None and number_of(v) == number_of(x)) or ah_same(v, x) or
                                    ((lseq([[lastw, False]])[0] != [loose(lastw)] or lseq([[FR[q + 2], False]])[0] != [loose(FR[q + 2])]) and W[c - 1] in lseq([[FR[q + 2], False]])[0]) or
                                    (min(len(norm(v)), len(norm(x))) >= 4 and same_word(v, x))
                                    for q in at3[tuple(S_[c - 3:c])]
@@ -5285,6 +5325,7 @@ def prepare_masechet(root, m, fix=None):
         read_as_text(rosh, rif, al)
         apply_decisions(rosh, comm, m)
     report.append(f"{scattered(rosh, comm, rif=rif, al=al)} מילים בהדגשה מקוטעת (לא מודגשות)")
+    report.append(f"ברא\"ש {whole_pairs(rosh)} מילים בצמדים שהם מילה אחת (עובד כוכבים)")
     for e in comm:
         e.pop("rashi_seqs", None)
         e.pop("rashi_loose", None)
