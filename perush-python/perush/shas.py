@@ -253,8 +253,10 @@ def lwords(w):
 NAMED = {"רבה", "ורבה", "דרבה", "לרבה", "כרבה", "מרבה", "רב", "ורב", "דרב", "לרב"}
 
 
-def lseq(toks):
-    """-> (loose words, index of the token each comes from)"""
+def lseq(toks, gentile=True):
+    """-> (loose words, index of the token each comes from). gentile: the censors' words for
+    a gentile read as one (for the Rosh against the Rif; not for the commentary against the
+    Gemara, where the user's marks keep them apart)."""
     seq, src = [], []
     for i, t in enumerate(toks):
         w = t[0] if isinstance(t, list) else t
@@ -269,7 +271,7 @@ def lseq(toks):
         # (a gentile as the censors wrote him: עובד כוכבים, עכו"ם, גוי, נכרי for כותי: all
         # read as עובד כוכבים, as the Rif and the Rosh have them each in another way)
         nw = norm(w)
-        k2 = next((k for k in range(0, 3) if all(c in "ולדשבמהכ" for c in nw[:k]) and
+        k2 = None if not gentile else next((k for k in range(0, 3) if all(c in "ולדשבמהכ" for c in nw[:k]) and
                    nw[k:] in ("כותי", "כותימ", "גוי", "גוימ", "נכרי", "נכרימ", "עכומ")), None)
         if k2 is not None:
             for x in (loose(nw[:k2] + "עובד"), loose("כוכבים")):
@@ -4542,7 +4544,7 @@ def load_masechet(root, m, found=None):
             label = dict(gamud)
             for j, p in enumerate(rif):
                 p["amud"], p["amud_n"] = label.get(amudim[j]), amudim[j]
-            g = lseq(gtoks)[0]
+            g = lseq(gtoks, gentile=False)[0]
             gem = {tuple(g[k:k + 3]) for k in range(len(g) - 2)}
             # the commonest words of the commentary: a match of them alone is no quotation
             freq = {}
