@@ -2503,7 +2503,7 @@ class Unit:
 
 LONG_COMM = 15
 # the commentary's name in the head of a page of the Rif, in two (as in Oz Vehadar: נמוקי ... יוסף)
-COMM_HEAD = {"נימוקי יוסף": ("נמוקי", "יוסף"), 'ר"ן': ("רבינו", "נסים"), "רבינו יונה": ("רבינו", "יונה"),
+COMM_HEAD = {"נימוקי יוסף": ("נימוקי", "יוסף"), 'ר"ן': ("רבנו", "ניסים"), "רבינו יונה": ("רבינו", "יונה"),
              "רבינו יהונתן": ("רבינו", "יהונתן")}
 COMM_AHEAD = 12     # words of the Rif after a page whose comments may still come on it
 COMM_TIGHT = 0.8    # how far the commentary's spaces may close
@@ -2562,7 +2562,9 @@ class Book:
         dh = Style(RIF_FONT, st.size * 1.25, True)
         # Rashi's wording in the commentary: a little heavier than the text (not the bold
         # of the dibbur); מתני' that opens a Mishna great, as in the Rif
-        rashi = Style("Frank Ruhl Libre Medium", st.size)
+        # (for checking, in Rashi's script, as the user asked: RASHI_SCRIPT=0 for the square)
+        rashi = Style("Noto Rashi Hebrew", st.size) if os.environ.get("RASHI_SCRIPT", "1") == "1" \
+            else Style("Frank Ruhl Libre Medium", st.size)
         clab = Style(RIF_FONT, st.size * 1.6, True)
         out = []
         for t in toks:
@@ -3533,7 +3535,7 @@ class Book:
                 "title": title, "sub": sub, "base": base, "sub_base": base + self.hs * 1.15,
                 "num": heb(first + n) if rif_off is None or n < rif_off else heb(n - rif_off + 1),
                 # the work's name on the two sides of the perek: רבינו ... אשר
-                "work": (("רבינו", "אשר") if pg["kind"] == "rosh" else COMM_HEAD.get(self.comm_name, ("הלכות", "רב אלפס"))),
+                "work": (("רבנו", "אשר") if pg["kind"] == "rosh" else COMM_HEAD.get(self.comm_name, ("הלכות", "רב אלפס"))),
                 "inner": self.name, "outer": "left" if n % 2 == 0 else "right", "box": day is not None}
             if day is not None:
                 page.oz_head["day"] = f"יום {heb(day)}"
