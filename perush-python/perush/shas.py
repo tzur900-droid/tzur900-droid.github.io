@@ -1643,6 +1643,14 @@ def extend_edges(rosh, rif, al, most=8, log=None):
                         last = list(got)
                         x, r = x + step, r + step
                         continue
+                    # (the Rosh's "וכו'" for the rest of the Rif's line: "החרש שנחלץ וכו'"
+                    # for "החרש שנחלץ והחרשת שחלצה חליצתן פסולה")
+                    if norm(p[src[x]][0]) in (norm("וכו'"), norm("כו'")) and 0 <= x + step < len(W):
+                        k2 = next((k for k in range(0, 9) if 0 <= r + k * step < len(R) and same(x + step, r + k * step)), None)
+                        if k2 is not None:
+                            got.append(x)
+                            x, r = x + step, r + k2 * step
+                            continue
                     if skipped:
                         break
                     x2, r2 = x + step, r + step
@@ -1703,6 +1711,16 @@ def extend_edges(rosh, rif, al, most=8, log=None):
                         three = list(range(q, q + 3)) if side == "<" else list(range(e - 3, e))
                         keys = [r for r in range(len(R) - 2)
                                 if all(_same_cached(W[x], R[r + z]) for z, x in enumerate(three))][:3]
+                    if not keys:
+                        # (or with a word of the Rif's between them: "חולצין בו [משום] שנאמר")
+                        if side == ">":
+                            keys = [r - 2 for r in range(2, len(R))
+                                    if _same_cached(W[e - 1], R[r]) and _same_cached(W[e - 2], R[r - 2])
+                                    and _same_cached(W[e - 3], R[r - 3] if r >= 3 else "")][:3]
+                        else:
+                            keys = [r for r in range(0, len(R) - 3)
+                                    if _same_cached(W[q], R[r]) and _same_cached(W[q + 1], R[r + 2])
+                                    and _same_cached(W[q + 2], R[r + 3])][:3]
                     for r0 in keys:
                         got = walk(q - 1, r0 - 1, -1) if side == "<" else walk(e, r0 + 3, 1)
                         if got:
@@ -2175,6 +2193,25 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                         if log is not None:
                             log.append(("before", s["num"], " ".join(W[t:ex])))
                         break
+            # (the Rif's ruling, "והלכה כרבא", said by the Rosh too where the Rif says it on
+            # the subject: bold, the Rif's words)
+            for x in range(len(W) - 1):
+                if p[src[x]][1] is not False or W[x] not in ("והלכה", "הלכה", "והלכתא", "הלכתא"):
+                    continue
+                if x and src[x - 1] == src[x]:
+                    continue
+                y = x + 1
+                while y < len(W) and src[y] == src[x + 1]:
+                    y += 1
+                tail = W[x:y]
+                if not p[src[y - 1]][0].rstrip().endswith((".", ":")) and y < len(W):
+                    continue
+                if any(all(_same_cached(tail[z], F[q + z]) for z in range(len(tail))) and
+                       FR[min(len(FR) - 1, q + len(tail) - 1)].rstrip().endswith((".", ":"))
+                       for q in range(len(F) - len(tail) + 1)):
+                    setv(x, y, True)
+                    if log is not None:
+                        log.append(("ruling", s["num"], " ".join(tail)))
             # alone
             rs = runs()
             for q, (a, b) in enumerate(rs):
