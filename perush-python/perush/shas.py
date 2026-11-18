@@ -2499,6 +2499,13 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                 w1 = ws[0] if after else ws[-1]
                 for q in at3.get(three, ()):
                     hit = True
+                    # (one word for the Rif's two or three: איזהו, "אי זה הוא")
+                    nw = norm(w).rstrip(".,:;")
+                    for n in (2, 3):
+                        part = FR[q + 3:q + 3 + n] if after else FR[max(0, q - n):q]
+                        j = "".join(norm(x).rstrip(".,:;") for x in part)
+                        if len(part) == n and any(nw in g and j in g for g in CONTRACTED):
+                            return True, True
                     near = FR[q + 3:q + 5] if after else FR[max(0, q - 2):q]
                     nearl = lseq([[x, False] for x in near])[0]
                     near = [y for x in near for y in (expand(x) or [x])]
