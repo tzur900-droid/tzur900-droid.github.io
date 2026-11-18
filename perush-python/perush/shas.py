@@ -1826,8 +1826,8 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
         R, _ = lseq(rt)
         RS = [stem2(x) for x in R]
         at3 = {}
-        for q in range(len(RS) - 2):
-            at3.setdefault(tuple(RS[q:q + 3]), []).append(q)
+        for q in range(len(RS) - 1):
+            at3.setdefault(tuple(RS[q:q + 2]), []).append(q)
         for p in s["paras"]:
             W, src = lseq(p)
             S_ = [stem2(w) for w in W]
@@ -1847,7 +1847,7 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                 return out
             k = 0
             while k < len(W) - (least - 2):
-                if not all(plain(x) for x in range(k, k + 3)) or tuple(S_[k:k + 3]) not in at3:
+                if not all(plain(x) for x in range(k, k + 2)) or tuple(S_[k:k + 2]) not in at3:
                     k += 1
                     continue
                 best = 0
@@ -1855,19 +1855,22 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
 
                 def eq(x, r):
                     return 0 <= r < len(R) and x < len(W) and plain(x) and (S_[x] == RS[r] or _same_cached(W[x], R[r]))
-                for q in at3[tuple(S_[k:k + 3])]:
+                for q in at3[tuple(S_[k:k + 2])]:
                     # (the Rif's words in order, a word changed, added or left out on either side
                     # where two words after it go on together, twice at most: "דסתם מעוברת
                     # [למניקה] קיימא [-וחיישינן] דלמא מיעברא ומיעכר [חלבה] וקטלה ליה")
                     L, r, got, skips = 0, q, 0, 0
-                    while k + L < len(W) and plain(k + L):
+                    while k + L < len(W) and (plain(k + L) or p[src[k + L]][1] == "gem"):
+                        if p[src[k + L]][1] == "gem":
+                            L += 1                      # (a mark of the Gemara's amud: over it)
+                            continue
                         if eq(k + L, r):
                             L, r, got = L + 1, r + 1, got + 1
-                        elif skips < 2 and got >= 3 and eq(k + L + 1, r + 1) and eq(k + L + 2, r + 2):
+                        elif skips < 2 and got >= 2 and eq(k + L + 1, r + 1) and eq(k + L + 2, r + 2):
                             L, r, skips = L + 1, r + 1, skips + 1          # (a word changed)
-                        elif skips < 2 and got >= 3 and eq(k + L, r + 1) and eq(k + L + 1, r + 2):
+                        elif skips < 2 and got >= 2 and eq(k + L, r + 1) and eq(k + L + 1, r + 2):
                             r, skips = r + 1, skips + 1                    # (a word of the Rif's left out)
-                        elif skips < 2 and got >= 3 and eq(k + L + 1, r) and eq(k + L + 2, r + 1):
+                        elif skips < 2 and got >= 2 and eq(k + L + 1, r) and eq(k + L + 2, r + 1):
                             L, skips = L + 1, skips + 1                    # (a word of the Rosh's added)
                         else:
                             break
@@ -2611,8 +2614,11 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                     # other)
                     gw = [stem2(W[x]) for x in between]
                     if len(between) <= 15 and not any(str(p[src[x]][0]).rstrip().endswith((".", ":")) for x in range(b1 - 1, a2)):
-                        pairs = [tuple(gw[q:q + 2]) for q in range(len(gw) - 1)]
-                        if pairs and sum(x in F2 for x in pairs) >= 0.7 * len(pairs):
+                        # (each word the Rif's, said a little differently: בדגלת, בדיגלת)
+                        gl = [W[x] for x in between]
+                        fset = set(F)
+                        found = sum(1 for w in gl if w in fset or any(_same_cached(w, f) for f in fset if f[:1] == w[:1] or f[1:2] == w[:1]))
+                        if len(gl) >= 4 and found >= 0.75 * len(gl):
                             setv(b1, a2, True)
                             if log is not None:
                                 log.append(("gap", s["num"], " ".join(W[b1:a2])))
