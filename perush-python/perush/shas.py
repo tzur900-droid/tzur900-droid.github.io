@@ -1688,7 +1688,9 @@ SAME_FORMS = [{"לקמנ", "לקמיה", "לקמנה"}, {"עי", "עלידי", "
               # (the Rosh's "כתבו רבוואתא" for the Rif's "ופסקו רבואתא", as the user decided)
               {"פסקו", "ופסקו", "כתבו", "וכתבו"},
               # (רבן שמעון בן גמליאל, written ר' שמעון בן גמליאל)
-              {"רב", "רבי", "רבנ"}]
+              {"רב", "רבי", "רבנ"},
+              # (כך וכך, the Rif's כן וכן: "so and so")
+              {"ככ", "כנ"}, {"וככ", "וכנ"}]
 
 
 LOOKALIKE = {frozenset(x) for x in ("בכ", "דר", "הח", "וז", "וי", "זי", "סמ", "טמ", "גנ", "כנ")}
@@ -1921,6 +1923,17 @@ def _extend_edges_once(rosh, rif, al, most, log):
             def same(x, r):
                 return same_word(W[x], R[r]) or same_word(p[src[x]][0], rtoks[rsrc[r]][0])
 
+            def joined(x, r, step):
+                # (one word for the Rif's three, or three for its one: איזהו, "אי זו היא")
+                w = norm(p[src[x]][0]).rstrip(".,:;")
+                for n in (2, 3):
+                    rr = [r + z * step for z in range(n)]
+                    if all(0 <= y < len(R) for y in rr):
+                        j = "".join(norm(rtoks[rsrc[y]][0]).rstrip(".,:;") for y in sorted(rr))
+                        if any(w in g and j in g for g in CONTRACTED):
+                            return n
+                return 0
+
             def walk(x, r, step):
                 """From Rosh word x and Rif word r outward (step -1 or 1): the Rosh words that
                 go on with the Rif's."""
@@ -1935,6 +1948,12 @@ def _extend_edges_once(rosh, rif, al, most, log):
                         got.append(x)
                         last = list(got)
                         x, r = x + step, r + step
+                        continue
+                    jn = joined(x, r, step)
+                    if jn:
+                        got.append(x)
+                        last = list(got)
+                        x, r = x + step, r + jn * step
                         continue
                     # (the Rosh's "וכו'" for the rest of the Rif's line: "החרש שנחלץ וכו'"
                     # for "החרש שנחלץ והחרשת שחלצה חליצתן פסולה")
@@ -1967,9 +1986,19 @@ def _extend_edges_once(rosh, rif, al, most, log):
                             if dx + dr < 2:
                                 continue
                             xx, rr = x + dx * step, r + dr * step
-                            if all(0 <= xx + z * step < len(W) and 0 <= rr + z * step < len(R) and
-                                   plain_ok[xx + z * step] and not bold[xx + z * step] and same(xx + z * step, rr + z * step)
-                                   for z in range(3)) and all(plain_ok[x + z * step] for z in range(dx)):
+
+                            def goes(z):
+                                return 0 <= xx + z * step < len(W) and 0 <= rr + z * step < len(R) and \
+                                    plain_ok[xx + z * step] and not bold[xx + z * step] and same(xx + z * step, rr + z * step)
+
+                            def at_label(z):
+                                # (the start of the Mishna or the Gemara: "מתני' המגרש את [האשה]"
+                                # for the Rif's "מתני' המגרש את [אשתו]")
+                                y = xx + z * step
+                                return step < 0 and (y < 0 or p[src[y]][1] == "label")
+                            if (all(goes(z) for z in range(3)) or
+                                    (dx == 1 and dr == 1 and all(goes(z) for z in range(2)) and at_label(2))) \
+                                    and all(plain_ok[x + z * step] for z in range(dx)):
                                 found = (dx, dr)
                                 break
                         if found:
@@ -2014,8 +2043,15 @@ def _extend_edges_once(rosh, rif, al, most, log):
                             keys = [r for r in range(0, len(R) - 3)
                                     if _same_cached(W[q], R[r]) and _same_cached(W[q + 1], R[r + 2])
                                     and _same_cached(W[q + 2], R[r + 3])][:3]
+                    # (of the places the Rif has the three words, the one its words go on from
+                    # the longest: "...קודמת למצות ייבום. אמר רב [אין כופין]" where another place
+                    # goes on "אמר רב יהודה")
+                    tries = []
                     for r0 in keys:
-                        got = walk(q - 1, r0 - 1, -1) if side == "<" else walk(e, r0 + 3, 1)
+                        g = walk(q - 1, r0 - 1, -1) if side == "<" else walk(e, r0 + 3, 1)
+                        tries.append(g)
+                    tries.sort(key=len, reverse=True)
+                    for got in tries[:1]:
                         if got:
                             for y in range(min(got), max(got) + 1):
                                 k = src[y]
@@ -2028,6 +2064,10 @@ def _extend_edges_once(rosh, rif, al, most, log):
                             break
     return count
 
+
+CONTRACTED = [{norm(w) for w in g} for g in (("איזהו", "איזוהי", "איזוהי", "איזוהיא", "אזוהי", "איזהוא"),
+                                              ("היכי", "היכא"), ("אהייא", "אהיא"))]
+CONTRACTED[0] |= {"אזהוא", "איזהוא", "אזוהיא", "איזוהיא"}
 
 NEGATIONS = {norm(w) for w in "לא ולא דלא שלא אין ואין דאין שאין אינו אינה אינן לית ולית ליכא לאו ולאו בלא".split()}
 
