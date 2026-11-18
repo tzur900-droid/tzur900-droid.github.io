@@ -1564,9 +1564,6 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
             # "מתני'" or "גמ'": the quotation itself, not a line brought again)
             if q and src[q - 1][0][src[q - 1][1]][1] == "label":
                 plain = 0
-            # (nor one the Rosh brings by the Rif's name: "וכן כתב רב אלפס ז"ל והיכא...")
-            if any(rif_marker(src[x][0][src[x][1]][0]) for x in range(max(0, q - 4), q)):
-                plain = 0
             grams = [tuple(W[x:x + 3]) for x in range(q, e - 2)]
             # (a line brought again, short, beside a quotation of the passage that has it
             # within it; not a quotation as long as the one before, which may be the real one)
@@ -1845,9 +1842,23 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                     if all(p[src[y]][1] is True for y in range(x, x + 3)):
                         out.add(tuple(S_[x:x + 3]))
                 return out
+            # (inside the Rosh's own explanation, "פי' בן שלש עשרה שנה ... אלא שהוא קטן מאחיו
+            # הגדול", plain, as the user decided: from פי' to where its sentence ends or the
+            # quotation goes on bold)
+            expl = [False] * len(W)
+            on = False
+            for x in range(len(W)):
+                t = p[src[x]]
+                if norm(str(t[0])).lstrip("ו") in EXPLAINS:
+                    on = True
+                elif on and t[1] is True:
+                    on = False
+                expl[x] = on
+                if str(t[0]).rstrip().endswith((".", ":")) and (x + 1 >= len(W) or src[x + 1] != src[x]):
+                    on = False
             k = 0
             while k < len(W) - (least - 2):
-                if not all(plain(x) for x in range(k, k + 2)) or tuple(S_[k:k + 2]) not in at3:
+                if expl[k] or not all(plain(x) for x in range(k, k + 2)) or tuple(S_[k:k + 2]) not in at3:
                     k += 1
                     continue
                 best = 0
@@ -1860,7 +1871,7 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                     # where two words after it go on together, twice at most: "דסתם מעוברת
                     # [למניקה] קיימא [-וחיישינן] דלמא מיעברא ומיעכר [חלבה] וקטלה ליה")
                     L, r, got, skips = 0, q, 0, 0
-                    while k + L < len(W) and (plain(k + L) or p[src[k + L]][1] == "gem"):
+                    while k + L < len(W) and not expl[k + L] and (plain(k + L) or p[src[k + L]][1] == "gem"):
                         if p[src[k + L]][1] == "gem":
                             L += 1                      # (a mark of the Gemara's amud: over it)
                             continue
@@ -1892,9 +1903,11 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                     gs = [tuple(S_[x:x + 3]) for x in range(k, k + best - 2)
                           if any(p[src[y]][1] is False for y in range(x, x + 3))]
                     before = bold_before(k)
-                    # (not one the Rosh brings by the Rif's name: "על רב אלפס ז"ל שכתב צרת
-                    # סוטה אסורה...", a quotation of the Rif)
-                    named = any(rif_marker(str(p[x][0])) for x in range(max(0, src[k] - 4), src[k]))
+                    # (not the quotation right after מתני' or גמ', nor one that goes on from the
+                    # bold just before it: "מאי אמר ליה [היו מכין אותו...]". A line the Rosh
+                    # brings again by the Rif's name is a line brought again all the same, as
+                    # the user decided)
+                    named = src[k] > 0 and (p[src[k] - 1][1] == "label" or p[src[k] - 1][1] is True)
                     if gs and not named and sum(g in before for g in gs) >= 0.5 * len(gs):
                         k += best
                         continue
@@ -2285,7 +2298,7 @@ def whole_pairs(rosh):
                     if t[1] is not True or not isinstance(t[0], str):
                         continue
                     n = norm(t[0]).rstrip(".,:;")
-                    if not (n in OWN_VOICE or rashi_marker(t[0])):
+                    if not (n in OWN_VOICE or rashi_marker(t[0]) or n.lstrip("ו") in EXPLAINS):
                         continue
                     edge = (k == 0 or p[k - 1][1] is not True) or (k + 1 == len(p) or p[k + 1][1] is not True)
                     if edge:
@@ -2616,9 +2629,19 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                     if len(between) <= 15 and not any(str(p[src[x]][0]).rstrip().endswith((".", ":")) for x in range(b1 - 1, a2)):
                         # (each word the Rif's, said a little differently: בדגלת, בדיגלת)
                         gl = [W[x] for x in between]
-                        fset = set(F)
-                        found = sum(1 for w in gl if w in fset or any(_same_cached(w, f) for f in fset if f[:1] == w[:1] or f[1:2] == w[:1]))
-                        if len(gl) >= 4 and found >= 0.75 * len(gl):
+                        # (two words that go on together in the Rif, each said a little
+                        # differently; not the Rosh's own words in it, פירש, כלומר, ומסתמא)
+                        own = any(norm(str(p[src[x]][0])).lstrip("ו") in EXPLAINS or norm(str(p[src[x]][0])) in OWN_VOICE
+                                  or rashi_marker(str(p[src[x]][0])) for x in between)
+                        firsts = {}
+                        for q, f in enumerate(F):
+                            firsts.setdefault(f[:1], []).append(q)
+                        pairs = 0
+                        for q in range(len(gl) - 1):
+                            if any(q2 + 1 < len(F) and _same_cached(gl[q], F[q2]) and _same_cached(gl[q + 1], F[q2 + 1])
+                                   for q2 in firsts.get(gl[q][:1], ())):
+                                pairs += 1
+                        if not own and len(gl) >= 4 and pairs >= 0.7 * (len(gl) - 1):
                             setv(b1, a2, True)
                             if log is not None:
                                 log.append(("gap", s["num"], " ".join(W[b1:a2])))
