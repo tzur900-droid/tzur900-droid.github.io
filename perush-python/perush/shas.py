@@ -1851,24 +1851,41 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                     k += 1
                     continue
                 best = 0
+                hits = 0
+
+                def eq(x, r):
+                    return 0 <= r < len(R) and x < len(W) and plain(x) and (S_[x] == RS[r] or _same_cached(W[x], R[r]))
                 for q in at3[tuple(S_[k:k + 3])]:
-                    L = 0
-                    while k + L < len(W) and q + L < len(R) and plain(k + L) and \
-                            (S_[k + L] == RS[q + L] or _same_cached(W[k + L], R[q + L])):
-                        L += 1
-                        # (a sentence's end in the Rosh ends it)
-                        if str(p[src[k + L - 1]][0]).endswith((".", ":")) and (k + L >= len(W) or src[k + L] != src[k + L - 1]):
+                    # (the Rif's words in order, a word changed, added or left out on either side
+                    # where two words after it go on together, twice at most: "דסתם מעוברת
+                    # [למניקה] קיימא [-וחיישינן] דלמא מיעברא ומיעכר [חלבה] וקטלה ליה")
+                    L, r, got, skips = 0, q, 0, 0
+                    while k + L < len(W) and plain(k + L):
+                        if eq(k + L, r):
+                            L, r, got = L + 1, r + 1, got + 1
+                        elif skips < 2 and got >= 3 and eq(k + L + 1, r + 1) and eq(k + L + 2, r + 2):
+                            L, r, skips = L + 1, r + 1, skips + 1          # (a word changed)
+                        elif skips < 2 and got >= 3 and eq(k + L, r + 1) and eq(k + L + 1, r + 2):
+                            r, skips = r + 1, skips + 1                    # (a word of the Rif's left out)
+                        elif skips < 2 and got >= 3 and eq(k + L + 1, r) and eq(k + L + 2, r + 1):
+                            L, skips = L + 1, skips + 1                    # (a word of the Rosh's added)
+                        else:
                             break
-                    best = max(best, L)
-                # (printed words, an abbreviation one)
-                n = len({src[x] for x in range(k, k + best)})
+                        # (a sentence's end in the Rosh ends it)
+                        if L and str(p[src[k + L - 1]][0]).endswith((".", ":")) and (k + L >= len(W) or src[k + L] != src[k + L - 1]):
+                            break
+                    if got > hits or (got == hits and L > best):
+                        best, hits = L, got
+                # (printed words, an abbreviation one; the words that are the Rif's, not the
+                # changed ones, counted for the length)
+                n = len({src[x] for x in range(k, k + best)}) - (best - hits)
                 # (at a sentence's start four are enough: "ייבום. אמר רב אין כופין")
                 lst = least
                 if k == 0 or str(p[src[k - 1]][0]).rstrip().endswith((".", ":")) or p[src[k - 1]][1] == "label":
                     lst = least - 1
                 # (a line already bold before is brought again: the rule of a quotation brought
                 # again, plain)
-                if best >= lst and n >= lst - 1:
+                if hits >= lst and n >= lst - 1:
                     gs = [tuple(S_[x:x + 3]) for x in range(k, k + best - 2)
                           if any(p[src[y]][1] is False for y in range(x, x + 3))]
                     before = bold_before(k)
@@ -1878,10 +1895,10 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                     if gs and not named and sum(g in before for g in gs) >= 0.5 * len(gs):
                         k += best
                         continue
-                if best >= lst and n >= lst - 1 and not any(p[src[y]][1] is False for y in range(k, k + best)):
+                if hits >= lst and n >= lst - 1 and not any(p[src[y]][1] is False for y in range(k, k + best)):
                     k += best
                     continue
-                if best >= lst and n >= lst - 1:
+                if hits >= lst and n >= lst - 1:
                     for x in sorted({src[y] for y in range(k, k + best)}):
                         if p[x][1] is False:
                             p[x][1] = True
