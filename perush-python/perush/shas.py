@@ -5141,6 +5141,12 @@ def fix_typos(m, rosh, rif, comm, path=TYPOS):
             k = 0
             while k < len(toks):
                 w = toks[k][0]
+                # (a bare number, "דקי"ל. 8 דאין למדין": the mark of a note of the digital
+                # edition left in the text without its note; nothing of the text)
+                if isinstance(w, str) and re.fullmatch(r"\d+", w) and toks[k][1] in (True, False):
+                    del toks[k]
+                    n += 1
+                    continue
                 mm = glued.match(w) if isinstance(w, str) else None
                 if mm and toks[k][1] in (True, False):
                     toks[k:k + 1] = [[mm.group(1)] + list(toks[k][1:]), [mm.group(2)] + list(toks[k][1:])]
