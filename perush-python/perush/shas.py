@@ -1833,8 +1833,10 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
             S_ = [stem2(w) for w in W]
 
             def plain(k):
+                # (a word of the text, plain or bold already: the Rif's wording is found across
+                # what is bold, and the plain words in it made bold, "*אמר *רב [אין כופין]")
                 t = p[src[k]]
-                return t[1] is False and not any(c in str(t[0]) for c in "()[]")
+                return t[1] in (False, True) and not any(c in str(t[0]) for c in "()[]")
 
             def bold_before(k):
                 # (the bold lines of this siman before k, and of the two before it)
@@ -1844,7 +1846,7 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                         out.add(tuple(S_[x:x + 3]))
                 return out
             k = 0
-            while k < len(W) - (least - 1):
+            while k < len(W) - (least - 2):
                 if not all(plain(x) for x in range(k, k + 3)) or tuple(S_[k:k + 3]) not in at3:
                     k += 1
                     continue
@@ -1860,15 +1862,26 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                     best = max(best, L)
                 # (printed words, an abbreviation one)
                 n = len({src[x] for x in range(k, k + best)})
+                # (at a sentence's start four are enough: "ייבום. אמר רב אין כופין")
+                lst = least
+                if k == 0 or str(p[src[k - 1]][0]).rstrip().endswith((".", ":")) or p[src[k - 1]][1] == "label":
+                    lst = least - 1
                 # (a line already bold before is brought again: the rule of a quotation brought
                 # again, plain)
-                if best >= least and n >= least - 1:
-                    gs = [tuple(S_[x:x + 3]) for x in range(k, k + best - 2)]
+                if best >= lst and n >= lst - 1:
+                    gs = [tuple(S_[x:x + 3]) for x in range(k, k + best - 2)
+                          if any(p[src[y]][1] is False for y in range(x, x + 3))]
                     before = bold_before(k)
-                    if gs and sum(g in before for g in gs) >= 0.5 * len(gs):
+                    # (not one the Rosh brings by the Rif's name: "על רב אלפס ז"ל שכתב צרת
+                    # סוטה אסורה...", a quotation of the Rif)
+                    named = any(rif_marker(str(p[x][0])) for x in range(max(0, src[k] - 4), src[k]))
+                    if gs and not named and sum(g in before for g in gs) >= 0.5 * len(gs):
                         k += best
                         continue
-                if best >= least and n >= least - 1:
+                if best >= lst and n >= lst - 1 and not any(p[src[y]][1] is False for y in range(k, k + best)):
+                    k += best
+                    continue
+                if best >= lst and n >= lst - 1:
                     for x in sorted({src[y] for y in range(k, k + best)}):
                         if p[x][1] is False:
                             p[x][1] = True
@@ -2067,7 +2080,7 @@ def _extend_edges_once(rosh, rif, al, most, log):
 
 CONTRACTED = [{norm(w) for w in g} for g in (("איזהו", "איזוהי", "איזוהי", "איזוהיא", "אזוהי", "איזהוא"),
                                               ("היכי", "היכא"), ("אהייא", "אהיא"))]
-CONTRACTED[0] |= {"אזהוא", "איזהוא", "אזוהיא", "איזוהיא"}
+CONTRACTED[0] |= {norm(w) for w in ("אזהוא", "איזהוא", "אזוהיא", "איזוהיא", "איזההוא", "אזההוא", "אזהוהיא")}
 
 NEGATIONS = {norm(w) for w in "לא ולא דלא שלא אין ואין דאין שאין אינו אינה אינן לית ולית ליכא לאו ולאו בלא".split()}
 
