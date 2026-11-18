@@ -4719,6 +4719,7 @@ def perakim_of(masechet):
 
 
 GEM_GRAMS = set()     # (the Gemara's three-word lines of the masechet being prepared)
+QUOTE_PLAIN = False   # (a quotation after "דכתיב (...)" plain: no longer, as the user decided)
 RESUME = {norm(w) for w in ("דאע\"ג", "ואע\"ג", "אע\"ג", "אבל", "הלכך", "הילכך", "ולהכי", "כלומר", "דהא", "שהרי",
                             "ויש", "ומשמע", "אלמא", "ש\"מ", "דכיון", "וכיון", "ולפיכך", "לפיכך", "ואם", "ואי")}
 CITES = {norm(p + w) for w in ("כתיב", "שנאמר", "נאמר", "תנן", "תניא", "תנא", "תנינא") for p in ("", "ו", "ד", "כד", "וכד", "דה")}
@@ -4753,7 +4754,10 @@ def rashi_after_ref(comm):
                     break
                 if str(toks[z][0]).rstrip().endswith((".", ":")) or toks[z][1] not in (False, "src"):
                     break
-            if a > 0 and toks[a - 1][1] == "src" and (cites or not goes_on):
+            # (a quotation Rashi brings is bold with his words, verse, Mishna or baraita, as
+            # the user decided: "if it is brought in Rashi, bold, though a quotation"; the
+            # stretch is bold only where it matched Rashi's words)
+            if QUOTE_PLAIN and a > 0 and toks[a - 1][1] == "src" and (cites or not goes_on):
                 # (the verse or the Mishna only, by its words in the Gemara: "ערות אשה ובתה לא
                 # תגלה את בת בנה ואת בת בתה", and Rashi's own words after it, "ויש בכלל זה
                 # חמותו...", stay bold)
