@@ -832,6 +832,7 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
         return any(tuple(seq[j:j + 3]) in gem for j in range(max(0, k - 2), k + 1))
 
     sseq = [stem(x) for x in seq]
+    s2seq = [stem2(x) for x in seq]
     for e in entries:
         r, rsrc = e["words"], e["src"]
         # as in the Rosh: words match without a one-letter prefix and a final ה or א, and
@@ -839,6 +840,13 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
         at = {}
         for p, w in enumerate(r):
             at.setdefault(stem(w), []).append(p)
+        # (and without two letters before it: "הכהנת", Rashi's "כהנת")
+        at2 = {}
+        for p, w in enumerate(r):
+            at2.setdefault(stem2(w), []).append(p)
+
+        def places(x):
+            return sorted(set(at.get(sseq[x], ())) | set(at2.get(s2seq[x], ())))
         rtext = e["text"]
 
         def same_sense(ci, i2, cp, p2):
@@ -851,12 +859,12 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
         i = dh_end
         while i < len(seq):
             best = []
-            for p0 in at.get(sseq[i], ()):
+            for p0 in places(i):
                 chain, ci, cp = [(i, p0)], i, p0
                 while True:
                     nxt = None
                     for i2 in range(ci + 1, min(len(seq), ci + gap + 1)):
-                        ps = [p for p in at.get(sseq[i2], ()) if cp < p <= cp + gap + 1 and same_sense(ci, i2, cp, p)]
+                        ps = [p for p in places(i2) if cp < p <= cp + gap + 1 and same_sense(ci, i2, cp, p)]
                         if ps:
                             nxt = (i2, ps[0])
                             break
@@ -4736,7 +4744,16 @@ def rashi_after_ref(comm):
             # "ואמרינן לקמן בהבא על יבמתו (נ:) דבאחי אביו", a reference never stops the bold)
             # (but a verse or a Mishna after "דכתיב (...)", "כדתנן בערכין (...)" is that one's)
             cites = a > 1 and any(norm(toks[z][0]) in CITES for z in range(max(0, a - 4), a - 1))
-            if a > 0 and toks[a - 1][1] == "src" and (cites or not (a > 1 and toks[a - 2][1] == "rashi")):
+            # (Rashi's before it: just before the reference, or a few words before it across
+            # the perek's name, "מבני יעקב [בפ' שני] (לקמן יז:) מה להלן", in one sentence)
+            goes_on = False
+            for z in range(a - 2, max(-1, a - 7), -1):
+                if toks[z][1] == "rashi":
+                    goes_on = True
+                    break
+                if str(toks[z][0]).rstrip().endswith((".", ":")) or toks[z][1] not in (False, "src"):
+                    break
+            if a > 0 and toks[a - 1][1] == "src" and (cites or not goes_on):
                 # (the verse or the Mishna only, by its words in the Gemara: "ערות אשה ובתה לא
                 # תגלה את בת בנה ואת בת בתה", and Rashi's own words after it, "ויש בכלל זה
                 # חמותו...", stay bold)
