@@ -880,7 +880,8 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
             i0, i1 = best[0][0], best[-1][0]
             dense = len(best) / (i1 - i0 + 1) >= 0.6
             # words of the two texts (an abbreviation is one), leaving out the Gemara's
-            own = [(i, p) for i, p in best if not gemara_word(i)]
+            # (the Gemara's words count too where Rashi brings them, as the user decided)
+            own = [(i, p) for i, p in best if GEMARA_IN_RASHI or not gemara_word(i)]
             n = min(len({src[i] for i, _ in own}), len({rsrc[p] for _, p in own}))
             # two of them at least not among the commentary's commonest words (לא, אבל, כל ...)
             if len({src[i] for i, _ in own if sseq[i] not in weak}) < 2:
@@ -4719,6 +4720,7 @@ def perakim_of(masechet):
 
 
 GEM_GRAMS = set()     # (the Gemara's three-word lines of the masechet being prepared)
+GEMARA_IN_RASHI = True   # (the Gemara's words Rashi brings bold with his, as the user decided)
 QUOTE_PLAIN = False   # (a quotation after "דכתיב (...)" plain: no longer, as the user decided)
 RESUME = {norm(w) for w in ("דאע\"ג", "ואע\"ג", "אע\"ג", "אבל", "הלכך", "הילכך", "ולהכי", "כלומר", "דהא", "שהרי",
                             "ויש", "ומשמע", "אלמא", "ש\"מ", "דכיון", "וכיון", "ולפיכך", "לפיכך", "ואם", "ואי")}
@@ -5435,7 +5437,7 @@ def load_masechet(root, m, found=None):
                         continue
                     W = lseq(rif_words_only(toks[a:k]))[0]
                     gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
-                    if len(gs) >= 2 and sum(x in gem for x in gs) >= 0.75 * len(gs):
+                    if not GEMARA_IN_RASHI and len(gs) >= 2 and sum(x in gem for x in gs) >= 0.75 * len(gs):
                         for q in range(a, k):
                             toks[q] = [toks[q][0], False] + list(toks[q][2:])
                             gq += 1
