@@ -1015,6 +1015,54 @@ def rashi_extend(e, entries, most=4):
                             break
 
 
+def rashi_gaps(e, entries, gap=3):
+    """A few words of the commentator's between two stretches of Rashi's wording that go on
+    one after the other in Rashi ("...לא תתן לבנו [קאי וה"ק] כי יסיר בעל בתך..." for
+    Rashi's "...לא תתן לבנו כי יסיר בעל בתך"): bold, so that what is bold reads as one
+    text, as the user asked. Within a sentence; not over a reference. In place."""
+    toks = e["tokens"]
+    start = e.get("dh_len", 0)
+    seqs = [[stem2(x) for x in r["words"]] for r in entries]
+    k, runs = start, []
+    while k < len(toks):
+        if toks[k][1] == "rashi":
+            a = k
+            while k < len(toks) and toks[k][1] == "rashi":
+                k += 1
+            runs.append((a, k))
+        else:
+            k += 1
+    for (a1, b1), (a2, b2) in zip(runs, runs[1:]):
+        between = range(b1, a2)
+        if not 1 <= len(between) <= gap or b1 - a1 < 2 or b2 - a2 < 2:
+            continue
+        if any(toks[x][1] is not False or any(c in str(toks[x][0]) for c in "()[]") for x in between):
+            continue
+        if any(str(toks[x][0]).rstrip().endswith((".", ":")) for x in list(between) + [b1 - 1]):
+            continue
+        left = [stem2(w) for w in lseq(toks[max(a1, b1 - 2):b1])[0]]
+        right = [stem2(w) for w in lseq(toks[a2:min(b2, a2 + 2)])[0]]
+        if not left or not right:
+            continue
+        ok = False
+        for S in seqs:
+            for y in range(len(S) - len(left) + 1):
+                if S[y:y + len(left)] == left:
+                    z = y + len(left)
+                    # (the right stretch within a few words after it in Rashi)
+                    for d in range(0, gap + 1):
+                        if S[z + d:z + d + len(right)] == right:
+                            ok = True
+                            break
+                if ok:
+                    break
+            if ok:
+                break
+        if ok:
+            for x in between:
+                toks[x] = [toks[x][0], "rashi"] + list(toks[x][2:])
+
+
 def mark_rashi_through_refs(e, near, gem, weak):
     """Rashi's wording in a commentary entry (mark_rashi, rashi_edges, rashi_whole), with the
     references in round brackets left out while comparing: a reference never stops the bold
@@ -1034,6 +1082,7 @@ def mark_rashi_through_refs(e, near, gem, weak):
     rashi_edges(view, near)
     rashi_whole(view, near)
     rashi_extend(view, near)
+    rashi_gaps(view, near)
     for i, k in enumerate(keep):
         toks[k] = view["tokens"][i]
     e["rashi_whole"] = {keep[i] for i in view["rashi_whole"]}
@@ -1515,6 +1564,9 @@ def drop_requotes(rosh, rif, al, before=5, share=0.6, log=None):
             # "מתני'" or "גמ'": the quotation itself, not a line brought again)
             if q and src[q - 1][0][src[q - 1][1]][1] == "label":
                 plain = 0
+            # (nor one the Rosh brings by the Rif's name: "וכן כתב רב אלפס ז"ל והיכא...")
+            if any(rif_marker(src[x][0][src[x][1]][0]) for x in range(max(0, q - 4), q)):
+                plain = 0
             grams = [tuple(W[x:x + 3]) for x in range(q, e - 2)]
             # (a line brought again, short, beside a quotation of the passage that has it
             # within it; not a quotation as long as the one before, which may be the real one)
@@ -1762,7 +1814,12 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
     brought again is judged after, by the rule of a quotation brought again. Not across a
     reference, a mark or a sentence's end. -> words made bold."""
     count = 0
+    prev, perek = [], None          # (the bold three-word lines of the two simanim before)
     for i, s in enumerate(rosh):
+        if s["perek"] != perek:
+            prev, perek = [], s["perek"]
+        seen = set().union(*prev) if prev else set()
+        mine = set()
         rt = [t for p in subject_passages(rif, al, i, len(rosh), 6) for t in rif_words_only(p["tokens"])]
         R, _ = lseq(rt)
         RS = [stem2(x) for x in R]
@@ -1776,6 +1833,14 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
             def plain(k):
                 t = p[src[k]]
                 return t[1] is False and not any(c in str(t[0]) for c in "()[]")
+
+            def bold_before(k):
+                # (the bold lines of this siman before k, and of the two before it)
+                out = set(seen) | mine
+                for x in range(min(k, len(W)) - 2):
+                    if all(p[src[y]][1] is True for y in range(x, x + 3)):
+                        out.add(tuple(S_[x:x + 3]))
+                return out
             k = 0
             while k < len(W) - (least - 1):
                 if not all(plain(x) for x in range(k, k + 3)) or tuple(S_[k:k + 3]) not in at3:
@@ -1793,6 +1858,14 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                     best = max(best, L)
                 # (printed words, an abbreviation one)
                 n = len({src[x] for x in range(k, k + best)})
+                # (a line already bold before is brought again: the rule of a quotation brought
+                # again, plain)
+                if best >= least and n >= least - 1:
+                    gs = [tuple(S_[x:x + 3]) for x in range(k, k + best - 2)]
+                    before = bold_before(k)
+                    if gs and sum(g in before for g in gs) >= 0.5 * len(gs):
+                        k += best
+                        continue
                 if best >= least and n >= least - 1:
                     for x in sorted({src[y] for y in range(k, k + best)}):
                         if p[x][1] is False:
@@ -1803,6 +1876,10 @@ def all_rif_wording(rosh, rif, al, least=5, log=None):
                     k += best
                 else:
                     k += 1
+            for x in range(len(W) - 2):
+                if all(p[src[y]][1] is True for y in range(x, x + 3)):
+                    mine.add(tuple(S_[x:x + 3]))
+        prev = (prev + [mine])[-2:]
     return count
 
 
