@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "perush-python")
 sys.path.insert(0, ROOT)
@@ -57,6 +58,18 @@ def verse_text(s):
     return clean_torah(s)
 
 
+# the commentaries are set without points, as in the printed Mikraot Gedolot (the Rashi font has
+# none of the points and marks some editions give them), and with the marks it does have
+MARKS = re.compile(r"[\u0591-\u05c7\u034f\u200b-\u200f\u202a-\u202e]")
+
+
+def plain_comm(t):
+    t = unicodedata.normalize("NFKD", t)          # (letters with a point as one character: apart)
+    t = t.replace("\u05be", " ").replace("\u05c3", ":").replace("\u05f4", '"').replace("\u05f3", "'")
+    t = t.replace("\u2014", "-").replace("\u2013", "-").replace("\u2026", "...")
+    return re.sub(r"  +", " ", MARKS.sub("", t))
+
+
 def load(sef, name):
     path = os.path.join(sef, name.replace(" ", "_") + ".json")
     return json.load(open(path, encoding="utf-8"))["text"] if os.path.exists(path) else None
@@ -69,7 +82,7 @@ def comm_text(text, verses):
     for n, (c, v) in enumerate(verses, 1):
         if c < len(text) and v < len(text[c]):
             for p in text[c][v] or []:
-                t = clean(no_notes(p), keep_bold=True)
+                t = plain_comm(clean(no_notes(p), keep_bold=True))
                 if t:
                     out.append(f"@{n} {t}")
     return "\n".join(out)
@@ -77,6 +90,12 @@ def comm_text(text, verses):
 
 def nach_book(sef, en, he):
     text = load(sef, en)
+    # a verse the Masorah edition leaves out (Joshua 21:36-37): from the Ta'amei Hamikra edition
+    other = load(sef, en + "__Tanach_with_Taamei_Hamikra")
+    for c, chapter in enumerate(text):
+        for v, s in enumerate(chapter):
+            if len(re.sub(r"<[^>]+>|[^\u05d0-\u05ea]", "", s)) < 2 and other and c < len(other) and v < len(other[c]):
+                chapter[v] = other[c][v]
     main, verses = [], []
     for c, chapter in enumerate(text):
         main.append(f"# פרק {heb(c + 1)}")
@@ -106,7 +125,8 @@ def torah_book(he):
     for c in src["comms"]:
         kind = {"אונקלוס": "onkelos", "רש\"י": "rashi"}.get(c["name"])
         if kind:
-            p["comms"].append(dict(STYLES[kind], text=c["text"]))
+            text = c["text"] if kind == "onkelos" else "\n".join(plain_comm(l) for l in c["text"].split("\n"))
+            p["comms"].append(dict(STYLES[kind], text=text))
     return p
 
 
