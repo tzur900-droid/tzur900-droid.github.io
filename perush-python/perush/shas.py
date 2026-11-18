@@ -947,6 +947,74 @@ def ref_groups(toks, start=0):
     return out
 
 
+def rashi_extend(e, entries, most=4):
+    """Each stretch of Rashi's wording on to where Rashi's sentence goes (and back to where it
+    begins), word by word while the words go on together with his: "*חולץ *לשתיהן. [דלא
+    ידע] *אי *זו *היא *יבמתו" for Rashi's "דלא ידע אי זו היא יבמתו". Up to most words each
+    way, not into the dibbur, a word in brackets or a stretch of another kind. In place."""
+    toks = e["tokens"]
+    start = e.get("dh_len", 0)
+    seqs = []
+    for r in entries:
+        W = list(r["words"])
+        seqs.append(([stem2(x) for x in W], W, [r["text"][k] for k in r["src"]]))
+
+    def same(k, S, W, T, y):
+        w = toks[k][0]
+        if not isinstance(w, str) or any(c in w for c in "()[]") or toks[k][1] is not False:
+            return False
+        lw = lseq([[w, False]])[0]
+        if len(lw) != 1:
+            return False
+        return stem2(lw[0]) == S[y] or same_word(lw[0], W[y]) or same_word(w, T[y])
+    changed = True
+    rounds = 0
+    while changed and rounds < 3:
+        changed, rounds = False, rounds + 1
+        k = start
+        runs = []
+        while k < len(toks):
+            if toks[k][1] == "rashi":
+                a = k
+                while k < len(toks) and toks[k][1] == "rashi":
+                    k += 1
+                runs.append((a, k))
+            else:
+                k += 1
+        for a, b in runs:
+            if b - a < 3:
+                continue
+            Wr, srcr = lseq(toks[a:b])
+            if len(Wr) < 3 or len(set(srcr)) != len(srcr):
+                continue
+            Sr = [stem2(x) for x in Wr]
+            for S, W, T in seqs:
+                # (the end of the stretch in this comment of Rashi's)
+                for y in range(len(S) - 2):
+                    if S[y:y + 3] == Sr[-3:]:
+                        x, z, got = b, y + 3, []
+                        while x < len(toks) and z < len(S) and len(got) < most and same(x, S, W, T, z):
+                            got.append(x)
+                            x, z = x + 1, z + 1
+                        for g in got:
+                            toks[g] = [toks[g][0], "rashi"] + list(toks[g][2:])
+                            changed = True
+                        if got:
+                            break
+                # (and its start)
+                for y in range(len(S) - 2):
+                    if S[y:y + 3] == Sr[:3]:
+                        x, z, got = a - 1, y - 1, []
+                        while x >= start and z >= 0 and len(got) < most and same(x, S, W, T, z):
+                            got.append(x)
+                            x, z = x - 1, z - 1
+                        for g in got:
+                            toks[g] = [toks[g][0], "rashi"] + list(toks[g][2:])
+                            changed = True
+                        if got:
+                            break
+
+
 def mark_rashi_through_refs(e, near, gem, weak):
     """Rashi's wording in a commentary entry (mark_rashi, rashi_edges, rashi_whole), with the
     references in round brackets left out while comparing: a reference never stops the bold
@@ -965,6 +1033,7 @@ def mark_rashi_through_refs(e, near, gem, weak):
     n = mark_rashi(view["tokens"], near, gem, trace=why, weak=weak)
     rashi_edges(view, near)
     rashi_whole(view, near)
+    rashi_extend(view, near)
     for i, k in enumerate(keep):
         toks[k] = view["tokens"][i]
     e["rashi_whole"] = {keep[i] for i in view["rashi_whole"]}
@@ -1683,6 +1752,58 @@ def rif_words_only(toks):
         out.append(t)
         k += 1
     return out
+
+
+def all_rif_wording(rosh, rif, al, least=5, log=None):
+    """All the Rif's wording in the Rosh bold, as the user put it (the rules are only there
+    to keep it from mistakes): a plain stretch of least words or more that the Rif's
+    passages on the subject have together, word for word (a little changed is still his),
+    in the Rosh's discussion too ("אלמה תניא לא ישא אדם מעוברת חבירו ומינקת חבירו"). A line
+    brought again is judged after, by the rule of a quotation brought again. Not across a
+    reference, a mark or a sentence's end. -> words made bold."""
+    count = 0
+    for i, s in enumerate(rosh):
+        rt = [t for p in subject_passages(rif, al, i, len(rosh), 6) for t in rif_words_only(p["tokens"])]
+        R, _ = lseq(rt)
+        RS = [stem2(x) for x in R]
+        at3 = {}
+        for q in range(len(RS) - 2):
+            at3.setdefault(tuple(RS[q:q + 3]), []).append(q)
+        for p in s["paras"]:
+            W, src = lseq(p)
+            S_ = [stem2(w) for w in W]
+
+            def plain(k):
+                t = p[src[k]]
+                return t[1] is False and not any(c in str(t[0]) for c in "()[]")
+            k = 0
+            while k < len(W) - (least - 1):
+                if not all(plain(x) for x in range(k, k + 3)) or tuple(S_[k:k + 3]) not in at3:
+                    k += 1
+                    continue
+                best = 0
+                for q in at3[tuple(S_[k:k + 3])]:
+                    L = 0
+                    while k + L < len(W) and q + L < len(R) and plain(k + L) and \
+                            (S_[k + L] == RS[q + L] or _same_cached(W[k + L], R[q + L])):
+                        L += 1
+                        # (a sentence's end in the Rosh ends it)
+                        if str(p[src[k + L - 1]][0]).endswith((".", ":")) and (k + L >= len(W) or src[k + L] != src[k + L - 1]):
+                            break
+                    best = max(best, L)
+                # (printed words, an abbreviation one)
+                n = len({src[x] for x in range(k, k + best)})
+                if best >= least and n >= least - 1:
+                    for x in sorted({src[y] for y in range(k, k + best)}):
+                        if p[x][1] is False:
+                            p[x][1] = True
+                            count += 1
+                    if log is not None:
+                        log.append((s["perek"], s["num"], " ".join(W[k:k + best])))
+                    k += best
+                else:
+                    k += 1
+    return count
 
 
 def extend_edges(rosh, rif, al, most=8, log=None):
@@ -5343,6 +5464,7 @@ def prepare_masechet(root, m, fix=None):
     if rif and rosh:
         report.append(f"ברא\"ש {close_small_holes(rosh, rif, al)} מילים בחורים קטנים בציטוטים")
         report.append(f"ברא\"ש {follow_quote(rosh, rif, al)} מילים בציטוט בשינוי לשון קל")
+        report.append(f"ברא\"ש {all_rif_wording(rosh, rif, al)} מילים בלשון הרי\"ף שנמצאו בדיון הרא\"ש (מודגשות)")
         report.append(f"ברא\"ש {extend_edges(rosh, rif, al)} מילים בקצות ציטוטים")
         report.append(f"ברא\"ש {bridge_one(rosh)} מילים בודדות בתוך ציטוטים")
         report.append(f"ברא\"ש {quoting_words(rosh, rif, al)} מילות קישור של הרא\"ש בתוך ציטוט (לא מודגשות)")
