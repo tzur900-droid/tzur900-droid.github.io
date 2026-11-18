@@ -4711,6 +4711,8 @@ def perakim_of(masechet):
 
 
 GEM_GRAMS = set()     # (the Gemara's three-word lines of the masechet being prepared)
+RESUME = {norm(w) for w in ("דאע\"ג", "ואע\"ג", "אע\"ג", "אבל", "הלכך", "הילכך", "ולהכי", "כלומר", "דהא", "שהרי",
+                            "ויש", "ומשמע", "אלמא", "ש\"מ", "דכיון", "וכיון", "ולפיכך", "לפיכך", "ואם", "ואי")}
 CITES = {norm(p + w) for w in ("כתיב", "שנאמר", "נאמר", "תנן", "תניא", "תנא", "תנינא") for p in ("", "ו", "ד", "כד", "וכד", "דה")}
 
 
@@ -4746,6 +4748,20 @@ def rashi_after_ref(comm):
                         x += 1
                     if x >= 3 and x < len(Wv) and len(Wv) - x >= 4:
                         end = a + sv[x]
+                    elif x < 3:
+                        # (not found in the Gemara as it is written: up to וגו' or כו', or a
+                        # word where the explanation goes on, "דאע"ג דיהיב לה גט...", ten words
+                        # at most)
+                        z = a
+                        while z < k and z - a < 10:
+                            w0 = norm(str(toks[z][0])).rstrip(".,:;")
+                            if z > a and w0 in RESUME:
+                                break
+                            z += 1
+                            if w0 in (norm("וגו'"), norm("כו'"), norm("וכו'")):
+                                break
+                        if k - z >= 4:
+                            end = z
                 for q in range(a, end):
                     toks[q] = [toks[q][0], False] + list(toks[q][2:])
                     count += 1
