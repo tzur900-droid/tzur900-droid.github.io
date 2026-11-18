@@ -5187,8 +5187,14 @@ def load_masechet(root, m, found=None):
             label = dict(gamud)
             for j, p in enumerate(rif):
                 p["amud"], p["amud_n"] = label.get(amudim[j]), amudim[j]
-            g = lseq(gtoks, gentile=False)[0]
+            g, gsrc_ = lseq(gtoks, gentile=False)
             gem = {tuple(g[k:k + 3]) for k in range(len(g) - 2)}
+            # (each word of the Gemara's amud, and a two-word index, to find an entry's dibbur)
+            GSq = [stem2(w) for w in g]
+            gpos_amud = [gamud[gsrc_[k]][0] for k in range(len(g))]
+            g_bi = {}
+            for k in range(len(GSq) - 1):
+                g_bi.setdefault((GSq[k], GSq[k + 1]), []).append(k)
             # the commonest words of the commentary: a match of them alone is no quotation
             freq = {}
             for e in comm:
@@ -5263,8 +5269,34 @@ def load_masechet(root, m, found=None):
                 b = aligned[e["para"]]
                 near = [x for x in rashi if (a is not None and a - 2 <= x["amud"] <= a + 2)
                         or (b is not None and b - 2 <= x["amud"] <= b + 2)]
+
                 if SUBJECT:
                     near = [x for x in near if on_subject(x, e["para"])]
+                # (and, on the subject by its place, Rashi of the amud where the entry's own dibbur is in the Gemara, and
+                # the Rashi whose dibbur is the entry's: the first entry of the masechet, on
+                # ב., where its passage is reckoned on ד.)
+                if a is not None:
+                    dhw = [stem2(w) for w in dh_words(e)]
+                    if len(dhw) >= 2:
+                        places = set()
+                        for o in range(0, max(1, len(dhw) - 1)):
+                            want = dhw[o:o + 4]
+                            if len(want) < 2:
+                                break
+                            places = {gpos_amud[q] for q in g_bi.get(tuple(want[:2]), ())
+                                      if abs(gpos_amud[q] - a) <= 6 and GSq[q:q + len(want)] == want}
+                            if places:
+                                break
+                        have_ids = {x["id"] for x in near}
+                        for x in rashi:
+                            if x["id"] in have_ids:
+                                continue
+                            xd = [stem2(w) for w in x["dh"]]
+                            if any(abs(x["amud"] - c) <= 1 for c in places) or \
+                                    (len(xd) >= 2 and abs(x["amud"] - a) <= 6 and
+                                     any(dhw[o:o + len(xd)] == xd for o in range(len(dhw) - len(xd) + 1))):
+                                near.append(x)
+                                have_ids.add(x["id"])
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
                 e["near"] = near
                 e["rashi_seqs"] = [[stem2(w) for w in x["dh"]] + [None] + [stem2(w) for w in x["words"]] for x in near]
