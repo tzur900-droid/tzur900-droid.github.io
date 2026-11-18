@@ -2641,7 +2641,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                             if any(q2 + 1 < len(F) and _same_cached(gl[q], F[q2]) and _same_cached(gl[q + 1], F[q2 + 1])
                                    for q2 in firsts.get(gl[q][:1], ())):
                                 pairs += 1
-                        if not own and len(gl) >= 4 and pairs >= 0.7 * (len(gl) - 1):
+                        if not own and len(gl) >= 4 and pairs >= 0.4 * (len(gl) - 1):
                             setv(b1, a2, True)
                             if log is not None:
                                 log.append(("gap", s["num"], " ".join(W[b1:a2])))
@@ -2739,6 +2739,10 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                 if a - left <= alone or right - b <= alone:
                     continue
                 if tuple(S_[a:b]) in sentences:
+                    continue
+                # (the quotation right after מתני' or גמ', "גמ' טעמא דהשיאה וגירשה השיאה": the
+                # Gemara's opening, not torn from its context)
+                if a > 0 and p[src[a] - 1][1] == "label" if src[a] > 0 else False:
                     continue
                 # (the quotation explained by the Rosh and going on after: "איתמר ביאת קטן
                 # פי' ... וחליצת הגדול")
