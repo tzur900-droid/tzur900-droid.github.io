@@ -2463,6 +2463,7 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
             F += seq
             FR += [tk[k][0] for k in at]
         FS = [stem2(x) for x in F]
+        F2 = {tuple(FS[q:q + 2]) for q in range(len(FS) - 1)}
         at3 = {}
         for q in range(len(FS) - 2):
             at3.setdefault(tuple(FS[q:q + 3]), []).append(q)
@@ -2601,7 +2602,20 @@ def read_as_text(rosh, rif, al, gap=6, short=5, alone=8, log=None):
                 # (a reference in it, "(נדרים עח.)", is not counted and stays as it is)
                 between = [x for x in range(b1, a2) if p[src[x]][1] is False
                            and (variant(p[src[x]][0]) or not any(c in p[src[x]][0] for c in "()[]"))]
-                if not between or len(between) > gap:
+                if not between:
+                    continue
+                if len(between) > gap:
+                    # (a longer one, up to 15 words, inside the sentence, its words the Rif's
+                    # though in another order: "...דאיהו [פלוני וכדאמרי' בהאי גברא דטבע בדגלת
+                    # ... דשני ת"ח] וה"ה לעד אחד במלחמה", the Rif's two clauses one after the
+                    # other)
+                    gw = [stem2(W[x]) for x in between]
+                    if len(between) <= 15 and not any(str(p[src[x]][0]).rstrip().endswith((".", ":")) for x in range(b1 - 1, a2)):
+                        pairs = [tuple(gw[q:q + 2]) for q in range(len(gw) - 1)]
+                        if pairs and sum(x in F2 for x in pairs) >= 0.7 * len(pairs):
+                            setv(b1, a2, True)
+                            if log is not None:
+                                log.append(("gap", s["num"], " ".join(W[b1:a2])))
                     continue
                 around = [x for x in range(max(a1, b1 - 6), min(b2, a2 + 6))
                           if not any(c in p[src[x]][0] for c in "()[]")]
@@ -5031,6 +5045,18 @@ def fix_typos(m, rosh, rif, comm, path=TYPOS):
     n = 0
     seqs = {"rosh": [p for x in rosh for p in x["paras"]], "rif": [p["tokens"] for p in rif],
             "comm": [e["tokens"] for e in comm]}
+    # (a word cut short with ' glued to the next one, "וכדאמרי'בהאי": a space lost, two words)
+    glued = re.compile(r"^([א-ת\"]{2,}['׳])([א-ת]{2,}.*)$")
+    for part, lists in seqs.items():
+        for toks in lists:
+            k = 0
+            while k < len(toks):
+                w = toks[k][0]
+                mm = glued.match(w) if isinstance(w, str) else None
+                if mm and toks[k][1] in (True, False):
+                    toks[k:k + 1] = [[mm.group(1)] + list(toks[k][1:]), [mm.group(2)] + list(toks[k][1:])]
+                    n += 1
+                k += 1
     for part, table in fixes.items():
         for toks in seqs.get(part, []):
             for t in toks:
