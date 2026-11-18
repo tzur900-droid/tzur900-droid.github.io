@@ -91,7 +91,7 @@ def check(eng, pages):
             sev = "exception" if r.get("late_ok") else "error"
             add("comm_start", n, ", ".join(f"{name} על {where(eng, v)}" for name, v in late), sev)
         # a commentary (or the Onkelos column) that ends in the middle of the page ends on a full line
-        ends = [(s["c"], s["lines"]) for s in r.get("sections", [])] + [(c, s["col"]) for c, s in r.get("side", {}).items()] \
+        ends = [(s["c"], s["lines"]) for s in r.get("sections", [])] + [(s["c2"], s["lines2"]) for s in r.get("sections", []) if s.get("pair")] + [(c, s["col"]) for c, s in r.get("side", {}).items()] \
             + list(r.get("gm", {}).items())
         for c, lines in ends:
             if (len(lines) > 1 and lines[-1].last and lines[-1].align != "center" and sum(w.w for w in lines[-1].words) < lines[-1].width * 0.5
@@ -257,6 +257,8 @@ def check_bounds(eng, pg, n, add):
         return
     x1, _, x2 = pg.rules[0]
     for fr in pg.frames:
+        if getattr(fr, "margin", False):
+            continue          # a note in the margin (the parasha, the aliyah)
         for l in fr.lines:
             right = fr.x_right - l.right
             left = right - l.width

@@ -64,6 +64,7 @@ class Frame:
     x_right: float
     top: float
     src: object = None   # where the lines come from: ("main", items) or ("comm", c), for clicks on the page
+    margin: bool = False  # a note in the outer margin (the parasha, the aliyah), outside the text area
 
 
 @dataclass
@@ -243,6 +244,8 @@ class Engine:
         self.m = P["margin"] * PT_PER_MM
         # a book is bound on its inner side: extra margin there (the pages alternate)
         self.gutter = float(P.get("gutter") or 0) * PT_PER_MM if P.get("bookMode") else 0.0
+        # in a volume of several books: whether the book's first page of text is a right-hand page
+        self.parity = int(P.get("pageParity") or 0) % 2
         self.W = self.page_w - 2 * self.m - self.gutter
         self.body_h = self.page_h - 2 * self.m
         # the dedication at the foot of the first page
@@ -261,6 +264,18 @@ class Engine:
         self.min_text_h = P["minLines"] * self.main_lh - 1
 
         self.all_items, self.count = parse_main(P["main"])
+        if P.get("parashaInline"):
+            # the parashot run on without a page of their own: the name is marked in the margin
+            # by the parasha's first verse (marginMarks), and still heads the pages
+            items, mark = [], None
+            for it in self.all_items:
+                if it["type"] == "h" and not it["noComm"] and re.match(r"^פרש(ת|ה)\s", it["text"]):
+                    mark = it["text"]
+                    continue
+                if mark and it["type"] == "v":
+                    it["mark"], mark = mark, None
+                items.append(it)
+            self.all_items = items
         self.comms = P["comms"]
         self.parsed = {}
         for i, c in enumerate(self.comms):
@@ -282,6 +297,12 @@ class Engine:
         self.sides = [i for i, c in enumerate(self.comms) if c["place"] == "side" and not self.gm_mode]
         self.unders = [i for i, c in enumerate(self.comms) if c["place"] == "under"]
         self.bottoms = [i for i, c in enumerate(self.comms) if i not in self.sides + self.unders + self.gm]
+        # two commentaries "half" one after the other: side by side under the text (pair_take)
+        self.pair_of, self.pair_second = {}, set()
+        halves = [i for i in self.bottoms if self.comms[i]["place"] == "half"]
+        for a, b in zip(halves[::2], halves[1::2]):
+            self.pair_of[a] = b
+            self.pair_second.add(b)
         self.style = {i: Style(c["font"], float(c["size"])) for i, c in enumerate(self.comms)}
         self.dh_only = {i: dh_only(c) for i, c in enumerate(self.comms)}
         self.para_break = {i: para_break(c) for i, c in enumerate(self.comms)}
@@ -358,7 +379,7 @@ class Engine:
                 mt = 1 * PT_PER_MM if it["noComm"] else 0.0
                 specs.append(Spec(hw, st, st.size * self.lh_k, "center", mt, 0.6 * PT_PER_MM if it["noComm"] else 0.0, kind="h"))
                 continue
-            if it.get("aliyah") and frm == 0:
+            if it.get("aliyah") and frm == 0 and not P.get("marginMarks"):
                 # the aliyah, small and bold, inside the text before its first verse
                 ast = self.main.scaled(0.68, bold=True)
                 t = f"({it['aliyah']})"
@@ -520,7 +541,7 @@ class Engine:
         always the inner side: the book opens on a left-hand page, whose inner side is
         the right, and the pages alternate from there."""
         if self.P.get("bookMode"):
-            return "right" if len(self.pages) % 2 == 0 else "left"
+            return "right" if (len(self.pages) + self.parity) % 2 == 0 else "left"
         return "right" if self.comms[c]["side"] == "right" else "left"
 
     def side_width(self, c):
@@ -562,6 +583,48 @@ class Engine:
         rows = math.ceil(n_lines / self.comms[c]["cols"])
         return self.note_pad() + self.note_title_h(c) + rows * (nlh or self.note_lh[c])
 
+    def sec_rows(self, s):
+        """The rows a section of the page takes (a pair of commentaries side by side: its own)."""
+        return s["rows"] if s.get("pair") else math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"])
+
+    def sec_h(self, s, nlh=None):
+        return self.note_pad() + self.note_title_h(s["c"]) + self.sec_rows(s) * (nlh or s["nlh"])
+
+    def half_w(self):
+        return (self.W - self.gap) / 2
+
+    def pair_take(self, a, b, lst_a, lst_b, rows, tight=1.0):
+        """Two commentaries side by side under the text, each in half the width; when one of
+        them ends, the other goes on under both (the shape of an L). Returns (lines of a,
+        words of a taken, lines of b, words of b taken, rows)."""
+        if rows < 1:
+            return [], 0, [], 0, 0
+        half, W = self.half_w(), self.W
+        nlh = max(self.note_lh[a], self.note_lh[b])
+        wa = self.entry_words(a, lst_a) if lst_a else []
+        wb = self.entry_words(b, lst_b) if lst_b else []
+        right_a, right_b = (lambda y: (0.0, half)), (lambda y: (half + self.gap, half))
+        if not wa or not wb:
+            c, ws = (a, wa) if wa else (b, wb)
+            lines, n = self.take(ws, self.style[c], nlh, W, rows, tight, key=self.lst_key(c, lst_a or lst_b))
+            return (lines, n, [], 0, len(lines)) if wa else ([], 0, lines, n, len(lines))
+        na = len(self.broken(self.lst_key(a, lst_a), wa, self.style[a], nlh, half, tight))
+        nb = len(self.broken(self.lst_key(b, lst_b), wb, self.style[b], nlh, half, tight))
+        if min(na, nb) >= rows:
+            la, ta = self.take(wa, self.style[a], nlh, half, rows, tight, width_at=right_a)
+            lb, tb = self.take(wb, self.style[b], nlh, half, rows, tight, width_at=right_b)
+            return la, ta, lb, tb, max(len(la), len(lb))
+        split = min(na, nb) * nlh - EPS
+        if na <= nb:
+            la, ta = self.take(wa, self.style[a], nlh, half, na, tight, width_at=right_a)
+            lb, tb = self.take(wb, self.style[b], nlh, W, rows, tight,
+                               width_at=lambda y: right_b(y) if y < split else (0.0, W))
+        else:
+            lb, tb = self.take(wb, self.style[b], nlh, half, nb, tight, width_at=right_b)
+            la, ta = self.take(wa, self.style[a], nlh, W, rows, tight,
+                               width_at=lambda y: right_a(y) if y < split else (0.0, W))
+        return la, ta, lb, tb, max(len(la), len(lb))
+
     def _auto_widths(self):
         """Give an automatic-width translation column the share of the line at which the
         text and the translation come out the same height, so they run out together."""
@@ -602,7 +665,7 @@ class Engine:
         end set above it. comm_only: a page of the commentaries under the text only.
         The same page is tried many times while a page is chosen: it is laid out once."""
         key = (a, b, force, id(pre), comm_only, tight, tuple(sorted(self.ptrs.items())),
-               tuple(sorted(self.col_w.items())), len(self.pages) % 2, self.allow_band, self.text_tight)
+               tuple(sorted(self.col_w.items())), (len(self.pages) + self.parity) % 2, self.allow_band, self.text_tight)
         hit = self.memo.get(key)
         if hit is not None:
             return hit
@@ -788,11 +851,18 @@ class Engine:
             even_paragraphs(s["col"])
             even_paragraphs(s["band"])
         for s in r["sections"]:
+            if s.get("pair"):
+                # side by side: each column ends on a full line, keeping its rows (the L stays)
+                for c, lines in ((s["c"], s["lines"]), (s["c2"], s["lines2"])):
+                    if lines and not ends_here(c):
+                        flush_end(lines)
+                    even_paragraphs(lines)
+                continue
             if not ends_here(s["c"]):
                 saved = [(l, list(l.words), l.last, getattr(l, "force", False)) for l in s["lines"]]
                 h0 = s["h"]
                 if flush_end(s["lines"], fold=True):
-                    s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
+                    s["h"] = self.sec_h(s)
                     if s["h"] < h0 - EPS and not self.fills(r):
                         # one row less would leave room the page can't spread: as it was
                         s["lines"][:] = [l for l, _, _, _ in saved]
@@ -865,7 +935,7 @@ class Engine:
         W, gap = self.W, self.gap
         wm = W * float(self.P.get("gmMain") or 40) / 100
         ws = (W - wm - 2 * gap) / 2
-        inner_right = not self.P.get("bookMode") or len(self.pages) % 2 == 0
+        inner_right = not self.P.get("bookMode") or (len(self.pages) + self.parity) % 2 == 0
         return inner_right, wm, ws, (W - gap) / 2
 
     def gm_band(self):
@@ -1020,7 +1090,15 @@ class Engine:
             req = self.list_from(c, ptr, last_full)
             alll = self.list_from(c, ptr, max_v)
             req_h = 0.0
-            if req:
+            if c in self.pair_of:
+                d = self.pair_of[c]
+                req_d = self.list_from(d, self.ptrs[d], last_full)
+                if req or req_d:
+                    rows = self.pair_take(c, d, req, req_d, 10 ** 6)[4]
+                    req_h = self.note_pad() + self.note_title_h(c) + rows * max(self.note_lh[c], self.note_lh[d])
+            elif c in self.pair_second:
+                pass                 # (its room is counted with the one beside it)
+            elif req:
                 rw = self.entry_words(c, req)
                 req_h = self.section_h(c, len(self.broken(self.lst_key(c, req), rw, self.style[c], self.note_lh[c], self.note_col_w(c))))
             plans.append((c, ptr, req, alll, req_h))
@@ -1030,9 +1108,53 @@ class Engine:
         placed = []            # (c, ptr, words, alll, room before it, gap) of each one placed
         deferred = set()       # commentaries that begin on the next page: one before them fills this one
         for n, (c, ptr, req, alll, req_h) in enumerate(plans):
+            if c in self.pair_second:
+                if deferred:
+                    deferred.add(c)
+                continue             # placed with the one beside it (which sets its pointer)
             r["ptrs"][c] = ptr
             if deferred:
                 deferred.add(c)
+                if c in self.pair_of:
+                    d = self.pair_of[c]
+                    r["ptrs"][d] = self.ptrs[d]
+                    deferred.add(d)
+                continue
+            if c in self.pair_of:
+                d = self.pair_of[c]
+                pd = next(p for p in plans if p[0] == d)
+                r["ptrs"][d] = pd[1]
+                if deferred:
+                    deferred.add(d)
+                    continue
+                alll_d = pd[3]
+                if not alll and not alll_d:
+                    continue
+                nlh = max(self.note_lh[c], self.note_lh[d])
+                gap_ = 1.2 * PT_PER_MM if placed_any else 0.0
+                later = sum(self.reserve(p, r["req_fit"]) for p in plans[n + 1:] if p[0] != d)
+                rows = int((room - later - gap_ - self.note_pad() - self.note_title_h(c) + EPS) // nlh)
+                if force and not placed_any and rows < 1:
+                    rows = 1
+                la, ta, lb, tb, used = self.pair_take(c, d, alll, alll_d, rows, tight)
+                wa = self.entry_words(c, alll) if alll else []
+                wb = self.entry_words(d, alll_d) if alll_d else []
+                cut = ta < len(wa) or tb < len(wb)
+                if not used:
+                    continue
+                if placed_any and cut and used < MIN_START_ROWS:
+                    deferred.update((c, d))     # they begin on the next page (RULES.md, rule 5)
+                    continue
+                h = self.note_pad() + self.note_title_h(c) + used * nlh
+                r["sections"].append({"c": c, "c2": d, "pair": True, "lines": la, "lines2": lb, "rows": used,
+                                      "nlh": nlh, "cut": cut, "h": h})
+                placed.append(None)
+                room -= h + gap_
+                placed_any = True
+                if alll:
+                    r["ptrs"][c] = self.advance(ptr, wa, ta, len(alll))
+                if alll_d:
+                    r["ptrs"][d] = self.advance(pd[1], wb, tb, len(alll_d))
                 continue
             if not alll:
                 continue
@@ -1066,7 +1188,7 @@ class Engine:
                 # one before it, if it goes on too, takes the room that was kept for it
                 deferred.add(c)
                 prev = placed[-1]
-                if r["sections"][-1]["cut"]:
+                if prev is not None and r["sections"][-1]["cut"]:
                     pc, pptr, pwords, palll, proom, pgap = prev
                     full = int((proom - pgap - self.note_pad() - self.note_title_h(pc) + EPS) // self.note_lh[pc])
                     l2, n2 = self.take(pwords, self.style[pc], self.note_lh[pc], self.note_col_w(pc), full * self.comms[pc]["cols"],
@@ -1101,6 +1223,11 @@ class Engine:
         """Room kept for a commentary placed after another: all of what the page owes it,
         and the first lines of what it begins on the page."""
         c, ptr, req, alll, req_h = p
+        if c in self.pair_second:
+            return 0.0           # (the one beside it keeps the room of both)
+        if c in self.pair_of:
+            d = self.pair_of[c]
+            alll = alll or self.list_from(d, self.ptrs[d], 10 ** 6)
         if not alll:
             return 0.0
         start = self.section_h(c, self.comms[c]["cols"])
@@ -1118,7 +1245,7 @@ class Engine:
         if hole <= self.main_lh * 1.5:
             return True
         units = len([l for l in r["text"] if l.kind == "p"])
-        units += sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in r["sections"])
+        units += sum(self.sec_rows(s) for s in r["sections"])
         lhs = [self.main_lh] + [s["nlh"] for s in r["sections"]]
         return units > 0 and hole / units <= 0.3 * min(lhs)
 
@@ -1190,18 +1317,18 @@ class Engine:
         secs = r["sections"]
         last = secs[-1]
         if not last["cut"]:
-            rows = sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in secs)
+            rows = sum(self.sec_rows(s) for s in secs)
             if rows and spare / rows < secs[0]["nlh"] * 0.12:
                 for s in secs:
                     s["nlh"] += spare / rows
-                    s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
+                    s["h"] = self.sec_h(s)
         else:
             # the last one goes on on the next page: its rows take the room, a little each (the
             # rest goes to all the lines of the page, below)
-            rows = math.ceil(len(last["lines"]) / self.comms[last["c"]]["cols"])
+            rows = self.sec_rows(last)
             if rows:
                 last["nlh"] += min(spare / rows, 0.15 * last["nlh"])
-                last["h"] = self.section_h(last["c"], len(last["lines"]), last["nlh"])
+                last["h"] = self.sec_h(last)
         # still a little room: share it out between the lines of the text and of the commentaries
         spare = self.contentH - self.total_h(r)
         text = [l for l in r["text"] if l.kind == "p"]
@@ -1211,7 +1338,7 @@ class Engine:
             text += [l for l in pre["lines"] if l.kind == "p"]
         # each line opens by the same share of its own height (a small commentary line as much
         # as a line of the text, to the eye)
-        rows = {id(s): math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in secs}
+        rows = {id(s): self.sec_rows(s) for s in secs}
         total = sum(l.h for l in text) + sum(rows[id(s)] * s["nlh"] for s in secs)
         if spare > 0.5 and total and spare / total <= 0.3:
             k = spare / total
@@ -1221,7 +1348,7 @@ class Engine:
                 pre["h"] = restack(pre["lines"])
             for s in secs:
                 s["nlh"] *= 1 + k
-                s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
+                s["h"] = self.sec_h(s)
             self.recompute_top(r)
             self.align_columns(r)
 
@@ -1264,7 +1391,7 @@ class Engine:
         spare = self.contentH - self.total_h(r)
         text = [l for l in r["text"] if l.kind == "p"]
         post = [l for l in (r.get("post") or {}).get("lines", []) if l.kind == "p"]
-        rows = sum(math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"]) for s in r["sections"])
+        rows = sum(self.sec_rows(s) for s in r["sections"])
         units = len(text) + len(post) + rows
         if spare < 0.5 or not units or spare / units > 0.3 * self.main_lh:
             return
@@ -1273,7 +1400,7 @@ class Engine:
             l.h += d
         for s in r["sections"]:
             s["nlh"] += d
-            s["h"] = self.section_h(s["c"], len(s["lines"]), s["nlh"])
+            s["h"] = self.sec_h(s)
         self.recompute_top(r)
         self.align_columns(r)
         if r.get("post"):
@@ -1456,7 +1583,7 @@ class Engine:
         if contents:
             # the back of the title page is a right-hand page: the binding is on its left
             out.append(toc_page(self.page_w, self.page_h, self.m, P["mainFont"], contents, self.gutter))
-        elif P.get("bookMode"):
+        elif P.get("bookMode") and P.get("titleBlank", True):
             out.append(blank_page(self.page_w, self.page_h))
         return out
 
@@ -1488,6 +1615,8 @@ class Engine:
                 # however the page was chosen, its text doesn't end on a short line when it goes
                 # on on the next page (rule 8)
                 best = self.fix_short_end(pos, pre, base, best)
+            if not next_plain and not getattr(self, "comm_after_plain", False):
+                best = self.absorb_book_tail(pos, pre, base, best)
             self.col_w = dict(best["state"][0])
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
             if last and next_plain:
@@ -1547,7 +1676,7 @@ class Engine:
     def decide(self, pos, pre, base):
         """The page the rules give directly, starting at pos with the column widths base.
         Kept: the page looked at ahead is the page decided when its turn comes."""
-        key = (pos, id(pre), tuple(sorted(self.ptrs.items())), tuple(sorted(base.items())), len(self.pages) % 2)
+        key = (pos, id(pre), tuple(sorted(self.ptrs.items())), tuple(sorted(base.items())), (len(self.pages) + self.parity) % 2)
         hit = self.decided.get(key)
         if hit is None:
             hit = self._decide(pos, pre, base)
@@ -1973,6 +2102,55 @@ class Engine:
                  "post": {"lines": lines, "h": h, "mt": 0.0, "items": lst}, "text": [], "text_h": 0.0, "top_h": 0.0}
             self.pages.append((r, it["chapter"], it["parasha"]))
 
+    def absorb_book_tail(self, pos, pre, base, best):
+        """The page before the last one of a book: if the last would hold only a few rows, all
+        of it comes onto this page, its lines a little closer (by up to TAIL_SQUEEZE), and the
+        book is a page shorter."""
+        end = (len(self.items), 0)
+        if best["b"] >= end and all(self.done(c, p) for c, p in best["ptrs"].items()):
+            return best
+        saved, saved_w = dict(self.ptrs), dict(self.col_w)
+        self.col_w = dict(best["state"][0])
+        self.ptrs = dict(best["ptrs"])
+        rest = self.compose(best["b"], end, False, None)
+        self.ptrs = saved
+        tail = (rest["at_end"] and all(self.done(c, p) for c, p in rest["ptrs"].items())
+                and self.total_h(rest) - self.head_h <= TAIL_LINES * self.main_lh)
+        if not tail:
+            self.col_w = saved_w
+            return best
+        body = self.body_h
+        self.body_h = body / (1 - TAIL_SQUEEZE)
+        self.memo.clear()
+        try:
+            whole = self.compose(pos, end, False, pre)
+        finally:
+            self.body_h = body
+            self.memo.clear()
+            self.col_w = saved_w
+        if not (whole["at_end"] and all(self.done(c, p) for c, p in whole["ptrs"].items()) and whole["start_ok"]):
+            return best
+        # what closes up is the lines' height (not the gaps, the names, the running head)
+        scal = whole["top_h"] + sum(self.sec_rows(sec) * sec["nlh"] for sec in whole["sections"])
+        fixed = self.total_h(whole) - scal
+        k = (self.contentH - fixed) / max(1.0, scal)
+        if k >= 1 or k < 1 - TAIL_SQUEEZE:
+            return best
+        for l in whole["text"]:
+            l.h *= k
+        for sd in whole["side"].values():
+            sd["slh"] *= k
+            sd["h"] = sd["th"] + len(sd["col"]) * sd["slh"]
+        for sec in whole["sections"]:
+            sec["nlh"] *= k
+            sec["h"] = self.sec_h(sec)
+        self.recompute_top(whole)
+        if self.total_h(whole) > self.contentH + 0.5:
+            return best
+        whole["squeezed"] = True
+        whole.setdefault("state", best["state"])
+        return whole
+
     def fix_short_end(self, pos, pre, base, best):
         """A page whose text goes on on the next page but ends here on a short line: finish the
         line, or end at the end of the line before (or the one before it); failing that, the
@@ -2137,6 +2315,25 @@ class Engine:
                 c = s["c"]
                 y0 = y + self.note_pad()
                 th = self.note_title_h(c)
+                if s.get("pair"):
+                    # two commentaries side by side: each name over its half (or the whole width,
+                    # when only one of them is on the page); each line knows its place
+                    half = self.half_w()
+                    for cc, lines, right, w in ((c, s["lines"], 0.0, half), (s["c2"], s["lines2"], half + self.gap, half)):
+                        if not lines:
+                            continue
+                        if th:
+                            alone = not (s["lines"] and s["lines2"])
+                            tst = self.style[cc].scaled(1.1, bold=True)
+                            t = break_lines(words_of([(w_, True) for w_ in self.comms[cc]["name"].split()], tst), tst, th,
+                                            full_width(self.W if alone else w), 0.0, "center")
+                            page.frames.append(Frame(t[:1], R - (0.0 if alone else right), y0))
+                        for j, l in enumerate(lines):
+                            l.y = j * s["nlh"]
+                            l.h = s["nlh"]
+                        page.frames.append(Frame(lines, R, y0 + th, ("comm", cc)))
+                    y += s["h"]
+                    continue
                 if th:
                     tst = self.style[c].scaled(1.1, bold=True)
                     t = break_lines(words_of([(w, True) for w in self.comms[c]["name"].split()], tst), tst, th, full_width(self.W), 0.0, "center")
@@ -2179,7 +2376,7 @@ class Engine:
             right = f"{title} · {parasha}" if parasha and title else (parasha or title)
             center = chapter if chapter and chapter != parasha else ""
             hs = self.head_style
-            if P.get("bookMode") and index % 2 == 1:
+            if P.get("bookMode") and (index + self.parity) % 2 == 1:
                 # a right-hand page: the page number goes on its outer side, the right
                 right, number = number, right
             page.head = (right, center, number, hs, y + 9.0 * 1.3 * 0.8)
@@ -2200,14 +2397,48 @@ class Engine:
                 lines.extend(ln)
             page.frames.append(Frame(lines, R, T + self.body_h - len(self.ded_lines) * self.ded_lh))
         self.finalizing = None
+        if P.get("marginMarks"):
+            self.margin_marks(page, index)
         page.links = self.links(page)
-        if self.gutter and index % 2 == 0:
+        if self.gutter and (index + self.parity) % 2 == 0:
             # a left-hand page: its inner side, the binding, is on the right
             for fr in page.frames:
                 fr.x_right -= self.gutter
             page.rules = [(x1 - self.gutter, y, x2 - self.gutter) for x1, y, x2 in page.rules]
             page.links = [(x1 - self.gutter, y1, x2 - self.gutter, y2, to) for x1, y1, x2, y2, to in page.links]
         return page
+
+    def margin_marks(self, page, index):
+        """The parasha and the aliyah, small, in the outer margin by the line of text where they
+        begin (before the page is moved for its binding: see finalize)."""
+        st = Style(self.P["mainFont"], max(6.5, self.P["mainSize"] * 0.5), True)
+        lh = st.size * 1.15
+        outer_right = (index + self.parity) % 2 == 1 or not self.gutter
+        L, R = self.m + self.gutter, self.page_w - self.m
+        w = self.m - 3 * PT_PER_MM
+        x_right = self.page_w - 2 * PT_PER_MM if outer_right else L - 1 * PT_PER_MM
+        seen = set()
+        for fr in list(page.frames):
+            if not (fr.src and fr.src[0] == "main") or fr.margin:
+                continue
+            items = fr.src[1] or []
+            for l in fr.lines:
+                for wd in l.words:
+                    ref = wd.ref
+                    if not (isinstance(ref, tuple) and ref[0] == "l" and ref[1] < len(items)) or ref[1] in seen:
+                        continue
+                    it = items[ref[1]]
+                    seen.add(ref[1])
+                    text = it.get("mark") or it.get("aliyah")
+                    if not text or it.get("type") != "v":
+                        continue
+                    lines = []
+                    for k, t in enumerate(text.split()):
+                        ws = [Word(t, st, width(st, t))]
+                        ln = Line(ws, 0.0, w, ws[0].w, lh, st, "center", True, k * lh)
+                        lines.append(ln)
+                    top = fr.top + l.y + max(0.0, (l.h - len(lines) * lh) / 2) if len(lines) == 1 else fr.top + l.y
+                    page.frames.append(Frame(lines, x_right, top, None, True))
 
     def links(self, page):
         """Where a click on each line of the page leads: (x1, y1, x2, y2, target), target

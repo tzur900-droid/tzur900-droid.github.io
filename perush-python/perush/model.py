@@ -8,7 +8,8 @@ import json
 import re
 
 PLACES = {"side": "טור צמוד לטקסט", "bottom": "מתחת לטקסט", "under": "אחרי כל פסוק",
-          "inner": "צד פנימי (דף גמרא)", "outer": "צד חיצוני (דף גמרא)"}
+          "inner": "צד פנימי (דף גמרא)", "outer": "צד חיצוני (דף גמרא)",
+          "half": "חצי רוחב, זה לצד זה (מתחת לטקסט)"}
 
 # Page sizes (name, width mm, height mm): the usual sizes for printing seforim, then paper
 # sizes; "custom" takes pageW / pageH from the project.
@@ -71,6 +72,11 @@ DEFAULTS = {
     "layout": "mg",
     "gmBand": 4,             # a Talmud page: lines of the commentaries above the text
     "gmMain": 40,            # a Talmud page: the text column's share of the width (%)
+    # a volume of several books (tools/tanakh_pdf.py), and a book that saves pages
+    "titleBlank": True,      # in book form: a blank page behind the title page, so the text begins on a left-hand page
+    "pageParity": 0,         # 1: the first page of text is a right-hand page (the book follows others in a volume)
+    "parashaInline": False,  # a parasha doesn't open a page: its name goes in the margin (with marginMarks)
+    "marginMarks": False,    # the parasha and the aliyot in the outer margin, by the line where they begin
     # the cover (a separate PDF: back, spine and front in one spread, with bleed)
     "coverPalette": "bordeaux",  # a key of cover.PALETTES, or "custom" (coverBg / coverInk)
     "coverBg": "#5e1a24",
@@ -221,6 +227,9 @@ def heb(n):
     ones = ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"]
     tens = ["", "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ"]
     hund = ["", "ק", "ר", "ש", "ת"]
+    if n >= 1000:
+        # the thousands, then a geresh (א׳רלד)
+        return heb(n // 1000) + "׳" + (heb(n % 1000) if n % 1000 else "")
     s = ""
     while n >= 400:
         s += "ת"
