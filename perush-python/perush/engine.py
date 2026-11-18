@@ -2103,9 +2103,11 @@ class Engine:
             self.pages.append((r, it["chapter"], it["parasha"]))
 
     def absorb_book_tail(self, pos, pre, base, best):
-        """The page before the last one of a book: if the last would hold only a few rows, all
-        of it comes onto this page, its lines a little closer (by up to TAIL_SQUEEZE), and the
-        book is a page shorter."""
+        """The page before the last one of a book. If the last page would hold only a few rows,
+        all of it comes onto this page; if it would hold only a line or two of the text over
+        its commentaries, those lines come onto this page and the last page holds only the
+        commentaries that go on (RULES.md, rule 6). Either way the lines of this page may come a
+        little closer (by up to TAIL_SQUEEZE)."""
         end = (len(self.items), 0)
         if best["b"] >= end and all(self.done(c, p) for c, p in best["ptrs"].items()):
             return best
@@ -2114,42 +2116,61 @@ class Engine:
         self.ptrs = dict(best["ptrs"])
         rest = self.compose(best["b"], end, False, None)
         self.ptrs = saved
-        tail = (rest["at_end"] and all(self.done(c, p) for c, p in rest["ptrs"].items())
-                and self.total_h(rest) - self.head_h <= TAIL_LINES * self.main_lh)
-        if not tail:
+        all_done = lambda q: all(self.done(c, p) for c, p in q["ptrs"].items())
+        rest_text = [l for l in rest["text"] if l.kind == "p"]
+        everything = lambda q: q["at_end"] and all_done(q) and q["start_ok"]          # all of it here
+        text_here = lambda q: q["b"] >= end and q["start_ok"] and q["top_fits"]      # the text here
+        if rest["at_end"] and all_done(rest) and self.total_h(rest) - self.head_h <= TAIL_LINES * self.main_lh:
+            needs = [everything]
+        elif rest_text and len(rest_text) <= 2 and rest["at_end"]:
+            # rather all of it, if it comes to that; else the text, the commentaries going on
+            needs = [everything, text_here]
+        else:
             self.col_w = saved_w
             return best
-        body = self.body_h
-        self.body_h = body / (1 - TAIL_SQUEEZE)
-        self.memo.clear()
         try:
-            whole = self.compose(pos, end, False, pre)
-        finally:
-            self.body_h = body
+            plain = self.compose(pos, end, False, pre)
+            body = self.body_h
+            self.body_h = body / (1 - TAIL_SQUEEZE)
             self.memo.clear()
+            try:
+                close = self.compose(pos, end, False, pre)
+            finally:
+                self.body_h = body
+                self.memo.clear()
+        finally:
             self.col_w = saved_w
-        if not (whole["at_end"] and all(self.done(c, p) for c, p in whole["ptrs"].items()) and whole["start_ok"]):
-            return best
+        for need in needs:
+            if need(plain) and self.total_h(plain) <= self.contentH + EPS and self.fills(plain):
+                plain.setdefault("state", best["state"])
+                return plain
+            if need(close) and self.squeeze(close):
+                close.setdefault("state", best["state"])
+                return close
+        return best
+
+    def squeeze(self, r):
+        """Bring the lines of a page a little closer (by up to TAIL_SQUEEZE) so that it fits
+        the page. Returns whether it does."""
         # what closes up is the lines' height (not the gaps, the names, the running head)
-        scal = whole["top_h"] + sum(self.sec_rows(sec) * sec["nlh"] for sec in whole["sections"])
-        fixed = self.total_h(whole) - scal
+        scal = r["top_h"] + sum(self.sec_rows(sec) * sec["nlh"] for sec in r["sections"])
+        fixed = self.total_h(r) - scal
         k = (self.contentH - fixed) / max(1.0, scal)
-        if k >= 1 or k < 1 - TAIL_SQUEEZE:
-            return best
-        for l in whole["text"]:
+        if k >= 1:
+            return True
+        if k < 1 - TAIL_SQUEEZE:
+            return False
+        for l in r["text"]:
             l.h *= k
-        for sd in whole["side"].values():
+        for sd in r["side"].values():
             sd["slh"] *= k
             sd["h"] = sd["th"] + len(sd["col"]) * sd["slh"]
-        for sec in whole["sections"]:
+        for sec in r["sections"]:
             sec["nlh"] *= k
             sec["h"] = self.sec_h(sec)
-        self.recompute_top(whole)
-        if self.total_h(whole) > self.contentH + 0.5:
-            return best
-        whole["squeezed"] = True
-        whole.setdefault("state", best["state"])
-        return whole
+        self.recompute_top(r)
+        r["squeezed"] = True
+        return self.total_h(r) <= self.contentH + 0.5
 
     def fix_short_end(self, pos, pre, base, best):
         """A page whose text goes on on the next page but ends here on a short line: finish the

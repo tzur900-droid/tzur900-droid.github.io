@@ -125,7 +125,10 @@ def check(eng, pages):
     if len(pages) - off > 1:
         rows = sum(len(fr.lines) for fr in pages[-1].frames)
         if rows <= 3:
-            add("last_alone", len(pages) - 1, f"{rows} שורות")
+            # the end of a commentary alone is better than a word of the text over it (rule 6),
+            # when the page before has no room for it
+            only_comm = not any(fr.src and fr.src[0] == "main" and fr.lines for fr in pages[-1].frames)
+            add("last_alone", len(pages) - 1, f"{rows} שורות", "exception" if only_comm else "error")
     for n in range(off, len(pages)):
         r = eng.pages[n - off][0]
         pre = r.get("pre") or {}
