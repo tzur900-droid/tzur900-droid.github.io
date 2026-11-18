@@ -885,7 +885,9 @@ def mark_rashi(toks, entries, gem, value="rashi", gap=3, trace=None, weak=frozen
             close = top >= 3 or (top >= 2 and len(best) >= 4)
             # four words of Rashi at least (a little changed is still his), never a word or
             # two torn from what he says
-            if dense and n >= 4 and close and i1 - i0 + 1 >= 4:
+            # (or six words of his one after the other, in both, though some are the Gemara's
+            # too: "אנוסת אביו שנשאה אחיו מאביו אחרי כן ומת בלא בנים", his comment copied)
+            if (dense and n >= 4 and close and i1 - i0 + 1 >= 4) or top >= 6:
                 for k in range(i0, i1 + 1):
                     bold[k] = 1
                 if trace is not None:
@@ -4708,6 +4710,7 @@ def perakim_of(masechet):
     return []
 
 
+GEM_GRAMS = set()     # (the Gemara's three-word lines of the masechet being prepared)
 CITES = {norm(p + w) for w in ("כתיב", "שנאמר", "נאמר", "תנן", "תניא", "תנא", "תנינא") for p in ("", "ו", "ד", "כד", "וכד", "דה")}
 
 
@@ -4732,7 +4735,18 @@ def rashi_after_ref(comm):
             # (but a verse or a Mishna after "דכתיב (...)", "כדתנן בערכין (...)" is that one's)
             cites = a > 1 and any(norm(toks[z][0]) in CITES for z in range(max(0, a - 4), a - 1))
             if a > 0 and toks[a - 1][1] == "src" and (cites or not (a > 1 and toks[a - 2][1] == "rashi")):
-                for q in range(a, k):
+                # (the verse or the Mishna only, by its words in the Gemara: "ערות אשה ובתה לא
+                # תגלה את בת בנה ואת בת בתה", and Rashi's own words after it, "ויש בכלל זה
+                # חמותו...", stay bold)
+                end = k
+                if GEM_GRAMS:
+                    Wv, sv = lseq(toks[a:k], gentile=False)
+                    x = 0
+                    while x < len(Wv) and any(tuple(Wv[y:y + 3]) in GEM_GRAMS for y in range(max(0, x - 2), x + 1)):
+                        x += 1
+                    if x >= 3 and x < len(Wv) and len(Wv) - x >= 4:
+                        end = a + sv[x]
+                for q in range(a, end):
                     toks[q] = [toks[q][0], False] + list(toks[q][2:])
                     count += 1
                 continue
@@ -5189,6 +5203,8 @@ def load_masechet(root, m, found=None):
                 p["amud"], p["amud_n"] = label.get(amudim[j]), amudim[j]
             g, gsrc_ = lseq(gtoks, gentile=False)
             gem = {tuple(g[k:k + 3]) for k in range(len(g) - 2)}
+            GEM_GRAMS.clear()
+            GEM_GRAMS.update(gem)
             # (each word of the Gemara's amud, and a two-word index, to find an entry's dibbur)
             GSq = [stem2(w) for w in g]
             gpos_amud = [gamud[gsrc_[k]][0] for k in range(len(g))]
@@ -5261,6 +5277,11 @@ def load_masechet(root, m, found=None):
                     return True
                 return any(region[j][0] <= q <= region[j][1] for q in where)
             SUBJECT = os.environ.get("RASHI_SUBJECT", "1") == "1"
+            rashi5 = {}
+            for x in rashi:
+                xs = [stem2(w) for w in x["words"]]
+                for q in range(len(xs) - 4):
+                    rashi5.setdefault(tuple(xs[q:q + 5]), set()).add(x["id"])
             n = 0
             for e in comm:
                 a = amudim[e["para"]]
@@ -5297,6 +5318,18 @@ def load_masechet(root, m, found=None):
                                      any(dhw[o:o + len(xd)] == xd for o in range(len(dhw) - len(xd) + 1))):
                                 near.append(x)
                                 have_ids.add(x["id"])
+                # (and any comment of Rashi within eight amudim that has five words in a row of
+                # the entry's: the commentator copying Rashi, "אמו. אנוסת אביו שנשאה אחיו מאביו
+                # אחרי כן ומת בלא בנים" for Rashi's on "אמו אנוסת אביו")
+                if a is not None or b is not None:
+                    es = [stem2(w) for w in lseq(e["tokens"][e.get("dh_len", 0):])[0]]
+                    have_ids = {x["id"] for x in near}
+                    for q in range(len(es) - 4):
+                        for rid in rashi5.get(tuple(es[q:q + 5]), ()):
+                            x = rashi[rid]
+                            if rid not in have_ids and any(c is not None and abs(x["amud"] - c) <= 8 for c in (a, b)):
+                                near.append(x)
+                                have_ids.add(rid)
                 e["why"] = [] if a is not None else None     # None: no Gemara of ours, Rashi not looked at
                 e["near"] = near
                 e["rashi_seqs"] = [[stem2(w) for w in x["dh"]] + [None] + [stem2(w) for w in x["words"]] for x in near]
