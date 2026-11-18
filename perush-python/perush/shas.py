@@ -4779,6 +4779,12 @@ def rashi_after_ref(comm):
                                 break
                         if k - z >= 4:
                             end = z
+                # (a quotation that is part of Rashi's words the commentator copies, his bold
+                # just before it and going on after it, "...צריכה גט למאמרו כדתנן ... עשה מאמר
+                # וחלץ צריכה הימנו גט דאע"ג דיהיב לה גט...": bold with them, one text, as the
+                # user decided; one at the end of what he copies, or alone, stays plain)
+                if goes_on and end < k:
+                    continue
                 for q in range(a, end):
                     toks[q] = [toks[q][0], False] + list(toks[q][2:])
                     count += 1
