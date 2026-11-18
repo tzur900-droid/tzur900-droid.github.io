@@ -614,7 +614,9 @@ class Engine:
             la, ta = self.take(wa, self.style[a], nlh, half, rows, tight, width_at=right_a)
             lb, tb = self.take(wb, self.style[b], nlh, half, rows, tight, width_at=right_b)
             return la, ta, lb, tb, max(len(la), len(lb))
-        split = min(na, nb) * nlh - EPS
+        # the longer one goes on in its half for one more row, under which the shorter one has
+        # ended: an empty row there shows where the one ends and the other spreads under both
+        split = (min(na, nb) + 1) * nlh - EPS
         if na <= nb:
             la, ta = self.take(wa, self.style[a], nlh, half, na, tight, width_at=right_a)
             lb, tb = self.take(wb, self.style[b], nlh, W, rows, tight,
