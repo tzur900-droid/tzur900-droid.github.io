@@ -37,7 +37,7 @@ SETTINGS = {
     "titlePage": True, "titleBlank": False, "toc": False, "parashaInline": True, "marginMarks": True,
     "dedication": "",
 }
-COMM = {"font": "Mekorot", "size": 9, "width": 30, "autoW": True, "cols": 1, "side": "left"}
+COMM = {"font": "Frank Ruehl CLM", "size": 9, "width": 30, "autoW": True, "cols": 1, "side": "left"}
 STYLES = {
     "onkelos": dict(COMM, name="אונקלוס", place="side", font="Frank Ruehl CLM", cols=2),
     "rashi": dict(COMM, name="רש\"י", place="bottom"),
