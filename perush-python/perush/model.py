@@ -76,6 +76,7 @@ DEFAULTS = {
     "titleBlank": True,      # in book form: a blank page behind the title page, so the text begins on a left-hand page
     "pageParity": 0,         # 1: the first page of text is a right-hand page (the book follows others in a volume)
     "parashaInline": False,  # a parasha doesn't open a page: its name goes in the margin (with marginMarks)
+    "noteLineHeight": 0,     # the line spacing of the commentaries (0 = from lineHeight)
     "marginMarks": False,    # the parasha and the aliyot in the outer margin, by the line where they begin
     # the cover (a separate PDF: back, spine and front in one spread, with bleed)
     "coverPalette": "bordeaux",  # a key of cover.PALETTES, or "custom" (coverBg / coverInk)

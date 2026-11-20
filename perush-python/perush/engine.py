@@ -256,7 +256,7 @@ class Engine:
         self.gap = P["colGap"] * PT_PER_MM
         self.sgap = P["sectionGap"] * PT_PER_MM
         self.lh_k = P["lineHeight"]
-        self.note_k = max(1.2, P["lineHeight"] - 0.12)
+        self.note_k = float(P.get("noteLineHeight") or 0) or max(1.2, P["lineHeight"] - 0.12)
         self.main = Style(P["mainFont"], P["mainSize"])
         self.main_lh = P["mainSize"] * self.lh_k
         self.head_style = Style(P["mainFont"], 9.0)

@@ -31,13 +31,13 @@ KETUVIM = [("Psalms", "תהלים"), ("Proverbs", "משלי"), ("Job", "איוב
            ("II Chronicles", "דברי הימים ב")]
 
 SETTINGS = {
-    "pageSize": "custom", "pageW": 180, "pageH": 250, "margin": 8, "gutter": 6, "bookMode": True,
-    "mainFont": "Taamey Frank CLM", "mainSize": 13, "lineHeight": 1.3, "colGap": 4, "sectionGap": 1.5,
+    "pageSize": "custom", "pageW": 180, "pageH": 250, "margin": 7, "gutter": 5, "bookMode": True,
+    "mainFont": "Taamey Frank CLM", "mainSize": 12, "lineHeight": 1.25, "noteLineHeight": 1.1, "colGap": 3.5, "sectionGap": 1.2,
     "minLines": 3, "numbers": True, "header": True, "names": True, "inlineChapters": True, "verseNewLine": False,
     "titlePage": True, "titleBlank": False, "toc": False, "parashaInline": True, "marginMarks": True,
     "dedication": "",
 }
-COMM = {"font": "Frank Ruehl CLM", "size": 9, "width": 30, "autoW": True, "cols": 1, "side": "left"}
+COMM = {"font": "Frank Ruehl CLM", "size": 7.5, "width": 30, "autoW": True, "cols": 1, "side": "left"}
 STYLES = {
     "onkelos": dict(COMM, name="אונקלוס", place="side", font="Frank Ruehl CLM", cols=2),
     "rashi": dict(COMM, name="רש\"י", place="bottom"),
