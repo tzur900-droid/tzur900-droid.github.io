@@ -46,6 +46,9 @@ STYLES = {
 }
 
 
+WITHOUT = set()        # kinds of commentary left out (see --without)
+
+
 def no_notes(s):
     s = re.sub(r'<sup class="footnote-marker">.*?</sup>', "", s, flags=re.S)
     return re.sub(r'<i class="footnote">.*?</i>', "", s, flags=re.S)
@@ -106,7 +109,7 @@ def nach_book(sef, en, he):
             verses.append((c, v))
     p = dict(SETTINGS, title=he, main="\n".join(main), comms=[])
     for kind, prefix in (("rashi", "Rashi on "), ("md", "Metzudat David on "), ("mz", "Metzudat Zion on ")):
-        t = load(sef, prefix + en)
+        t = load(sef, prefix + en) if kind not in WITHOUT else None
         if t:
             p["comms"].append(dict(STYLES[kind], text=comm_text(t, verses)))
     return p
@@ -124,7 +127,7 @@ def torah_book(he):
     p = dict(SETTINGS, title=he, main="\n".join(main), comms=[])
     for c in src["comms"]:
         kind = {"אונקלוס": "onkelos", "רש\"י": "rashi"}.get(c["name"])
-        if kind:
+        if kind and kind not in WITHOUT:
             text = c["text"] if kind == "onkelos" else "\n".join(plain_comm(l) for l in c["text"].split("\n"))
             p["comms"].append(dict(STYLES[kind], text=text))
     return p
@@ -149,4 +152,10 @@ def main(sef, out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    # --without NAME,NAME: leave those commentaries out (e.g. --without rashi,onkelos)
+    args = sys.argv[1:]
+    if "--without" in args:
+        i = args.index("--without")
+        WITHOUT.update(args[i + 1].split(","))
+        del args[i:i + 2]
+    main(args[0], args[1])
