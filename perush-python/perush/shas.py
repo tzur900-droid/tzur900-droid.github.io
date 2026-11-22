@@ -5160,11 +5160,20 @@ def fix_typos(m, rosh, rif, comm, path=TYPOS):
                 k += 1
     for part, table in fixes.items():
         for toks in seqs.get(part, []):
-            for t in toks:
-                core_ = t[0].rstrip(".,:;")
+            k = 0
+            while k < len(toks):
+                t = toks[k]
+                core_ = t[0].rstrip(".,:;") if isinstance(t[0], str) else None
                 if core_ in table:
-                    t[0] = table[core_] + t[0][len(core_):]
+                    # (a correction of more than one word: the words glued in the source,
+                    # "אכולהואחייבילאוין", each a word of its own)
+                    ws = table[core_].split()
+                    ws[-1] = ws[-1] + t[0][len(core_):]
+                    toks[k:k + 1] = [[w] + list(t[1:]) for w in ws]
                     n += 1
+                    k += len(ws)
+                    continue
+                k += 1
     return n
 
 
