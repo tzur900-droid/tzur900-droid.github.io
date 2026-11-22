@@ -93,6 +93,7 @@ DEFAULTS = {
     "coverFoot": "",         # a line at the foot of the front (a publisher, a year)
     "coverSpine": "",        # the name on the spine ("" = the name on the front)
     "coverSpineSub": "",     # smaller, after it on the spine (a volume, the commentaries)
+    "coverSpineRules": True, # the double rules across the top and the foot of the spine
     "coverSpineDir": "down", # the spine's text: "down" (top to bottom), "up", or "across" (lines across it)
     "coverBack": "",         # the text on the back (a description, a dedication)
     "coverBarcode": "",      # an image put at the foot of the back (a barcode); a file path

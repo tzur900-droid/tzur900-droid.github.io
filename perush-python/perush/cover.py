@@ -692,7 +692,7 @@ def draw_spine(p, c, x, y, w, h, ink, family):
     logo_h = min(16 * MM, max(6 * MM, w * 1.2)) if logo else 0.0
     p.setBrush(Qt.NoBrush)
     tops = (y + band, y + h - band - logo_h)
-    for k, by in enumerate(tops):
+    for k, by in enumerate(tops if c.P.get("coverSpineRules", True) else ()):
         d = 1.6 * MM if k == 0 else -1.6 * MM
         p.setPen(pen(ink, 1.4))
         p.drawLine(QPointF(x, by), QPointF(x + w, by))

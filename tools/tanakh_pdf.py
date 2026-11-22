@@ -25,11 +25,22 @@ from perush.render import export_pdf  # noqa: E402
 from perush.textlayout import load_bundled_fonts  # noqa: E402
 from perush.titlepage import title_page, toc_page  # noqa: E402
 
-SECTION_LINES = {
-    "תורה": ["חמשה חומשי תורה", "עם תרגום אונקלוס ופירוש רש\"י"],
-    "נביאים": ["נביאים ראשונים ונביאים אחרונים", "עם פירוש רש\"י, מצודת דוד ומצודת ציון"],
-    "כתובים": ["עם פירוש רש\"י, מצודת דוד ומצודת ציון"],
-}
+SECTION_FIRST = {"תורה": ["חמשה חומשי תורה"], "נביאים": ["נביאים ראשונים ונביאים אחרונים"]}
+
+
+def with_comms(names):
+    """'עם תרגום אונקלוס, פירוש רש"י ומצודת דוד' from the commentaries' names (in their order)."""
+    from perush.titlepage import with_list
+    names = [("תרגום " if n == "אונקלוס" else "") + n for n in names]
+    if not names:
+        return []
+    if len(names) > 1 and not names[0].startswith("תרגום"):
+        names[0] = "פירוש " + names[0]
+    elif len(names) > 1:
+        names[1] = "פירוש " + names[1]
+    else:
+        names[0] = names[0] if names[0].startswith("תרגום") else "פירוש " + names[0]
+    return ["עם " + with_list(names)]
 
 
 def main(src, out, fonts, family):
@@ -47,12 +58,15 @@ def main(src, out, fonts, family):
     pages = [None, None]                 # the title page and the table of contents, made at the end
     contents, report, total_err = [], [], 0
     section = None
+    projects = {b["file"]: json.load(open(os.path.join(src, b["file"]), encoding="utf-8")) for b in order}
+    names_in = lambda books: list(dict.fromkeys(c["name"] for b in books for c in projects[b["file"]]["comms"]))
     for book in order:
         if book["section"] != section:
             section = book["section"]
-            pages.append(title_page(pw, ph, m, font, section, SECTION_LINES.get(section, []), []))
+            lines = SECTION_FIRST.get(section, []) + with_comms(names_in([b for b in order if b["section"] == section]))
+            pages.append(title_page(pw, ph, m, font, section, lines, []))
             contents.append((section, heb(len(pages)), 0))
-        p = normalize(json.load(open(os.path.join(src, book["file"]), encoding="utf-8")))
+        p = normalize(projects[book["file"]])
         if family:
             p["mainFont"] = family
         start = len(pages) + 1           # the book's first page of text, after its title page
@@ -70,7 +84,7 @@ def main(src, out, fonts, family):
         contents.append((book["title"], heb(start + 1), 1))
         pages += bp
     pages[0] = title_page(pw, ph, m, font, "תורה נביאים כתובים",
-                          ["עם תרגום אונקלוס, פירוש רש\"י,", "מצודת דוד ומצודת ציון"],
+                          with_comms(names_in(order)),
                           [l for l in DEDICATION.split("\n") if l.strip()])
     pages[1] = toc_page(pw, ph, m, font, contents, probe.gutter)
     export_pdf(pages, out, "תורה נביאים כתובים")
