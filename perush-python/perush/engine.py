@@ -175,7 +175,8 @@ def flush_end(lines, fold=False):
         ls[-1].force = True
         fits = all(sum(w.w for w in l.words) + sum(1 for w in l.words[:-1] if not w.join) * space(l.base) * 0.8
                    <= l.width + 0.01 for l in ls)
-        if (fits and sum(w.w for w in ls[-1].words) >= ls[-1].width * 0.5
+        lone = any(len(l.words) == 1 for l in ls[:-1])          # a word alone on a line (rule 8)
+        if (fits and not lone and sum(w.w for w in ls[-1].words) >= ls[-1].width * 0.5
                 and max(map(space_ratio, ls)) <= max(3.5, widest)):
             return True
         for l, ws in zip(ls, keep):
@@ -1393,15 +1394,15 @@ class Engine:
         spare = self.contentH - self.total_h(r)
         text = [l for l in r["text"] if l.kind == "p"]
         post = [l for l in (r.get("post") or {}).get("lines", []) if l.kind == "p"]
-        rows = sum(self.sec_rows(s) for s in r["sections"])
-        units = len(text) + len(post) + rows
-        if spare < 0.5 or not units or spare / units > 0.3 * self.main_lh:
+        # each line opens by the same share of its height (as in justify), up to 25%
+        total = sum(l.h for l in text + post) + sum(self.sec_rows(s) * s["nlh"] for s in r["sections"])
+        if spare < 0.5 or not total or spare / total > 0.25:
             return
-        d = spare / units
+        k = spare / total
         for l in text + post:
-            l.h += d
+            l.h *= 1 + k
         for s in r["sections"]:
-            s["nlh"] += d
+            s["nlh"] *= 1 + k
             s["h"] = self.sec_h(s)
         self.recompute_top(r)
         self.align_columns(r)
@@ -1613,6 +1614,16 @@ class Engine:
             self.tick()
             base = dict(self.col_w)
             best = self.choose(pos, pre, base)
+            if pre and pre.get("tail") and (best.get("late_v") or best.get("deferred") or not best["sections"]):
+                # the new parasha under the end of the haftara can't have its commentaries begin
+                # with it there: the end of the haftara keeps its page, the parasha opens the next
+                h = pre["h"]
+                self.pages.append(({"a": pre["frm"], "b": pre["end"], "at_end": True, "pre": None, "ptrs": {}, "side": {},
+                                    "sections": [], "post": {"lines": pre["lines"], "h": h, "mt": 0.0, "items": pre["items"]},
+                                    "text": [], "text_h": 0.0, "top_h": 0.0}, pre["chapter"], pre["parasha"]))
+                pre = None
+                self.memo.clear()
+                best = self.choose(pos, pre, base)
             if self.short_text_end(best):
                 # however the page was chosen, its text doesn't end on a short line when it goes
                 # on on the next page (rule 8)
@@ -1844,6 +1855,11 @@ class Engine:
                     if x > g0:
                         add(self.compose(pos, self.pos(x), False, pre))
             b = g["b"]
+            # or end at the end of a verse a little before (the verse after it begins the next
+            # page with its commentaries)
+            for e in ((b[0], 0), (b[0] - 1, 0), (b[0] - 2, 0)):
+                if self.g_of(e) > g0 and e != b:
+                    add(self.compose(pos, e, False, pre))
             for e in ((b[0] + 1, 0), (b[0] + 2, 0)):
                 if e[0] <= len(self.items):
                     add(self.compose(pos, e if e[0] < len(self.items) else (len(self.items), 0), False, pre))
@@ -1856,9 +1872,12 @@ class Engine:
         """How badly a page breaks the rules (RULES.md): 0 for a page that keeps them all."""
         if not r["top_fits"]:
             return 1e9
-        c = 1e6 * self.page_unstarted(r) + 2e4 * len(r.get("late_v", ()))
+        c = 1e6 * self.page_unstarted(r) + 2.5e5 * len(r.get("late_v", ()))
         if self.thin_text(r):
             c += 5e4
+            line = next((l for l in r["text"] if l.kind == "p"), None)
+            if line is not None and line.natural < line.width * 0.6:
+                c += 3e5               # a word or two of the text alone over the commentaries
         if r["state"][3] and not r["sections"]:
             c += 1e5                   # an empty page
         spare = self.contentH - self.total_h(r)
@@ -2095,7 +2114,7 @@ class Engine:
                 # the commented text continues under the end of the haftara on this page (a new
                 # parasha too, when the end of the haftara takes only a little of the page)
                 self.pre = {"lines": lines, "h": h, "chapter": it["chapter"], "parasha": it["parasha"], "items": lst,
-                            "tail": self.opens_page(next_sec["items"][0])}
+                            "tail": self.opens_page(next_sec["items"][0]), "frm": frm, "end": end}
                 break
             if not done:
                 n_lines = len([l for l in lines if l.kind == "p"])
