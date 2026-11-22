@@ -35,7 +35,7 @@ NAMES = {
     "width": "טור צמוד רחב מהמותר",
     "side_start": "תרגום שלא מתחיל בעמוד של הפסוק",
     "comm_start": "פירוש שלא מתחיל בעמוד של הפסוק",
-    "thin": "שורת פסוק אחת לבד מעל הפירושים",
+    "thin": "מילה או שתיים של פסוק לבד מעל הפירושים",
     "hole": "מקום ריק בתחתית העמוד",
     "spaces": "רווחים גדולים בין המילים",
     "lone": "מילה אחת לבד בשורה באמצע פסקה",
@@ -87,9 +87,13 @@ def check(eng, pages):
         if eng.page_unstarted(r):
             add("side_start", n, f"{eng.page_unstarted(r)} פסוקים בלי תחילת תרגום")
         late = late_commentaries(eng, r)
+        put_off = [x for x in late if len(x) == 3]
+        late = [x for x in late if len(x) == 2]
         if late:
             sev = "exception" if r.get("late_ok") else "error"
             add("comm_start", n, ", ".join(f"{name} על {where(eng, v)}" for name, v in late), sev)
+        if put_off:
+            add("comm_start", n, ", ".join(f"{name} על {where(eng, v)} (נדחה)" for name, v, _ in put_off), "exception")
         # a commentary (or the Onkelos column) that ends in the middle of the page ends on a full line
         ends = [(s["c"], s["lines"]) for s in r.get("sections", [])] + [(s["c2"], s["lines2"]) for s in r.get("sections", []) if s.get("pair")] + [(c, s["col"]) for c, s in r.get("side", {}).items()] \
             + list(r.get("gm", {}).items())
@@ -111,7 +115,7 @@ def check(eng, pages):
                 and b[0] < len(items) and (b[1] > 0 or (items[b[0]]["type"] == "v" and not eng.P.get("verseNewLine")))
                 and text[-1].natural < text[-1].width * 0.6):
             add("text_end", n, " ".join(w.text for w in text[-1].words)[:30], "exception" if r.get("short_ok") else "error")
-        if len(text) == 1 and r.get("sections") and not heads:
+        if len(text) == 1 and r.get("sections") and not heads and text[0].natural < text[0].width * 0.6:
             add("thin", n, " ".join(w.text for w in text[0].words)[:40], "exception" if r.get("thin_ok") else "error")
         # a page that should be full: not the last one, nor the last before a new section
         if n + 1 < len(pages) and (n + 1) not in starts:
@@ -320,7 +324,14 @@ def late_commentaries(eng, r):
         return out
     for c in eng.bottoms + eng.gm:
         if c in r.get("deferred", ()):
-            continue      # the commentary before it fills the page: it begins on the next one
+            # the commentary before it fills the page (or this one would begin with a line or
+            # two at its foot): it begins on the next page — shown as a known exception
+            ptr = r["ptrs"].get(c)
+            for v in range(lo, hi + 1):
+                idx = eng.first_idx[c].get(v)
+                if idx is not None and ptr is not None and ptr[0] <= idx:
+                    out.append((eng.comms[c]["name"], v, "deferred"))
+            continue
         ptr = r["ptrs"].get(c)
         if ptr is None:
             continue

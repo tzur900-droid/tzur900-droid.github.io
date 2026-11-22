@@ -37,7 +37,7 @@ LOOSE = 1.12
 # looking ahead: a page and the next with a cost under GOOD are taken as they are; another
 # way to end a page is taken only if it does better by MARGIN
 GOOD, MARGIN = 60.0, 25.0
-LOOK_AHEAD = 1      # how many pages ahead each page looks
+LOOK_AHEAD = 2      # how many pages ahead each page looks
 GM_STRETCH = 0.2    # a Talmud page: how much more room each line may take to fill the page
 MIN_START_ROWS = 3  # a commentary under another doesn't begin at the foot of a page with fewer rows
 # a haftara whose end takes no more than this share of its last page: the next parasha begins
@@ -1872,18 +1872,18 @@ class Engine:
         """How badly a page breaks the rules (RULES.md): 0 for a page that keeps them all."""
         if not r["top_fits"]:
             return 1e9
-        c = 1e6 * self.page_unstarted(r) + 2.5e5 * len(r.get("late_v", ()))
+        c = 1e6 * self.page_unstarted(r) + 2.5e5 * (len(r.get("late_v", ())) + self.deferred_owed(r))
         if self.thin_text(r):
-            c += 5e4
+            # one full line of the text over the commentaries is allowed (with its translation
+            # beside it); a word or two alone is not
             line = next((l for l in r["text"] if l.kind == "p"), None)
-            if line is not None and line.natural < line.width * 0.6:
-                c += 3e5               # a word or two of the text alone over the commentaries
+            c += 3.5e5 if line is not None and line.natural < line.width * 0.6 else 5e3
         if r["state"][3] and not r["sections"]:
             c += 1e5                   # an empty page
         spare = self.contentH - self.total_h(r)
         if not r["at_end"]:
             # a hole in the middle of a parasha is the worst of all (RULES.md, rule 7)
-            c += (3e5 + spare * 20) if not self.fills(r) else spare * 0.3
+            c += (9e5 + spare * 20) if not self.fills(r) else spare * 0.3
         for l in r["text"]:
             q = space_ratio(l)
             if q > 3:
@@ -1893,6 +1893,18 @@ class Engine:
         if r["state"][2] != 1.0:
             c += 20
         return c
+
+    def deferred_owed(self, r):
+        """How many verses on the page have a commentary that was put off to the next page
+        (rule 5's exception): the page keeps it only if no other way to end it does better."""
+        n = 0
+        lo, hi = r.get("min_v"), r.get("max_v")
+        if lo is None or hi is None:
+            return 0
+        for c in r.get("deferred", ()):
+            e = r["ptrs"][c][0]
+            n += sum(1 for v in range(lo, hi + 1) if self.first_idx[c].get(v) is not None and e <= self.first_idx[c][v])
+        return n
 
     def search_page(self, pos, pre):
         """The best page starting at pos, with the current column widths."""
