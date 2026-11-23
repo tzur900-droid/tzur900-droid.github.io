@@ -6022,7 +6022,7 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
             # (a "הדרן עלך" only: "סליק מסכת יבמות" names no perek)
             if p_ and p_[0][1] == "hadran" and p_[0][0].startswith("הדרן"):
                 t = " ".join(w[0] for w in p_)
-                t = re.sub(r"^\s*הדרן\s+עלך\s+", "", t)
+                t = re.sub(r"^\s*הדרן\s+עלך\s+(?:פרק\s+)?", "", t)
                 t = re.split(r"\s+(?:וסליקא|וסליק)", t)[0].strip(" .:")
                 pname.setdefault(x["perek"], t)
 

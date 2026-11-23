@@ -74,7 +74,9 @@ def draw_oz_head(p, page, h):
     # on the left, each a space away, as the user asked
     import re as _re
     title = h["title"] or ""
-    mm = _re.match(r"^(.*?)\s*(פרק \S+)\s*(.*)$", title)
+    # (the perek's number may be two words, "פרק ששה עשר"; the last "פרק" is the number's,
+    # a perek's name may have the word in it, "פרק שני דייני גזירות")
+    mm = _re.match(r"^(.*)\s*(פרק (?:\S+ עשר|\S+))\s+(\S+(?:\s\S+)?)$", title)
     pname, center, mas = (mm.group(1), mm.group(2), mm.group(3)) if mm else ("", title, "")
     tw = width(big, center) if center else 0.0
     inner_r, inner_l = mid + tw / 2, mid - tw / 2       # how far the head's middle reaches
