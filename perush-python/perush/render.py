@@ -112,10 +112,17 @@ def draw_oz_head(p, page, h):
     # head's line, as the user asked
     p.setFont(qfont(st))
     low = base + st.size * 0.55
-    for word, a, c in ((right_word, inner_r, right_end), (left_word, left_end, inner_l)):
+    for word, a, c, side in ((right_word, inner_r, right_end, "r"), (left_word, left_end, inner_l, "l")):
         if word:
             ww = width(st, word)
-            p.drawText(QPointF((a + c) / 2 - ww / 2, low), word)
+            if abs(c - a) >= ww + st.size:
+                p.drawText(QPointF((a + c) / 2 - ww / 2, low), word)
+            else:
+                # (no room beside a long name, "פרק שלשה עשר כתובות": under the head's line,
+                # clear of its letters, at the edge on that side)
+                y2 = base + big.size * 0.35 + st.size * 0.95
+                x2 = (max(a, c) - ww) if side == "r" else min(a, c)
+                p.drawText(QPointF(x2, y2), word)
     if h["box"]:
         # a day begins: the number in a grey box, and right under it, small, the day
         # (the grey box goes on down over the day's name too, one box for both)
