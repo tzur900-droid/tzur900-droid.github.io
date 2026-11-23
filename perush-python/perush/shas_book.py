@@ -218,7 +218,7 @@ def cover_page(ms, n_pages, volume, colour=COVER, page=B5):
     return p
 
 
-CONTENTS_TOP = 14 * PT_PER_MM      # (the heading a little higher, as the user asked)
+CONTENTS_TOP = 12 * PT_PER_MM      # (the heading a little higher, as the user asked)
 CONTENTS_BOTTOM = 20 * PT_PER_MM
 CONTENTS_LH = 13.2
 
@@ -233,17 +233,21 @@ def contents(pw, ph, ms, books):
         for d, where in books[m][2].get("day_pages", []):
             rows.append((heb(d), m, where.get("rosh", ""), where.get("rif", "")))
     room = ph - CONTENTS_TOP - CONTENTS_BOTTOM - (CONTENTS_LH + 4)
-    first_n = int((room - 44) // CONTENTS_LH)
-    other_n = int((room - 8) // CONTENTS_LH)
-    pages = [contents_page(pw, ph, rows[:first_n], first=True)]
+    # (the rows a little closer where that puts the whole table on one page: down to 11.5pt)
+    lh = CONTENTS_LH
+    if rows and (room - 44) // lh < len(rows) and (room - 44) / len(rows) >= 11.5:
+        lh = (room - 44) / len(rows)
+    first_n = int((room - 44) // lh + 1e-6)
+    other_n = int((room - 8) // lh)
+    pages = [contents_page(pw, ph, rows[:first_n], first=True, lh=lh)]
     k = first_n
     while k < len(rows):
-        pages.append(contents_page(pw, ph, rows[k:k + other_n], first=False))
+        pages.append(contents_page(pw, ph, rows[k:k + other_n], first=False, lh=lh))
         k += other_n
     return pages
 
 
-def contents_page(pw, ph, rows, first):
+def contents_page(pw, ph, rows, first, lh=13.2):
     from PySide6.QtCore import QPointF, QRectF
     from PySide6.QtGui import QColor
     from . import design
@@ -263,7 +267,6 @@ def contents_page(pw, ph, rows, first):
         xs = [pw - m - W * f for f in (0.06, 0.32, 0.64, 0.88)]
         hst = Style("Frank Ruhl Libre", 10, True)
         rst = Style("Frank Ruhl Libre", 10)
-        lh = CONTENTS_LH
         p.fillRect(QRectF(m, y, W, lh + 2), QColor("#d6d6d6"))
         for x, t in zip(xs, ("יום", "מסכת", "רא״ש עמ'", "רי״ף עמ'")):
             design.text_c(p, x, y + lh - 2.5, t, hst, "#000000")

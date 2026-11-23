@@ -137,6 +137,10 @@ def parse_rosh(lines):
         # "הדרן עלך ..." at the end of a perek: a line of its own (the source has it
         # run on, sometimes after a stray 0)
         h = next((k for k, x in enumerate(t) if x[0].lstrip("0") == "הדרן"), None)
+        # (and "סליק מסכת יבמות" at the end of the masechet, run on at its last words)
+        if h is None:
+            h = next((k for k, x in enumerate(t) if len(t) - k <= 5 and x[0].strip(".:") in ("סליק", "סליקא")
+                      and any(y[0].strip(".:") in ("מסכת", "מסכתא") for y in t[k + 1:k + 4])), None)
         if h is not None:
             t[h][0] = t[h][0].lstrip("0")
             hadran = [[w, "hadran"] for w, *_ in t[h:]]
