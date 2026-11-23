@@ -4649,12 +4649,51 @@ def rashi_not_rif(comm, rif, share=0.6, log=None):
             # says: "פרק יוצא דופן" before a reference is the commentator's)
             short = len({x for x in range(a, k)}) < 4 and \
                 tuple(toks[x][0] for x in range(a, k) if toks[x][1] == "rashi") not in e.get("rashi_whole_text", ())
-            if short or (gs and sum(x in g for x in gs) >= share * len(gs)):
+            # (but copied from Rashi, six words of his in a row, though the Rif has them too:
+            # "כעד אחד אומר מת והתירוה לינשא ובא אחר ואמר לא מת", as the user decided)
+            copied = False
+            if not short and gs:
+                for R_ in e.get("rashi_seqs", ()):
+                    for q0 in range(len(W) - 5):
+                        six = W[q0:q0 + 6]
+                        if any(R_[r0:r0 + 6] == six for r0 in range(len(R_) - 5)):
+                            copied = True
+                            break
+                    if copied:
+                        break
+            if short or (not copied and gs and sum(x in g for x in gs) >= share * len(gs)):
                 for q in (x for x in range(a, k) if toks[x][1] != "src"):
                     toks[q] = [toks[q][0], False] + list(toks[q][2:])
                     count += 1
                 if log is not None:
                     log.append(" ".join(t[0] for t in toks[a:k]))
+    return count
+
+
+def rashi_repeats(comm, most=12, share=0.6):
+    """A saying of Rashi's the commentator brings again in his discussion ("אין אדם מקדיש
+    דבר שלא בא לעולם" six times in one entry): bold the first time only, as the user
+    decided. A stretch of most words or fewer, share of its lines already bold before in
+    the entry. -> words made plain."""
+    count = 0
+    for e in comm:
+        toks = e["tokens"]
+        seen = set()
+        k = e.get("dh_len", 0)
+        while k < len(toks):
+            if toks[k][1] != "rashi":
+                k += 1
+                continue
+            a = k
+            while k < len(toks) and toks[k][1] == "rashi":
+                k += 1
+            W = [stem2(x) for x in lseq(rif_words_only(toks[a:k]))[0]]
+            gs = [tuple(W[q:q + 3]) for q in range(len(W) - 2)]
+            if gs and len(W) <= most and sum(g in seen for g in gs) >= share * len(gs):
+                for q in range(a, k):
+                    toks[q] = [toks[q][0], False] + list(toks[q][2:])
+                    count += 1
+            seen.update(gs)
     return count
 
 
@@ -5837,6 +5876,7 @@ def prepare_masechet(root, m, fix=None):
     report.append(f"ב{comm_name} {stray_marks([e['tokens'] for e in comm])} סימני דף שאינם במקומם הפכו להפניה")
     self_refs([e["tokens"] for e in comm], m)
     report.append(f"ב{comm_name} {rashi_after_ref(comm)} מילים אחרי מראה מקום (פסוק, משנה) שאינן לשון רש\"י")
+    report.append(f"ב{comm_name} {rashi_repeats(comm)} מילים בביטוי של רש\"י שחוזר בדיון (מודגש רק בפעם הראשונה)")
     # ("עובד כוכבים" one word in the commentary too: never half of it Rashi's bold)
     _pairs = 0
     for e in comm:
