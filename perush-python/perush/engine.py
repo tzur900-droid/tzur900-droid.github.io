@@ -42,11 +42,15 @@ GM_STRETCH = 0.2    # a Talmud page: how much more room each line may take to fi
 MIN_START_ROWS = 3  # a commentary under another doesn't begin at the foot of a page with fewer rows
 # a haftara whose end takes no more than this share of its last page: the next parasha begins
 # under it on that page, instead of on a new one
-HAFTARA_TAIL = 0.7
+HAFTARA_TAIL = 0.0
 # the most the lines of a haftara's last page may come closer, to take its last few lines
 TAIL_SQUEEZE = 0.1
 # a haftara's last page holds at least this many lines (when its lines can't all come up)
 TAIL_LINES = 6
+# a haftara whose last page would hold no more than this share of it: its letters and lines
+# become a little smaller (one of PLAIN_SCALES, the least that saves the page)
+PLAIN_FEW = 0.3
+PLAIN_SCALES = (0.97, 0.94, 0.91)
 # the letter (פ / ס) at the end of an open / a closed section
 SECTION_FONT = "David Libre"
 
@@ -112,6 +116,24 @@ def layout_specs(specs, width_at, tight=1.0):
                     hi = mid
             if best is not None and best[-1].natural > ls[-1].natural:
                 ls = best
+        if (not sp.cut and len(ls) > 1 and sp.align == "justify" and len(ls[-1].words) == 1
+                and ls[-1].natural < 0.35 * ls[-1].width):
+            # a paragraph that ends with one word alone on its last line: the spaces between
+            # the words close up a little (never the letters) to take it into the line before
+            for k in (0.92, 0.85, 0.8):
+                l2 = break_lines(sp.words, sp.base, sp.lh, width_at, y, sp.align, tight * k)
+                if len(l2) < len(ls):
+                    ls = l2
+                    break
+            else:
+                # it doesn't fit: a word of the line before comes down to it (never one word alone)
+                prev, last = ls[-2], ls[-1]
+                if len(prev.words) >= 3 and not prev.words[-2].glue:
+                    w = prev.words.pop()
+                    last.words.insert(0, w)
+                    sp_w = space(sp.base)
+                    prev.natural = sum(x.w for x in prev.words) + sp_w * sum(1 for x in prev.words[:-1] if not x.join)
+                    last.natural = sum(x.w for x in last.words) + sp_w * sum(1 for x in last.words[:-1] if not x.join)
         for k, l in enumerate(ls):
             l.mt = sp.mt if k == 0 else 0.0
             l.mb = sp.mb if k == len(ls) - 1 else 0.0
@@ -415,7 +437,7 @@ class Engine:
 
     def item_words(self, i, it):
         """The words of a verse of the text (made once: they are measured with the text's style)."""
-        key = (id(it), i)   # its words know its place in the list (a haftara's verses, and the
+        key = (id(it), i, self.main.size)   # its words know its place in the list (a haftara's verses, and the
                             # whole book when the translation column is measured, are other lists)
         ws = self.iw_cache.get(key)
         if ws is None:
@@ -586,7 +608,35 @@ class Engine:
 
     def sec_rows(self, s):
         """The rows a section of the page takes (a pair of commentaries side by side: its own)."""
-        return s["rows"] if s.get("pair") else math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"])
+        if s.get("pair"):
+            return s["rows"]
+        return len(s["lines"]) if s.get("wide") else math.ceil(len(s["lines"]) / self.comms[s["c"]]["cols"])
+
+    def widen_short(self, r):
+        """A commentary in columns that takes only a row or two of the page (and ends there)
+        is set in one column the width of the page, its last line in the middle."""
+        for s in r["sections"]:
+            c = s["c"]
+            if s.get("pair") or s.get("wide") or s["cut"] or self.comms[c]["cols"] < 2 or self.sec_rows(s) > 2:
+                continue
+            words = [w for l in s["lines"] for w in l.words]
+            lines = break_lines(words, self.style[c], s["nlh"], full_width(self.W))
+            if len(lines) > self.sec_rows(s):
+                continue
+            if len(lines) > 1 and len(lines[-1].words) == 1 and len(lines[-2].words) >= 3:
+                # not one word alone on the last line: the one before it goes down with it
+                prev, last = lines[-2], lines[-1]
+                w = prev.words.pop()
+                last.words.insert(0, w)
+                sp = space(self.style[c])
+                prev.natural -= w.w + sp
+                last.natural += w.w + sp
+            for j, l in enumerate(lines):
+                l.last = j == len(lines) - 1
+                l.y = j * s["nlh"]
+            lines[-1].align = "center"
+            s["lines"], s["wide"] = lines, True
+            s["h"] = self.sec_h(s)
 
     def sec_h(self, s, nlh=None):
         return self.note_pad() + self.note_title_h(s["c"]) + self.sec_rows(s) * (nlh or s["nlh"])
@@ -1359,7 +1409,47 @@ class Engine:
 
     def fill_plain(self, lst, a, budget):
         """Set as much plain text (a haftara) from position a as fits in budget, ending on
-        a full line. Returns (lines, height, end position, done)."""
+        a full line, in its letters' size (see plain_scale). Returns (lines, height, end
+        position, done)."""
+        k = getattr(self, "plain_scale", 1.0)
+        if k == 1.0:
+            return self.fill_plain_at(lst, a, budget)
+        saved = self.main, self.main_lh
+        self.main, self.main_lh = self.main.scaled(k), self.main_lh * k
+        try:
+            return self.fill_plain_at(lst, a, budget)
+        finally:
+            self.main, self.main_lh = saved
+
+    def plain_pages(self, lst, a, first):
+        """How many pages the rest of a haftara takes from position a (the first of them with
+        first of room), and the height of its last page."""
+        full, n, budget, h = self.contentH - self.head_h, 0, first, 0.0
+        while n < 200:
+            lines, h, end, done = self.fill_plain(lst, a, budget)
+            if lines or budget < full:
+                n += 1
+            if done:
+                break
+            if lines:
+                a = end
+            budget = full
+        return n, h
+
+    def choose_plain_scale(self, lst, a, first):
+        """A haftara whose last page would hold only a few lines: its letters and lines a
+        little smaller (by up to PLAIN_SHRINK), if that saves the page. Sets plain_scale."""
+        self.plain_scale = 1.0
+        n, h = self.plain_pages(lst, a, first)
+        if n < 2 or h > PLAIN_FEW * (self.contentH - self.head_h):
+            return
+        for k in PLAIN_SCALES:
+            self.plain_scale = k
+            if self.plain_pages(lst, a, first)[0] < n:
+                return
+        self.plain_scale = 1.0
+
+    def fill_plain_at(self, lst, a, budget):
         n = len(lst)
         segs = self.segments(a, (n, 0), lst)
         specs = self.text_specs(segs, False)
@@ -1634,6 +1724,7 @@ class Engine:
             last = best["b"][0] >= len(self.items) and all(self.done(c, p) for c, p in best["ptrs"].items())
             if last and next_plain:
                 budget = self.contentH - self.total_h(best) - self.sgap - 3 * PT_PER_MM
+                self.choose_plain_scale(next_plain, self.plain_start, budget)
                 lines, h, end, done = self.fill_plain(next_plain, self.plain_start, budget)
                 if lines and not done:
                     # its last few lines would be left alone on the next page: they come here
@@ -1646,6 +1737,7 @@ class Engine:
             # something follows on the next page (a haftara, the next parasha): no reason to
             # leave room at the bottom of this one
             best["more"] = not last or bool(next_plain)
+            self.widen_short(best)
             self.even_page(best)
             self.justify(best)
             if best.get("post") and not best["post"].get("done", True):
@@ -2102,6 +2194,14 @@ class Engine:
         return best, g
 
     def run_plain(self, lst, next_sec):
+        if self.plain_start == (0, 0):
+            self.choose_plain_scale(lst, (0, 0), self.contentH - self.head_h)
+        try:
+            self.run_plain_at(lst, next_sec)
+        finally:
+            self.plain_scale = 1.0
+
+    def run_plain_at(self, lst, next_sec):
         off, total = self.units(lst)
         guard = 0
         while (total if self.plain_start[0] >= len(lst) else off[self.plain_start[0]] + self.plain_start[1]) < total and guard < 5000:
@@ -2213,7 +2313,8 @@ class Engine:
         g0 = self.g_of(pos)
         ok = lambda q: (q.get("start_ok") and not self.page_unstarted(q) and not self.short_text_end(q)
                         and (q["col_full"] or q["at_end"] or not self.sides) and self.fills(q)
-                        and not (self.thin_text(q) and not self.thin_text(best)))
+                        and not (self.thin_text(q) and not self.thin_text(best))
+                        and self.deferred_owed(q) <= self.deferred_owed(best))
 
         def mend(r):
             g = self.g_of(r["b"])
@@ -2289,6 +2390,8 @@ class Engine:
         """Whether the next parasha begins on this page, under the end of the haftara: when the
         haftara ran on to this page and its end takes no more than HAFTARA_TAIL of it, rather
         than leaving the page almost empty (the festival haftarot always open a page)."""
+        if not HAFTARA_TAIL:
+            return False
         it = next_sec["items"][0]
         return (it["type"] == "h" and re.match(r"^פרש(ת|ה)\s", it["text"]) is not None
                 and frm != (0, 0) and h <= HAFTARA_TAIL * (self.contentH - self.head_h))
@@ -2392,8 +2495,8 @@ class Engine:
                     tst = self.style[c].scaled(1.1, bold=True)
                     t = break_lines(words_of([(w, True) for w in self.comms[c]["name"].split()], tst), tst, th, full_width(self.W), 0.0, "center")
                     page.frames.append(Frame(t[:1], R, y0))
-                cols = self.comms[c]["cols"]
-                cw = self.note_col_w(c)
+                cols = 1 if s.get("wide") else self.comms[c]["cols"]
+                cw = self.W if s.get("wide") else self.note_col_w(c)
                 rows = math.ceil(len(s["lines"]) / cols)
                 for k in range(cols):
                     chunk = s["lines"][k * rows:(k + 1) * rows]

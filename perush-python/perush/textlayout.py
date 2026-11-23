@@ -328,7 +328,10 @@ def even_lines(lines, slack=10):
         gaps = (m - 1) - (joins[j - 1] - joins[i])      # spaces between the words of the line
         width_ = lines[line_no].width
         if line_no == n_lines - 1 and free_last:
-            return 0.0 if total + gaps * s * 0.8 <= width_ + 0.01 else INF
+            if total + gaps * s * 0.8 > width_ + 0.01:
+                return INF
+            # a paragraph's last line holds two words at least, if it can (rule 8)
+            return 1e6 if m == 1 and n_lines > 1 else 0.0
         if gaps <= 0:
             # a lone word can't reach the end of the line: only if there is no other way
             return 1e8 if total <= width_ + 0.01 else INF
