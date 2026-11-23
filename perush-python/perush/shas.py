@@ -5704,7 +5704,7 @@ def perek_breaks(rosh, rif, al, masechet=None):
         if x["perek"] not in order:
             order.append(x["perek"])
         for p in x["paras"]:
-            if p and p[0][1] == "hadran":
+            if p and p[0][1] == "hadran" and p[0][0].startswith("הדרן"):
                 hadran[x["perek"]] = " ".join(t[0] for t in p)
     own = {j + 1 for j, p in enumerate(rif) if any(norm(t[0]) in ("הדרנ", "סליקו") for t in p["tokens"])}
     # "סליק פירקא" at the head of a passage: the perek ends there (the next begins after it,
@@ -6019,7 +6019,8 @@ def build_masechet(root, m, first_day, ndays, page=(210, 297), sizes=None, fix=N
     pname = {}
     for x in rosh:
         for p_ in x["paras"]:
-            if p_ and p_[0][1] == "hadran":
+            # (a "הדרן עלך" only: "סליק מסכת יבמות" names no perek)
+            if p_ and p_[0][1] == "hadran" and p_[0][0].startswith("הדרן"):
                 t = " ".join(w[0] for w in p_)
                 t = re.sub(r"^\s*הדרן\s+עלך\s+", "", t)
                 t = re.split(r"\s+(?:וסליקא|וסליק)", t)[0].strip(" .:")
