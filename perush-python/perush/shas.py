@@ -3399,6 +3399,20 @@ class Book:
     def layout_rosh(self, units):
         self.rosh_units_list = units
         colw = (self.W - self.gap) / 2
+        # the masechet's last "הדרן עלך ... וסליקא לה מסכת": one line under both columns,
+        # across the page, larger, as the user asked
+        foot = []
+        if units and units[-1].kind == "h" and units[-1].words and units[-1].words[0].role == "הדרן":
+            u = units[-1]
+            units = units[:-1]
+            st_ = u.words[0].style
+            big = Style(st_.family, st_.size * 1.4 / 1.15, True)
+            ws_ = [Word(w.text, big, width(big, w.text)) for w in u.words]
+            for w in ws_:
+                w.role = "הדרן"
+            fu = Unit("h", ws_)
+            fu.space = 2.4
+            foot = self.lines_of([fu], self.W, self.st_rosh, self.lh_rosh)
         lines = self.lines_of(units, colw, self.st_rosh, self.lh_rosh)
         pages, i, n = [], 0, len(lines)
         while i < n:
@@ -3445,6 +3459,19 @@ class Book:
                     l.y = y
                     y += l.h
             pages.append({"kind": "rosh", "cols": cols, "colw": colw})
+        if foot:
+            fh = sum(l.h for l in foot)
+            pg = pages[-1] if pages else None
+            used = max((sum(l.h for l in c) for c in pg["cols"]), default=0.0) if pg else self.H
+            if pg is None or used + fh > self.H + EPS:
+                pg = {"kind": "rosh", "cols": [[], []], "colw": colw}
+                pages.append(pg)
+                used = 0.0
+            y = used
+            for l in foot:
+                l.y = y
+                y += l.h
+            pg["foot"] = foot
         return pages
 
     # -------------------------------------------------- the Rif with the commentary around it
@@ -4245,6 +4272,8 @@ class Book:
                 for k, col in enumerate(pg["cols"]):
                     if col:
                         page.frames.append(Frame(col, R - k * (pg["colw"] + self.gap), top))
+                if pg.get("foot"):
+                    page.frames.append(Frame(pg["foot"], R, top))
                     for l in col:
                         day_box(mr if k == 0 else ml, l, bst)
                         if getattr(l, "note", None):
