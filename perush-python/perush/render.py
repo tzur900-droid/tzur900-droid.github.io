@@ -114,10 +114,14 @@ def draw_oz_head(p, page, h):
     # head's line, as the user asked
     p.setFont(qfont(st))
     low = base + st.size * 0.55
-    for word, a, c, side in ((right_word, inner_r, right_end, "r"), (left_word, left_end, inner_l, "l")):
+    pair = ((right_word, inner_r, right_end, "r"), (left_word, left_end, inner_l, "l"))
+    # (where one of the two has no room, both go under the line, level with each other, as
+    # the user asked)
+    down = any(word and abs(c - a) < width(st, word) + st.size for word, a, c, _ in pair)
+    for word, a, c, side in pair:
         if word:
             ww = width(st, word)
-            if abs(c - a) >= ww + st.size:
+            if not down:
                 p.drawText(QPointF((a + c) / 2 - ww / 2, low), word)
             else:
                 # (no room beside a long name, "פרק שלשה עשר כתובות": under the head's line,
