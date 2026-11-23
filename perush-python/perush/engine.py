@@ -1222,8 +1222,9 @@ class Engine:
             if rows >= 1:
                 lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"], tight,
                                          key=self.lst_key(c, alll))
-            # (but not when one after it goes on from the page before, in the middle of a passage)
-            if later and (not lines or ntake < len(words)) and not any(p[1][1] > 0 for p in plans[n + 1:]):
+            # (only when it would have fewer than MIN_START_ROWS rows: else the ones after it
+            # begin here, in the room kept for them, and it goes on on the next page)
+            if later and (not lines or ntake < len(words)) and math.ceil(len(lines) / self.comms[c]["cols"]) < MIN_START_ROWS:
                 # too long for the room left after the first lines of the ones after it: if it
                 # is too long for all the room, it takes all of it, and the ones after it begin
                 # on the next page (RULES.md, rule 5)
@@ -1285,7 +1286,12 @@ class Engine:
             alll = alll or self.list_from(d, self.ptrs[d], 10 ** 6)
         if not alll:
             return 0.0
-        start = self.section_h(c, self.comms[c]["cols"] * (MIN_START_ROWS if ptr[1] > 0 else 1))
+        start = self.section_h(c, self.comms[c]["cols"] * MIN_START_ROWS)
+        if c not in self.pair_of:
+            # (no more than all of it takes)
+            n_all = len(self.broken(self.lst_key(c, alll), self.entry_words(c, alll), self.style[c],
+                                    self.note_lh[c], self.note_col_w(c)))
+            start = min(start, self.section_h(c, n_all))
         if req_fit and req:
             h = req_h + (self.note_lh[c] if len(alll) > len(req) else 0.0)
         else:
