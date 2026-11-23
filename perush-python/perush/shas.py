@@ -945,11 +945,13 @@ def ref_groups(toks, start=0):
     out, k = [], start
     while k < len(toks):
         w = toks[k][0]
-        if isinstance(w, str) and w.startswith("("):
+        if isinstance(w, str) and w[:1] in "([":
+            # (in square brackets too, "[דף לא:]", as the source writes some of them)
+            close = ")" if w[0] == "(" else "]"
             e = next((q for q in range(k, min(len(toks), k + 7))
-                      if str(toks[q][0]).rstrip(".,:;").endswith(")")), None)
+                      if str(toks[q][0]).rstrip(".,:;").endswith(close)), None)
             if e is not None:
-                inner = re.sub(r"\)[.,:;]*$", "", " ".join(str(toks[q][0]) for q in range(k, e + 1)))[1:]
+                inner = re.sub(r"[\])][.,:;]*$", "", " ".join(str(toks[q][0]) for q in range(k, e + 1)))[1:]
                 if REF_IN.search(" " + inner + " "):
                     out.append(list(range(k, e + 1)))
                     k = e + 1
