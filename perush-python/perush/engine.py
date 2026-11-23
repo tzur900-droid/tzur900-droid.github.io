@@ -169,6 +169,21 @@ def even_paragraphs(lines):
             run = []
 
 
+def pull_lone(lines):
+    """The last line of a paragraph that holds one short word alone: the word before it comes
+    down to it (never one word alone, RULES.md rule 8)."""
+    for k in range(1, len(lines)):
+        prev, last = lines[k - 1], lines[k]
+        if (getattr(last, "kind", "p") != "p" or getattr(prev, "kind", "p") != "p" or not last.last or prev.last
+                or len(last.words) != 1 or last.natural >= 0.35 * last.width or len(prev.words) < 3
+                or prev.words[-2].glue):
+            continue
+        w = prev.words.pop()
+        last.words.insert(0, w)
+        for l in (prev, last):
+            l.natural = sum(x.w for x in l.words) + space(l.base) * sum(1 for x in l.words[:-1] if not x.join)
+
+
 def flush_end(lines, fold=False):
     """A paragraph whose last line is short ends flush instead: its words are spread over its
     lines (the last one justified too), as long as no space opens wider than it was or than
@@ -619,18 +634,21 @@ class Engine:
             c = s["c"]
             if s.get("pair") or s.get("wide") or s["cut"] or self.comms[c]["cols"] < 2 or self.sec_rows(s) > 2:
                 continue
-            words = [w for l in s["lines"] for w in l.words]
+            # (an entry's number goes with the word after it)
+            words = [replace(w, glue=True) if w.ref and w.ref[0] == "L" else w for l in s["lines"] for w in l.words]
             lines = break_lines(words, self.style[c], s["nlh"], full_width(self.W))
             if len(lines) > self.sec_rows(s):
                 continue
-            if len(lines) > 1 and len(lines[-1].words) == 1 and len(lines[-2].words) >= 3:
-                # not one word alone on the last line: the one before it goes down with it
+            if len(lines) > 1 and len(lines[-1].words) == 1:
+                # not one word alone on the last line: the one before it goes down with it (and
+                # an entry's number before that one, with them)
                 prev, last = lines[-2], lines[-1]
-                w = prev.words.pop()
-                last.words.insert(0, w)
-                sp = space(self.style[c])
-                prev.natural -= w.w + sp
-                last.natural += w.w + sp
+                n = 2 if len(prev.words) > 1 and prev.words[-2].glue else 1
+                if len(prev.words) >= n + 2:
+                    for _ in range(n):
+                        last.words.insert(0, prev.words.pop())
+                    for l in (prev, last):
+                        l.natural = sum(x.w for x in l.words) + space(l.base) * sum(1 for x in l.words[:-1] if not x.join)
             for j, l in enumerate(lines):
                 l.last = j == len(lines) - 1
                 l.y = j * s["nlh"]
@@ -883,6 +901,7 @@ class Engine:
                 r["text_h"] = restack(r["text"])
                 self.recompute_top(r)
         even_paragraphs(r["text"])
+        pull_lone(r["text"])
         ends_here = lambda c: r["at_end"] and self.done(c, r["ptrs"][c]) and not r.get("more")
         for c, s in r["side"].items():
             # the column may lose a line only where nothing is laid out under it (the text
@@ -1745,8 +1764,8 @@ class Engine:
             # something follows on the next page (a haftara, the next parasha): no reason to
             # leave room at the bottom of this one
             best["more"] = not last or bool(next_plain)
-            self.widen_short(best)
             self.even_page(best)
+            self.widen_short(best)
             self.justify(best)
             if best.get("post") and not best["post"].get("done", True):
                 # the haftara starts under the parasha and continues: fill the page to the bottom
