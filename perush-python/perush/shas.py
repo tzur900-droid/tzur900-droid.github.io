@@ -1736,7 +1736,9 @@ def same_word(a, b):
                                          na0[0] in "ודש" and {na0[1:], nb0[1:]} == {"לא", "אינ"}):
         return True
     # (ב for כ at the head of a long word is a misprint, as the user decided: כערוה, בערוה)
-    if len(na0) >= 5 and na0[1:] == nb0[1:] and {na0[0], nb0[0]} == {"ב", "כ"}:
+    # (three letters at least, as the user said: a small change that does not change the
+    # meaning is the same word, "כעד אחד" for Rashi's "בעד אחד"; not two, בה and כה)
+    if len(na0) >= 3 and na0[1:] == nb0[1:] and {na0[0], nb0[0]} == {"ב", "כ"}:
         return True
     if na0 and nb0 and na0[0] != nb0[0] and na0[0] in "בלמכ" and nb0[0] in "בלמכ" and na0[1:] == nb0[1:]:
         return False
