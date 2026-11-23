@@ -1222,7 +1222,8 @@ class Engine:
             if rows >= 1:
                 lines, ntake = self.take(words, self.style[c], nlh, self.note_col_w(c), rows * self.comms[c]["cols"], tight,
                                          key=self.lst_key(c, alll))
-            if later and (not lines or ntake < len(words)):
+            # (but not when one after it goes on from the page before, in the middle of a passage)
+            if later and (not lines or ntake < len(words)) and not any(p[1][1] > 0 for p in plans[n + 1:]):
                 # too long for the room left after the first lines of the ones after it: if it
                 # is too long for all the room, it takes all of it, and the ones after it begin
                 # on the next page (RULES.md, rule 5)
@@ -1235,7 +1236,8 @@ class Engine:
                         deferred.add(None)
             if not lines:
                 continue
-            if placed_any and ntake < len(words) and math.ceil(len(lines) / self.comms[c]["cols"]) < MIN_START_ROWS:
+            if (placed_any and ntake < len(words) and ptr[1] == 0
+                    and math.ceil(len(lines) / self.comms[c]["cols"]) < MIN_START_ROWS):
                 # a commentary that would begin with a line or two at the foot of the page and go
                 # on to the next: it begins on the next page instead (RULES.md, rule 5) — and the
                 # one before it, if it goes on too, takes the room that was kept for it
@@ -1283,7 +1285,7 @@ class Engine:
             alll = alll or self.list_from(d, self.ptrs[d], 10 ** 6)
         if not alll:
             return 0.0
-        start = self.section_h(c, self.comms[c]["cols"])
+        start = self.section_h(c, self.comms[c]["cols"] * (MIN_START_ROWS if ptr[1] > 0 else 1))
         if req_fit and req:
             h = req_h + (self.note_lh[c] if len(alll) > len(req) else 0.0)
         else:
