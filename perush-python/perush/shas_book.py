@@ -218,16 +218,28 @@ def cover_page(ms, n_pages, volume, colour=COVER, page=B5):
     return p
 
 
-def contents(pw, ph, ms, books, rows_per_page=44):
+CONTENTS_TOP = 14 * PT_PER_MM      # (the heading a little higher, as the user asked)
+CONTENTS_BOTTOM = 20 * PT_PER_MM
+CONTENTS_LH = 13.2
+
+
+def contents(pw, ph, ms, books):
     """At the end of a volume: the days of learning in it, each with its masechet and the
-    pages (as numbered at their heads) where it begins in the Rosh and in the Rif."""
+    pages (as numbered at their heads) where it begins in the Rosh and in the Rif. As many
+    rows on a page as its height holds: the whole table on one page where it can be, as the
+    user asked."""
     rows = []
     for m in ms:
         for d, where in books[m][2].get("day_pages", []):
             rows.append((heb(d), m, where.get("rosh", ""), where.get("rif", "")))
-    pages = []
-    for k in range(0, len(rows), rows_per_page):
-        pages.append(contents_page(pw, ph, rows[k:k + rows_per_page], first=k == 0))
+    room = ph - CONTENTS_TOP - CONTENTS_BOTTOM - (CONTENTS_LH + 4)
+    first_n = int((room - 44) // CONTENTS_LH)
+    other_n = int((room - 8) // CONTENTS_LH)
+    pages = [contents_page(pw, ph, rows[:first_n], first=True)]
+    k = first_n
+    while k < len(rows):
+        pages.append(contents_page(pw, ph, rows[k:k + other_n], first=False))
+        k += other_n
     return pages
 
 
@@ -239,7 +251,7 @@ def contents_page(pw, ph, rows, first):
     def paint(p):
         m = 20 * PT_PER_MM
         mid = pw / 2
-        y = m
+        y = CONTENTS_TOP
         if first:
             design.text_c(p, mid, y + 14, "תוכן ימי הלימוד", Style(design.TITLE_FONT, 20, True))
             design.divider(p, mid, y + 28, 50, "#555555")
@@ -251,7 +263,7 @@ def contents_page(pw, ph, rows, first):
         xs = [pw - m - W * f for f in (0.06, 0.32, 0.64, 0.88)]
         hst = Style("Frank Ruhl Libre", 10, True)
         rst = Style("Frank Ruhl Libre", 10)
-        lh = 13.2
+        lh = CONTENTS_LH
         p.fillRect(QRectF(m, y, W, lh + 2), QColor("#d6d6d6"))
         for x, t in zip(xs, ("יום", "מסכת", "רא״ש עמ'", "רי״ף עמ'")):
             design.text_c(p, x, y + lh - 2.5, t, hst, "#000000")
