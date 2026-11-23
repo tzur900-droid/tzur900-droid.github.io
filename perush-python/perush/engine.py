@@ -1972,7 +1972,7 @@ class Engine:
         """How badly a page breaks the rules (RULES.md): 0 for a page that keeps them all."""
         if not r["top_fits"]:
             return 1e9
-        c = 1e6 * self.page_unstarted(r) + 2.5e5 * (len(r.get("late_v", ())) + self.deferred_owed(r))
+        c = 1e6 * self.page_unstarted(r) + 4e5 * (len(r.get("late_v", ())) + self.deferred_owed(r))
         if self.thin_text(r):
             # one full line of the text over the commentaries is allowed (with its translation
             # beside it); a word or two alone is not
@@ -2281,11 +2281,14 @@ class Engine:
                 self.memo.clear()
         finally:
             self.col_w = saved_w
+        owed = lambda q: len(q.get("late_v", ())) + self.deferred_owed(q)
         for need in needs:
-            if need(plain) and self.total_h(plain) <= self.contentH + EPS and self.fills(plain):
+            if owed(plain) > owed(best) and owed(close) > owed(best):
+                break           # (not at the cost of a commentary that begins on another page)
+            if need(plain) and owed(plain) <= owed(best) and self.total_h(plain) <= self.contentH + EPS and self.fills(plain):
                 plain.setdefault("state", best["state"])
                 return plain
-            if need(close) and self.squeeze(close):
+            if need(close) and owed(close) <= owed(best) and self.squeeze(close):
                 close.setdefault("state", best["state"])
                 return close
         return best
